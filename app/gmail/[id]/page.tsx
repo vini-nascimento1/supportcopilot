@@ -24,6 +24,35 @@ function formatDate(iso: string): string {
   })
 }
 
+function EmailBody({ plain, html }: { plain: string; html: string }) {
+  // Prefer plain text if available — safer and more readable.
+  if (plain) {
+    return (
+      <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed">
+        {plain}
+      </pre>
+    )
+  }
+
+  // HTML-only emails: render in a sandboxed iframe so the operator can
+  // actually read the content instead of seeing "(HTML message)".
+  if (html) {
+    return (
+      <iframe
+        srcDoc={html}
+        sandbox="allow-same-origin"
+        title="Email content"
+        className="min-h-[200px] w-full rounded border bg-background"
+        style={{ height: "auto" }}
+      />
+    )
+  }
+
+  return (
+    <p className="text-sm text-muted-foreground">(No body)</p>
+  )
+}
+
 function MessageCard({
   message,
   isFirst,
@@ -40,8 +69,6 @@ function MessageCard({
   }
   isFirst: boolean
 }) {
-  const body = message.bodyPlain || (message.bodyHtml ? "(HTML message)" : "(No body)")
-
   return (
     <div className={`flex flex-col gap-2 rounded-lg border bg-card p-4 ${isFirst ? "" : "mt-3"}`}>
       <div className="flex items-start justify-between gap-2">
@@ -62,9 +89,7 @@ function MessageCard({
         </div>
       </div>
       <Separator />
-      <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed">
-        {body}
-      </pre>
+      <EmailBody plain={message.bodyPlain} html={message.bodyHtml} />
     </div>
   )
 }
@@ -97,8 +122,16 @@ export default async function GmailThreadPage({
   const lastMsg = thread.messages[thread.messages.length - 1]
   const firstMsg = thread.messages[0]
 
-  // Reply-to is the last sender who isn't us (or just last sender)
-  const replyTo = lastMsg?.from ?? firstMsg?.from ?? ""
+  // Reply-to: find the last message NOT sent by us.
+  const myEmail = tokens.email?.toLowerCase() ?? ""
+  function extractEmail(from: string): string {
+    const match = from.match(/<([^>]+)>$/)
+    return (match?.[1] ?? from).toLowerCase()
+  }
+  const lastExternalMsg = [...thread.messages]
+    .reverse()
+    .find((m) => extractEmail(m.from) !== myEmail)
+  const replyTo = lastExternalMsg?.from ?? lastMsg?.from ?? firstMsg?.from ?? ""
   const replySubject = thread.subject.startsWith("Re:")
     ? thread.subject
     : `Re: ${thread.subject}`

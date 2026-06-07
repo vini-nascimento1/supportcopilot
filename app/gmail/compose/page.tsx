@@ -1,15 +1,16 @@
 "use client"
 
 import { useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowLeftIcon, SendIcon } from "lucide-react"
+import { SendIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Textarea } from "@/components/ui/textarea"
+import { WorkspaceLayout } from "@/components/workspace-layout"
 
 export default function ComposePage() {
   const router = useRouter()
@@ -45,18 +46,14 @@ export default function ComposePage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-10 flex min-h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur lg:px-6">
-        <Link
-          href="/gmail"
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <ArrowLeftIcon className="size-4" />
-        </Link>
+    <WorkspaceLayout>
+      <header className="flex min-h-14 items-center gap-3 border-b px-4 lg:px-6">
+        <SidebarTrigger />
+        <Separator orientation="vertical" className="min-h-6" />
         <h1 className="text-sm font-semibold">Compose</h1>
       </header>
 
-      <main className="mx-auto flex max-w-2xl flex-col gap-4 p-4 lg:p-6">
+      <main className="flex flex-col gap-4 p-4 lg:p-6">
         {status === "sent" ? (
           <div className="flex flex-col items-center gap-3 py-16 text-center">
             <span className="text-4xl">✓</span>
@@ -118,6 +115,6 @@ export default function ComposePage() {
           </>
         )}
       </main>
-    </div>
+    </WorkspaceLayout>
   )
 }
