@@ -188,6 +188,34 @@ async function resolveSlackUsers(
   return result
 }
 
+/** Resolve bot IDs to display names using bots.info API. */
+async function resolveSlackBots(
+  token: string,
+  botIds: string[]
+): Promise<Record<string, string>> {
+  const unique = [...new Set(botIds)].slice(0, 20)
+  const result: Record<string, string> = {}
+  await Promise.all(
+    unique.map(async (bid) => {
+      try {
+        const res = await fetch(`https://slack.com/api/bots.info?bot=${bid}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = (await res.json()) as {
+          ok: boolean
+          bot?: { id?: string; name?: string; app_id?: string }
+        }
+        if (data.ok && data.bot?.name) {
+          result[bid] = data.bot.name
+        }
+      } catch {
+        /* ignore */
+      }
+    })
+  )
+  return result
+}
+
 async function resolveSlackChannelName(token: string, channelId: string): Promise<string> {
   try {
     const res = await fetch(`https://slack.com/api/conversations.info?channel=${encodeURIComponent(channelId)}`, {
@@ -205,8 +233,9 @@ async function fetchChannelMessages(
   channelId: string,
   limit = 30
 ): Promise<Array<{
-  user?: string; text?: string; ts: string; subtype?: string
+  user?: string; bot_id?: string; text?: string; ts: string; subtype?: string
   reply_count?: number; thread_ts?: string
+  bot_profile?: { id?: string; name?: string; app_id?: string }
   reactions?: Array<{ name: string; users: string[]; count: number }>
 }>> {
   try {
@@ -219,8 +248,9 @@ async function fetchChannelMessages(
     const data = (await res.json()) as {
       ok: boolean
       messages?: Array<{
-        user?: string; text?: string; ts: string; subtype?: string
+        user?: string; bot_id?: string; text?: string; ts: string; subtype?: string
         reply_count?: number; thread_ts?: string
+        bot_profile?: { id?: string; name?: string; app_id?: string }
         reactions?: Array<{ name: string; users: string[]; count: number }>
       }>
     }
@@ -228,7 +258,12 @@ async function fetchChannelMessages(
       console.warn(`[slack] conversations.history error for ${channelId}:`, (data as Record<string, unknown>).error ?? "unknown")
       return []
     }
-    return (data.messages ?? []).filter((m) => !m.subtype && m.user)
+    // Allow bot_message subtype (workflows, automation) and messages without user field (bots)
+    return (data.messages ?? []).filter((m) => {
+      if (!m.subtype) return true
+      if (m.subtype === "bot_message") return true
+      return false
+    })
   } catch {
     return []
   }
@@ -538,20 +573,43 @@ export async function getConversationMessages(
       resolveSlackChannelName(token, channelId),
     ])
 
+    // Collect both user IDs and bot IDs
     const userIds = [...new Set(raw.map((m) => m.user).filter(Boolean) as string[])]
-    const users = await resolveSlackUsers(token, userIds)
+    const botIds = [...new Set(raw.map((m) => m.bot_id).filter(Boolean) as string[])]
+    const [users, bots] = await Promise.all([
+      resolveSlackUsers(token, userIds),
+      resolveSlackBots(token, botIds),
+    ])
 
-    const messages: SlackMessage[] = [...raw].reverse().map((m) => ({
-      id: m.ts,
-      userId: m.user ?? "unknown",
-      userName: users[m.user ?? ""]?.name ?? m.user ?? "Unknown",
-      userColor: users[m.user ?? ""]?.color ?? slackUserColor(m.user ?? ""),
-      text: m.text ?? "",
-      ts: m.ts,
-      threadCount: m.reply_count,
-      threadTs: m.thread_ts,
-      reactions: m.reactions?.map((r) => ({ name: r.name, count: r.count, users: r.users })),
-    }))
+    const messages: SlackMessage[] = [...raw].reverse().map((m) => {
+      const id = m.user ?? m.bot_id ?? "unknown"
+      if (m.bot_id && !m.user) {
+        // Bot message — use bot profile name or resolved name
+        const bot = bots[m.bot_id] ?? m.bot_profile?.name ?? `Bot (${m.bot_id})`
+        return {
+          id: m.ts,
+          userId: m.bot_id,
+          userName: bot,
+          userColor: slackUserColor(m.bot_id),
+          text: m.text ?? "",
+          ts: m.ts,
+          threadCount: m.reply_count,
+          threadTs: m.thread_ts,
+          reactions: m.reactions?.map((r) => ({ name: r.name, count: r.count, users: r.users })),
+        }
+      }
+      return {
+        id: m.ts,
+        userId: id,
+        userName: users[m.user ?? ""]?.name ?? m.user ?? "Unknown",
+        userColor: users[m.user ?? ""]?.color ?? slackUserColor(id),
+        text: m.text ?? "",
+        ts: m.ts,
+        threadCount: m.reply_count,
+        threadTs: m.thread_ts,
+        reactions: m.reactions?.map((r) => ({ name: r.name, count: r.count, users: r.users })),
+      }
+    })
 
     return { messages, channelName }
   } catch {

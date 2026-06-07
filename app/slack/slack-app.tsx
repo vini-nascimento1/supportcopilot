@@ -11,6 +11,9 @@ import {
   MessageSquareReplyIcon,
   RefreshCwIcon,
   SmilePlusIcon,
+  SearchIcon,
+  XIcon,
+  ArrowUpIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -46,6 +49,13 @@ function relativeTime(ts: string | number): string {
   if (days < 30) return `${days}d ago`
   if (days < 365) return `${Math.floor(days / 30)}mo ago`
   return `${Math.floor(days / 365)}y ago`
+}
+
+function slackUserColor(userId: string): string {
+  const palette = ["#e879f9", "#38bdf8", "#34d399", "#fb923c", "#f87171", "#a78bfa", "#fbbf24", "#4ade80"]
+  let hash = 0
+  for (const ch of userId) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffff
+  return palette[hash % palette.length]
 }
 
 function initials(name: string): string {
@@ -366,6 +376,14 @@ export function SlackApp() {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searchResults, setSearchResults] = useState<Array<{
+    ts: string; text: string; channelId: string; channelName: string
+    userName: string; permalink?: string
+  }> | null>(null)
+  const [searching, setSearching] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Fetch conversations
@@ -407,6 +425,30 @@ export function SlackApp() {
     void load()
     return () => { cancelled = true }
   }, [activeChannelId, refreshKey])
+
+  // Focus search input when opened
+  useEffect(() => {
+    if (searchOpen && searchInputRef.current) {
+      searchInputRef.current.focus()
+    }
+  }, [searchOpen])
+
+  // Search messages
+  async function handleSearch() {
+    if (!searchQuery.trim()) return
+    setSearching(true)
+    setSearchResults(null)
+    try {
+      const res = await fetch(`/api/slack/search?q=${encodeURIComponent(searchQuery.trim())}`)
+      const data = await res.json()
+      if (data.ok) setSearchResults(data.results)
+      else setSearchResults([])
+    } catch {
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
+  }
 
   // Scroll to bottom
   useEffect(() => {
@@ -482,11 +524,40 @@ export function SlackApp() {
             <Badge variant="secondary" className="text-xs">{totalUnread} unread</Badge>
           )}
         </div>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" asChild>
-          <a href={workspaceUrl} target="_blank" rel="noopener noreferrer">
-            Open in Slack <ExternalLinkIcon className="size-3" />
-          </a>
-        </Button>
+        {searchOpen ? (
+          <form onSubmit={(e) => { e.preventDefault(); handleSearch() }}
+            className="flex flex-1 items-center gap-2 lg:max-w-md">
+            <div className="relative flex-1">
+              <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input ref={searchInputRef} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search messages…"
+                className="h-8 pl-8 text-sm" />
+              {searching && (
+                <Loader2Icon className="absolute right-2.5 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+              )}
+            </div>
+            <Button type="submit" size="icon" variant="ghost" className="size-8 shrink-0" disabled={!searchQuery.trim() || searching}>
+              <ArrowUpIcon className="size-4" />
+            </Button>
+            <Button type="button" size="icon" variant="ghost" className="size-8 shrink-0"
+              onClick={() => { setSearchOpen(false); setSearchQuery(""); setSearchResults(null) }}>
+              <XIcon className="size-4" />
+            </Button>
+          </form>
+        ) : (
+          <div className="flex items-center gap-1">
+            <Button size="icon" variant="ghost" className="size-8"
+              onClick={() => setSearchOpen(true)}
+              title="Search messages">
+              <SearchIcon className="size-4" />
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" asChild>
+              <a href={workspaceUrl} target="_blank" rel="noopener noreferrer">
+                Open in Slack <ExternalLinkIcon className="size-3" />
+              </a>
+            </Button>
+          </div>
+        )}
       </header>
 
       {/* Split pane */}
@@ -533,7 +604,56 @@ export function SlackApp() {
 
         {/* Messages area */}
         <main className="flex min-w-0 flex-1 flex-col">
-          {!activeChannelId ? (
+          {searchResults !== null ? (
+            // Search results
+            <div className="flex flex-1 flex-col">
+              <div className="flex items-center gap-2 border-b px-4 py-2">
+                <span className="text-xs font-medium text-muted-foreground">Search: “{searchQuery}”</span>
+                <span className="text-xs text-muted-foreground/60">({searchResults.length} results)</span>
+              </div>
+              <div className="flex-1 overflow-y-auto py-2">
+                {searchResults.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-2 pt-12 text-center">
+                    <SearchIcon className="size-8 text-muted-foreground/30" />
+                    <p className="text-sm text-muted-foreground">No results found.</p>
+                  </div>
+                ) : (
+                  searchResults.map((r) => (
+                    <button key={r.ts}
+                      onClick={() => {
+                        setSearchOpen(false)
+                        setSearchResults(null)
+                        setSearchQuery("")
+                        setActiveChannelId(r.channelId)
+                      }}
+                      className="flex w-full items-start gap-3 px-4 py-2 text-left transition-colors hover:bg-muted/50">
+                      <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded text-[10px] font-bold text-white"
+                        style={{ backgroundColor: slackUserColor(r.userName) }}>
+                        {initials(r.userName)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xs font-semibold">{r.userName}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            #{r.channelName}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-sm leading-snug text-muted-foreground">
+                          {parseSlackText(r.text)}
+                        </p>
+                      </div>
+                      <a href={r.permalink} target="_blank" rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground/40 hover:text-muted-foreground"
+                        title="Open in Slack">
+                        <ExternalLinkIcon className="size-3" />
+                      </a>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : !activeChannelId ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
               <MessageSquareIcon className="size-12 text-muted-foreground/20" />
               <p className="text-sm text-muted-foreground">Select a conversation to view messages</p>
