@@ -147,7 +147,7 @@ async function* streamChatCompletion(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "deepseek-chat",
+      model: "deepseek-v4-flash",
       max_tokens: 1024,
       stream: true,
       messages,
