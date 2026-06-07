@@ -112,7 +112,6 @@ async function persistDraft(
         intercom_conversation_id: conversationId,
         customer_name: customerName,
         playbook_id: playbookId,
-        status: "drafted",
         owner_id: ownerId,
       },
       { onConflict: "intercom_conversation_id" }

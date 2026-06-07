@@ -158,12 +158,12 @@ export default async function DraftsPage() {
                     </div>
                     <Badge
                       variant={
-                        draft.caseStatus === "resolved"
+                        draft.intercomState === "closed"
                           ? "secondary"
                           : "outline"
                       }
                     >
-                      {draft.caseStatus}
+                      {draft.intercomState}
                     </Badge>
                   </div>
                 </CardHeader>

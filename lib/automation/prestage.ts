@@ -94,7 +94,7 @@ export async function prestageDraft(conversationId: string | null): Promise<Pres
     const { data: created } = await db
       .from("cases")
       .upsert(
-        { intercom_conversation_id: conversationId, customer_name: conversation.customer, status: "drafted" },
+        { intercom_conversation_id: conversationId, customer_name: conversation.customer },
         { onConflict: "intercom_conversation_id" }
       )
       .select("id")

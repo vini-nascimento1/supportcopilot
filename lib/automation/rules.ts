@@ -134,7 +134,7 @@ export async function deleteRule(
 export type TestMatch = {
   caseId: string
   customer: string | null
-  status: string | null
+  intercomState: string | null
   actionKinds: string[]
 }
 
@@ -170,7 +170,7 @@ export async function testRule(
     matches.push({
       caseId: c.id,
       customer: c.customer_name ?? null,
-      status: c.status ?? null,
+      intercomState: c.intercom_state ?? null,
       actionKinds: plan[0]?.actions.map((a) => a.kind) ?? [],
     })
   }

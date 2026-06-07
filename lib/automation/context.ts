@@ -10,8 +10,6 @@ import type { EvalContext, FieldValue } from "./types"
 /** Minimal shape we can build a context from today (superset is fine). */
 export type CaseLike = {
   intercom_conversation_id?: string | null
-  status?: string | null
-  state?: string | null
   intercom_state?: string | null
   subject?: string | null
   snippet?: string | null
@@ -44,9 +42,8 @@ function ageSeconds(iso: string | null | undefined, nowMs: number): number | und
 export function buildContext(c: CaseLike, event: string | null, nowMs: number): EvalContext {
   const updated = c.updated_at ?? c.updatedAt ?? null
   const fields: Record<string, FieldValue> = {
-    // Prefer intercom_state (real Intercom conversation state) over the internal
-    // workflow status. Falls back to c.status for legacy rows without intercom_state.
-    status: c.intercom_state ?? c.status ?? c.state ?? null,
+    // Source of truth: the real Intercom conversation state (open/closed/snoozed).
+    status: c.intercom_state ?? null,
     subject: c.subject ?? c.snippet ?? c.summary ?? null,
     tags: c.tags ?? c.auto_tags ?? [],
     priority_hint: c.priority_hint ?? null,

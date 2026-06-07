@@ -63,7 +63,6 @@ export function caseToContextInput(c: CaseRow): CaseLike {
   const updated = c.opened_at ?? c.created_at ?? null
   return {
     intercom_conversation_id: c.intercom_conversation_id,
-    status: c.status,
     intercom_state: c.intercom_state,
     subject: c.summary,
     summary: c.summary,
@@ -97,7 +96,7 @@ export async function runMonitorSweep(nowMs: number): Promise<SweepSummary> {
   const { data: caseRows, error: caseErr } = await db
     .from("cases")
     .select("*, playbooks(case_type)")
-    .eq("status", "open")
+    .eq("intercom_state", "open")
   if (caseErr) errors.push(`cases: ${caseErr.message}`)
   const cases = (caseRows ?? []) as CaseRow[]
 
