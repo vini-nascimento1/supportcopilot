@@ -334,6 +334,196 @@ export async function getThreadReplies(
   }
 }
 
+// ── conversation listing (Phase 2 — all user channels) ─────────
+
+export type SlackConversation = {
+  id: string
+  name: string
+  type: "channel" | "im" | "mpim"
+  unreadCount: number
+  /** For DMs: the other user's display name */
+  dmUser?: string
+  /** For DMs: the other user's color */
+  dmColor?: string
+}
+
+export type ConversationsResult =
+  | { ok: true; conversations: SlackConversation[]; workspaceUrl: string }
+  | { ok: false }
+
+/** List all conversations the user has access to, with unread counts. */
+export async function getUserConversations(
+  agentSlackToken?: string | null
+): Promise<ConversationsResult> {
+  const token = agentSlackToken ?? process.env.SLACK_BOT_TOKEN
+  if (!token) return { ok: false }
+
+  try {
+    const authRes = await fetch("https://slack.com/api/auth.test", {
+      headers: { Authorization: `Bearer ${token}` },
+      next: { revalidate: 0 },
+    })
+    const auth = (await authRes.json()) as { ok: boolean; url?: string }
+    if (!auth.ok) return { ok: false }
+
+    // Fetch all conversations the user is in
+    const convoRes = await fetch(
+      "https://slack.com/api/users.conversations?types=public_channel,private_channel,im,mpim&limit=200&exclude_archived=true",
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    const convoData = (await convoRes.json()) as {
+      ok: boolean
+      channels?: Array<{
+        id: string
+        name: string
+        is_channel?: boolean
+        is_im?: boolean
+        is_mpim?: boolean
+        user?: string // for DMs, the other user
+        unread_count?: number
+      }>
+    }
+    if (!convoData.ok) return { ok: false }
+
+    // Collect DM user IDs to resolve names
+    const dmUserIds = (convoData.channels ?? [])
+      .filter((c) => c.is_im && c.user)
+      .map((c) => c.user!)
+    const users = dmUserIds.length > 0 ? await resolveSlackUsers(token, dmUserIds.slice(0, 30)) : {}
+
+    const conversations: SlackConversation[] = (convoData.channels ?? [])
+      .filter((c) => c.name !== "slack_app" && c.name !== "slackbot")
+      .map((c) => {
+        const isDm = !!c.is_im
+        const base: SlackConversation = {
+          id: c.id,
+          name: isDm ? (users[c.user ?? ""]?.name ?? c.user ?? "Unknown") : `#${c.name}`,
+          type: c.is_im ? "im" : c.is_mpim ? "mpim" : "channel",
+          unreadCount: c.unread_count ?? 0,
+        }
+        if (isDm && c.user) {
+          base.dmUser = users[c.user]?.name ?? c.user
+          base.dmColor = users[c.user]?.color ?? slackUserColor(c.user)
+        }
+        return base
+      })
+      .filter((c) => c.name) // remove nameless channels
+
+    return {
+      ok: true,
+      conversations,
+      workspaceUrl: auth.url ?? "https://slack.com",
+    }
+  } catch {
+    return { ok: false }
+  }
+}
+
+/** Fetch messages for a specific channel (public function version of fetchChannelMessages). */
+export async function getConversationMessages(
+  agentSlackToken: string | null | undefined,
+  channelId: string,
+  limit = 50
+): Promise<{ messages: SlackMessage[]; channelName: string } | null> {
+  const token = agentSlackToken ?? process.env.SLACK_BOT_TOKEN
+  if (!token) return null
+
+  try {
+    const [raw, channelName] = await Promise.all([
+      fetchChannelMessages(token, channelId, limit),
+      resolveSlackChannelName(token, channelId),
+    ])
+
+    const userIds = [...new Set(raw.map((m) => m.user).filter(Boolean) as string[])]
+    const users = await resolveSlackUsers(token, userIds)
+
+    const messages: SlackMessage[] = [...raw].reverse().map((m) => ({
+      id: m.ts,
+      userId: m.user ?? "unknown",
+      userName: users[m.user ?? ""]?.name ?? m.user ?? "Unknown",
+      userColor: users[m.user ?? ""]?.color ?? slackUserColor(m.user ?? ""),
+      text: m.text ?? "",
+      ts: m.ts,
+      threadCount: m.reply_count,
+      threadTs: m.thread_ts,
+    }))
+
+    return { messages, channelName }
+  } catch {
+    return null
+  }
+}
+
+/** Get unread count summary for the dashboard card. */
+export async function getSlackUnreadSummary(
+  agentSlackToken?: string | null
+): Promise<{ connected: boolean; unreadCount: number; workspaceUrl: string }> {
+  const token = agentSlackToken ?? process.env.SLACK_BOT_TOKEN
+  if (!token) return { connected: false, unreadCount: 0, workspaceUrl: "" }
+
+  try {
+    const authRes = await fetch("https://slack.com/api/auth.test", {
+      headers: { Authorization: `Bearer ${token}` },
+      next: { revalidate: 0 },
+    })
+    const auth = (await authRes.json()) as { ok: boolean; url?: string }
+    if (!auth.ok) return { connected: false, unreadCount: 0, workspaceUrl: "" }
+
+    const convoRes = await fetch(
+      "https://slack.com/api/users.conversations?types=public_channel,private_channel,im,mpim&limit=200&exclude_archived=true",
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    const convoData = (await convoRes.json()) as {
+      ok: boolean
+      channels?: Array<{ unread_count?: number }>
+    }
+    if (!convoData.ok) return { connected: true, unreadCount: 0, workspaceUrl: auth.url ?? "https://slack.com" }
+
+    const totalUnread = (convoData.channels ?? []).reduce(
+      (sum, c) => sum + (c.unread_count ?? 0),
+      0
+    )
+
+    return { connected: true, unreadCount: totalUnread, workspaceUrl: auth.url ?? "https://slack.com" }
+  } catch {
+    return { connected: false, unreadCount: 0, workspaceUrl: "" }
+  }
+}
+
+/** Send a message to a Slack channel. */
+export async function sendSlackMessage(
+  agentSlackToken: string | null | undefined,
+  channelId: string,
+  text: string,
+  threadTs?: string
+): Promise<{ ok: boolean; ts?: string; error?: string }> {
+  const token = agentSlackToken ?? process.env.SLACK_BOT_TOKEN
+  if (!token) return { ok: false, error: "No token" }
+
+  try {
+    const body: Record<string, string> = { channel: channelId, text }
+    if (threadTs) body.thread_ts = threadTs
+
+    const res = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    })
+    const data = (await res.json()) as { ok: boolean; ts?: string; error?: string }
+    return data
+  } catch {
+    return { ok: false, error: "Network error" }
+  }
+}
+
+/** Bulk-unread counter helper. */
+export function countUnreadConversations(conversations: SlackConversation[]): number {
+  return conversations.filter((c) => c.unreadCount > 0).length
+}
+
 /** Build a permalink to a specific Slack message. */
 export function getMessagePermalink(
   workspaceUrl: string,

@@ -1,4 +1,4 @@
-import { ShieldCheckIcon } from "lucide-react"
+import Image from "next/image"
 import { Button } from "@/components/ui/button"
 
 export const dynamic = "force-dynamic"
@@ -23,8 +23,15 @@ export default async function LoginPage({
 
         {/* brand */}
         <div className="flex flex-col items-center gap-3 text-center">
-          <div className="flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
-            <ShieldCheckIcon className="size-7" />
+          <div className="flex size-14 items-center justify-center overflow-hidden rounded-2xl border shadow-sm">
+            <Image
+              src="/fanvue-logo.png"
+              alt="Fanvue"
+              width={56}
+              height={56}
+              priority
+              className="size-full object-cover"
+            />
           </div>
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Fanvue Support Copilot</h1>

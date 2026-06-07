@@ -7,6 +7,12 @@ import { UpdateBanner } from "@/components/update-banner"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SpeedInsights } from "@vercel/speed-insights/next"
+import type { Metadata } from "next"
+
+export const metadata: Metadata = {
+  title: "Fanvue Support Copilot",
+  description: "Your AI-powered support dashboard",
+}
 
 export default function RootLayout({
   children,

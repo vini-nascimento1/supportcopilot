@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -8,8 +9,8 @@ import {
   LifeBuoyIcon,
   LogOutIcon,
   MailIcon,
+  MessageSquareIcon,
   SettingsIcon,
-  ShieldCheckIcon,
 } from "lucide-react"
 
 import {
@@ -29,6 +30,7 @@ const navItems = [
   { label: "Dashboard", icon: LifeBuoyIcon, href: "/" },
   { label: "Cases", icon: ClipboardListIcon, href: "/cases" },
   { label: "Gmail", icon: MailIcon, href: "/gmail" },
+  { label: "Slack", icon: MessageSquareIcon, href: "/slack" },
   { label: "Playbooks", icon: BookOpenIcon, href: "/playbooks" },
   { label: "Settings", icon: SettingsIcon, href: "/settings" },
 ]
@@ -45,8 +47,14 @@ export function WorkspaceSidebar({ userEmail }: Props) {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-3 px-2 py-2">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <ShieldCheckIcon className="size-5" />
+          <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border">
+            <Image
+              src="/fanvue-logo.png"
+              alt="Fanvue"
+              width={36}
+              height={36}
+              className="size-full object-cover"
+            />
           </div>
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-sm font-medium">Fanvue Support</span>

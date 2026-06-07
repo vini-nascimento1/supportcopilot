@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     "chat:write",
     "reactions:read", "reactions:write",
     "users:read", "users:read.email",
-    "search:read",
+    "users.conversations:read",
   ].join(",")
   url.searchParams.set("user_scope", userScopes)
   url.searchParams.set("redirect_uri", `${origin}/api/auth/slack/callback`)

@@ -14,7 +14,7 @@ import { getAgentProfile, getGreeting } from "@/lib/agent"
 import { getAgentTokens } from "@/lib/auth"
 import { getCalendarEvents, type CalRange } from "@/lib/gcal"
 import { getGmailUnreadCount } from "@/lib/gmail-client"
-import { getSlackActivity } from "@/lib/slack"
+import { getSlackUnreadSummary } from "@/lib/slack"
 
 export const dynamic = "force-dynamic"
 
@@ -37,7 +37,7 @@ export default async function DashboardPage({
   const [gcal, gmail, slack] = await Promise.all([
     getCalendarEvents(range, nowIso, tokens.googleToken, tokens.email),
     getGmailUnreadCount(tokens.googleToken, tokens.email),
-    getSlackActivity(tokens.slackToken),
+    getSlackUnreadSummary(tokens.slackToken),
   ])
 
   const cases = await getOpenCasesQueue(playbooks.allRows, agent.intercomAdminId)
@@ -75,7 +75,7 @@ export default async function DashboardPage({
           calendarCard={<CalendarCard gcal={gcal} nowIso={nowIso} range={range} />}
           intercomCard={<IntercomCard cases={cases} appId={appId} />}
           gmailCard={<GmailCard gmail={gmail} />}
-          slackCard={<SlackMiniCard initialConnected={slack.connected} />}
+          slackCard={<SlackMiniCard slack={slack} />}
           notionCard={<NotionCard />}
         />
       </main>
