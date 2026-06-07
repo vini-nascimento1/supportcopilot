@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { applyOperator, evaluateGroup, evaluateTree, planCaseActions } from "./engine"
+import { applyOperator, evaluateCondition, evaluateGroup, evaluateTree, planCaseActions } from "./engine"
 import type { AutomationRule, ConditionTree, EvalContext } from "./types"
 
 const ctx = (fields: EvalContext["fields"]): EvalContext => ({ fields })
@@ -152,6 +152,32 @@ describe("evaluateTree (DNF: OR across groups)", () => {
     }
     expect(evaluateTree(tree, c)).toBe(true) // 90000s > 86400s
     expect(evaluateTree(tree, ctx({ status: "open", time_since_update: 100 }))).toBe(false)
+  })
+
+  it("first_response_minutes SLA countdown: alerts when remaining ≤ threshold", () => {
+    // 30-min SLA, alert when ≤ 5 minutes remaining
+    const cond = { field: "first_response_minutes", op: "lte" as const, value: 5, sla: 30 }
+
+    // 26 minutes elapsed → 4 remaining → matches (4 ≤ 5)
+    expect(evaluateCondition(cond, ctx({ first_response_minutes: 26 }))).toBe(true)
+    // 20 minutes elapsed → 10 remaining → no match (10 > 5)
+    expect(evaluateCondition(cond, ctx({ first_response_minutes: 20 }))).toBe(false)
+    // 30 minutes elapsed → 0 remaining → matches (0 ≤ 5) — SLA breached
+    expect(evaluateCondition(cond, ctx({ first_response_minutes: 30 }))).toBe(true)
+    // 35 minutes elapsed → -5 remaining → matches (negative = breached)
+    expect(evaluateCondition(cond, ctx({ first_response_minutes: 35 }))).toBe(true)
+    // No first_response_minutes field → false
+    expect(evaluateCondition(cond, ctx({}))).toBe(false)
+  })
+
+  it("first_response_minutes SLA: gt operator for 'more than X minutes remaining'", () => {
+    // Alert when MORE than 10 minutes remaining on a 30-min SLA
+    const cond = { field: "first_response_minutes", op: "gt" as const, value: 10, sla: 30 }
+
+    // 15 min elapsed → 15 remaining → matches (15 > 10)
+    expect(evaluateCondition(cond, ctx({ first_response_minutes: 15 }))).toBe(true)
+    // 25 min elapsed → 5 remaining → no match (5 ≤ 10)
+    expect(evaluateCondition(cond, ctx({ first_response_minutes: 25 }))).toBe(false)
   })
 })
 

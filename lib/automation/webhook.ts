@@ -45,7 +45,8 @@ const unixToIso = (s: number | null | undefined): string | null =>
 function itemToCaseLike(item: IntercomConversationItem): CaseLike {
   return {
     intercom_conversation_id: item.id != null ? String(item.id) : null,
-    status: item.state ?? null,
+    status: item.state ?? null, // Intercom state (open/closed/snoozed) for eval
+    intercom_state: item.state ?? null,
     subject: item.source?.subject ?? item.source?.body ?? item.title ?? null,
     tags: (item.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean),
     updated_at: unixToIso(item.updated_at),
@@ -137,7 +138,8 @@ export async function runTriggerForEvent(payload: IntercomNotification, nowMs: n
     const caseRow = {
       intercom_conversation_id: convId,
       owner_id: ownerId,
-      status: item.state ?? "open",
+      status: "open", // internal workflow status — not the Intercom state
+      intercom_state: item.state ?? "open", // Intercom's real conversation state
       summary: item.source?.subject ?? item.source?.body ?? item.title ?? null,
       opened_at: unixToIso(item.created_at),
     }

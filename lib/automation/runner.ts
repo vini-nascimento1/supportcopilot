@@ -64,6 +64,7 @@ export function caseToContextInput(c: CaseRow): CaseLike {
   return {
     intercom_conversation_id: c.intercom_conversation_id,
     status: c.status,
+    intercom_state: c.intercom_state,
     subject: c.summary,
     summary: c.summary,
     tags: c.auto_tags ?? [],

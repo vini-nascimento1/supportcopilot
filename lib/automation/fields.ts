@@ -113,6 +113,16 @@ export const FIELDS: FieldDef[] = [
     unit: "minutes",
   },
 
+  // ── SLA countdown ──
+  {
+    key: "first_response_minutes",
+    label: "First response SLA",
+    type: "duration",
+    category: "SLA",
+    appliesTo: ["monitor"],
+    unit: "minutes",
+  },
+
   // ── Event (triggers only) ──
   {
     key: "event",

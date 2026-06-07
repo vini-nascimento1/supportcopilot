@@ -439,7 +439,7 @@ function RuleEditor({
     setBusy(false)
     if (res.ok) {
       setTestResult(data)
-      toast.success(`${data.matches.length}/${data.scanned} open cases would match`)
+      toast.success(`${data.matches.length}/${data.scanned} cases would match`)
     } else toast.error(data.error ?? "Test failed")
   }
 
@@ -866,13 +866,26 @@ function ConditionRow({
           </Select>
         ) : isDuration ? (
           <div className="flex items-center gap-1.5">
+            {cond.field === "first_response_minutes" && (
+              <>
+                <span className="text-xs text-muted-foreground">SLA</span>
+                <Input
+                  type="number"
+                  className="h-8 w-16 text-xs"
+                  placeholder="30"
+                  value={cond.sla ?? ""}
+                  onChange={(e) => onChange({ ...cond, sla: Number(e.target.value) || undefined })}
+                />
+                <span className="text-xs text-muted-foreground">min → alert when ≤</span>
+              </>
+            )}
             <Input
               type="number"
               className="h-8 w-20 text-xs"
               value={typeof cond.value === "number" ? Math.round(cond.value / 60) : ""}
               onChange={(e) => onChange({ ...cond, value: Number(e.target.value) * 60 })}
             />
-            <span className="text-xs text-muted-foreground">min</span>
+            <span className="text-xs text-muted-foreground">min left</span>
           </div>
         ) : cond.op === "in" ? (
           <Input
@@ -1007,7 +1020,7 @@ function ActionsStep({
           <div>
             <p className="text-sm font-medium">Test this rule</p>
             <p className="text-xs text-muted-foreground">
-              Check how many of your open cases match these conditions.
+              Check how many of your cases match these conditions.
             </p>
           </div>
           <Button
@@ -1024,7 +1037,7 @@ function ActionsStep({
           <div className="mt-3 flex items-center gap-2 rounded-md bg-background p-3 text-sm">
             <CheckIcon className="size-4 text-green-600" />
             <span>
-              <strong>{testResult.matches.length}</strong> of {testResult.scanned} open cases match.
+              <strong>{testResult.matches.length}</strong> of {testResult.scanned} cases match.
             </span>
           </div>
         )}

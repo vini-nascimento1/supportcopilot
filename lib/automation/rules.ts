@@ -154,7 +154,6 @@ export async function testRule(
     .from("cases")
     .select("*, playbooks(case_type)")
     .eq("owner_id", agentId)
-    .eq("status", "open")
     .order("opened_at", { ascending: false })
     .limit(limit)
   if (error) throw new Error(error.message)

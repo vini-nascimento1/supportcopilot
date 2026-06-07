@@ -30,6 +30,17 @@ export function evaluateGroup(group: ConditionGroup, ctx: EvalContext): boolean 
 }
 
 export function evaluateCondition(cond: Condition, ctx: EvalContext): boolean {
+  // SLA countdown: for fields like first_response_minutes, the condition carries
+  // an `sla` threshold (in minutes). We compute remaining = sla - elapsed and
+  // compare against the condition value. This lets agents set rules like
+  // "alert me when 5 minutes remain on a 30-min first response SLA".
+  if (cond.sla != null && cond.field === "first_response_minutes") {
+    const elapsed = typeof ctx.fields[cond.field] === "number" ? (ctx.fields[cond.field] as number) : null
+    if (elapsed == null) return false
+    const remaining = cond.sla - elapsed
+    return applyOperator(cond.op, remaining, cond.value)
+  }
+
   const actual = ctx.fields[cond.field]
   return applyOperator(cond.op, actual, cond.value)
 }

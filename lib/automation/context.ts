@@ -12,6 +12,7 @@ export type CaseLike = {
   intercom_conversation_id?: string | null
   status?: string | null
   state?: string | null
+  intercom_state?: string | null
   subject?: string | null
   snippet?: string | null
   summary?: string | null
@@ -43,7 +44,9 @@ function ageSeconds(iso: string | null | undefined, nowMs: number): number | und
 export function buildContext(c: CaseLike, event: string | null, nowMs: number): EvalContext {
   const updated = c.updated_at ?? c.updatedAt ?? null
   const fields: Record<string, FieldValue> = {
-    status: c.status ?? c.state ?? null,
+    // Prefer intercom_state (real Intercom conversation state) over the internal
+    // workflow status. Falls back to c.status for legacy rows without intercom_state.
+    status: c.intercom_state ?? c.status ?? c.state ?? null,
     subject: c.subject ?? c.snippet ?? c.summary ?? null,
     tags: c.tags ?? c.auto_tags ?? [],
     priority_hint: c.priority_hint ?? null,
@@ -52,6 +55,13 @@ export function buildContext(c: CaseLike, event: string | null, nowMs: number): 
     matched_playbook: c.matched_playbook ?? null,
     time_since_update: ageSeconds(updated, nowMs),
     time_since_created: ageSeconds(c.opened_at, nowMs),
+    // First-response countdown: minutes elapsed since conversation opened.
+    // The evaluator subtracts this from the SLA threshold (stored per-condition
+    // in `cond.sla`) to compute time remaining. This way the agent gets alerted
+    // BEFORE the breach, not after.
+    first_response_minutes: ageSeconds(c.opened_at, nowMs) != null
+      ? Math.floor(ageSeconds(c.opened_at, nowMs)! / 60)
+      : null,
     event,
   }
   return { fields }
