@@ -356,3 +356,32 @@ export async function markThreadRead(
     }
   )
 }
+
+// ── Bulk operations ──────────────────────────────────────────────────────────
+
+export async function trashThreads(
+  token: string,
+  email: string | null,
+  threadIds: string[]
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await googleFetch(
+      email,
+      token,
+      "https://gmail.googleapis.com/gmail/v1/users/me/threads/batchModify",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: threadIds, addLabelIds: ["TRASH"] }),
+      }
+    )
+    if (!res) return { ok: false, error: "No token or refresh failed" }
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
+      return { ok: false, error: err.error?.message ?? `HTTP ${res.status}` }
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Unknown error" }
+  }
+}
