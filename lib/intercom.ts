@@ -365,6 +365,7 @@ export type SweepConversation = {
   priority: string | null
   createdAt: string | null
   updatedAt: string | null
+  adminAssigneeId: string | null
 }
 
 export function coerceCustomBool(value: unknown): boolean | null {
@@ -411,6 +412,7 @@ function toSweepConversation(c: IntercomSearchConversation): {
       priority: c.priority ?? null,
       createdAt: toDate(c.created_at),
       updatedAt: toDate(c.updated_at),
+      adminAssigneeId: c.admin_assignee_id != null ? String(c.admin_assignee_id) : null,
     },
     contactId: contact?.id ?? null,
   }

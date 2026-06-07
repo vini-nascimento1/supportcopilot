@@ -140,9 +140,13 @@ export type TestMatch = {
 }
 
 /**
- * Dry-run: evaluate a candidate condition tree (+ actions) against the agent's
- * live Intercom open queue, joined with our DB metadata. Pure decision —
- * NO actions are executed and nothing is written.
+ * Dry-run: evaluate a candidate condition tree (+ actions) against live Intercom
+ * open queues, joined with our DB metadata. Pure decision — NO actions are
+ * executed and nothing is written.
+ *
+ * If the candidate rule has NO teammate condition (global rule), conversations
+ * are fetched from ALL agents. If it has a teammate condition, only the current
+ * agent's queue is scanned.
  */
 export async function testRule(
   agentId: string,
@@ -150,30 +154,52 @@ export async function testRule(
   candidate: { conditions: ConditionTree; actions: Action[] },
   nowMs: number
 ): Promise<{ scanned: number; matches: TestMatch[] }> {
-  const { data: agent } = await db
-    .from("agents")
-    .select("intercom_admin_id")
-    .eq("id", agentId)
-    .maybeSingle()
-  const intercomAdminId = (agent?.intercom_admin_id as string | null | undefined) ?? null
-  if (!intercomAdminId) return { scanned: 0, matches: [] }
+  // Determine if this is a global rule (no teammate condition) or per-agent.
+  const isGlobal = !candidate.conditions.groups.some((g) =>
+    g.conditions.some((c) => c.field === "teammate")
+  )
 
-  // Cap the dry-run sample so heavy queues don't exceed Vercel's serverless timeout.
   const DRY_RUN_LIMIT = 200
-  let liveConvs
-  try {
-    liveConvs = await searchOpenConversationsForAdmin(intercomAdminId)
-  } catch (e) {
-    throw new Error(`Intercom unavailable: ${(e as Error).message}`)
+  let liveConvs: Awaited<ReturnType<typeof searchOpenConversationsForAdmin>> = []
+
+  if (isGlobal) {
+    // Global rule — fetch conversations from ALL agents.
+    const { data: allAgents } = await db.from("agents").select("id, intercom_admin_id")
+    const agentList = (allAgents ?? []) as Array<{ id: string; intercom_admin_id: string | null }>
+    for (const a of agentList) {
+      if (!a.intercom_admin_id) continue
+      try {
+        const convs = await searchOpenConversationsForAdmin(a.intercom_admin_id)
+        liveConvs.push(...convs)
+      } catch {
+        // Skip agents whose Intercom fetch fails — don't abort the whole test.
+      }
+      if (liveConvs.length >= DRY_RUN_LIMIT) break
+    }
+  } else {
+    // Per-agent rule — only scan the current user's queue.
+    const { data: agent } = await db
+      .from("agents")
+      .select("intercom_admin_id")
+      .eq("id", agentId)
+      .maybeSingle()
+    const intercomAdminId = (agent?.intercom_admin_id as string | null | undefined) ?? null
+    if (!intercomAdminId) return { scanned: 0, matches: [] }
+    try {
+      liveConvs = await searchOpenConversationsForAdmin(intercomAdminId)
+    } catch (e) {
+      throw new Error(`Intercom unavailable: ${(e as Error).message}`)
+    }
   }
+
   if (liveConvs.length === 0) return { scanned: 0, matches: [] }
   if (liveConvs.length > DRY_RUN_LIMIT) liveConvs = liveConvs.slice(0, DRY_RUN_LIMIT)
 
   const convIds = liveConvs.map((c) => c.id)
+  // For global rules, fetch metadata for ALL conversations (not scoped to one agent).
   const { data: metaRows } = await db
     .from("cases")
     .select("id, intercom_conversation_id, owner_id, priority_hint, auto_tags, playbooks(case_type)")
-    .eq("owner_id", agentId)
     .in("intercom_conversation_id", convIds)
   const metaByConvId = new Map<string, NonNullable<typeof metaRows>[number]>()
   for (const m of metaRows ?? []) {

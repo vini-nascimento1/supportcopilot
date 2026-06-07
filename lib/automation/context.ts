@@ -20,6 +20,8 @@ export type ConversationLive = {
   priority: string | null
   createdAt: string | null
   updatedAt: string | null
+  /** Intercom admin_assignee_id — the teammate assigned to this conversation. */
+  adminAssigneeId: string | null
 }
 
 /** Our DB metadata about a case (rule-set state + playbook link). */
@@ -75,6 +77,10 @@ export function buildContext(
     matched_playbook: meta?.matchedPlaybook ?? null,
     time_since_update: ageSeconds(updatedAt, nowMs),
     time_since_created: openedAgeSec,
+    // Teammate = the Intercom admin assigned to this conversation.
+    // Rules without a teammate condition are "global" — they evaluate against
+    // all agents' queues. Rules with `teammate is <id>` are scoped to that agent.
+    teammate: conv?.adminAssigneeId ?? null,
     // First-response countdown: minutes elapsed since conversation opened.
     // The evaluator subtracts this from the SLA threshold (stored per-condition
     // in `cond.sla`) to compute time remaining. This way the agent gets alerted

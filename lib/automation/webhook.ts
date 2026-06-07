@@ -78,6 +78,7 @@ function itemToConversationLive(item: IntercomConversationItem): ConversationLiv
     priority: item.priority ?? null,
     createdAt: unixToIso(item.created_at),
     updatedAt: unixToIso(item.updated_at),
+    adminAssigneeId: item.admin_assignee_id != null ? String(item.admin_assignee_id) : null,
   }
 }
 

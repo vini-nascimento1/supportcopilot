@@ -112,6 +112,13 @@ export const FIELDS: FieldDef[] = [
     category: "Knowledge",
     appliesTo: ["trigger", "monitor"],
   },
+  {
+    key: "teammate",
+    label: "Teammate (assignee ID)",
+    type: "text",
+    category: "Conversation",
+    appliesTo: ["trigger", "monitor"],
+  },
 
   // ── Time-based (monitors lean on these) ──
   // NOTE: time_since_update is now Intercom's real `updated_at` (post live-Intercom
