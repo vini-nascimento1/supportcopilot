@@ -11,6 +11,7 @@ import {
   MailIcon,
   MessageSquareIcon,
   SettingsIcon,
+  ZapIcon,
 } from "lucide-react"
 
 import {
@@ -32,6 +33,7 @@ const navItems = [
   { label: "Gmail", icon: MailIcon, href: "/gmail" },
   { label: "Slack", icon: MessageSquareIcon, href: "/slack" },
   { label: "Playbooks", icon: BookOpenIcon, href: "/playbooks" },
+  { label: "Automation", icon: ZapIcon, href: "/automation" },
   { label: "Settings", icon: SettingsIcon, href: "/settings" },
 ]
 

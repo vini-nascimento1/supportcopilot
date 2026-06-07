@@ -30,11 +30,19 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  // Allow unauthenticated access to the login page and auth API routes.
+  // Machine-to-machine endpoints that authenticate via a shared secret / signature
+  // header (NOT a user session) — they must NOT be redirected to /login, or the
+  // caller (pg_cron, Intercom webhook) can never reach the handler. Each route
+  // enforces its own auth (CRON_SECRET, webhook signature).
+  const isMachineRoute =
+    pathname === "/api/automation/sweep" || pathname.startsWith("/api/webhooks/")
+
+  // Allow unauthenticated access to the login page, auth API routes, and machine routes.
   if (
     !user &&
     pathname !== "/login" &&
-    !pathname.startsWith("/api/auth")
+    !pathname.startsWith("/api/auth") &&
+    !isMachineRoute
   ) {
     const url = request.nextUrl.clone()
     url.pathname = "/login"
