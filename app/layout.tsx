@@ -3,6 +3,7 @@ import "@fontsource-variable/instrument-sans"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { UpdateBanner } from "@/components/update-banner"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SpeedInsights } from "@vercel/speed-insights/next"
@@ -24,6 +25,7 @@ export default function RootLayout({
             {children}
             <Toaster />
             <SpeedInsights />
+            <UpdateBanner />
           </TooltipProvider>
         </ThemeProvider>
       </body>
