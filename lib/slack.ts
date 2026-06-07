@@ -55,7 +55,6 @@ async function countRecentMessages(
 ): Promise<number> {
   if (channelIds.length === 0) return 0
 
-  const oldest = ((Date.now() - 24 * 60 * 60 * 1000) / 1000).toString()
   let total = 0
 
   await Promise.all(
@@ -63,8 +62,8 @@ async function countRecentMessages(
       try {
         const url = new URL("https://slack.com/api/conversations.history")
         url.searchParams.set("channel", channel)
-        url.searchParams.set("oldest", oldest)
-        url.searchParams.set("limit", "200")
+        url.searchParams.set("unreads", "true")
+        url.searchParams.set("limit", "1")
         const res = await fetch(url.toString(), {
           headers: { Authorization: `Bearer ${token}` },
           next: { revalidate: 0 },
@@ -72,10 +71,10 @@ async function countRecentMessages(
         if (!res.ok) return
         const data = (await res.json()) as {
           ok: boolean
-          messages?: Array<{ subtype?: string }>
+          unread_count_display?: number
         }
         if (!data.ok) return
-        total += (data.messages ?? []).filter((m) => !m.subtype).length
+        total += data.unread_count_display ?? 0
       } catch {
         // ignore per-channel errors
       }
