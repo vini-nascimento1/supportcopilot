@@ -29,7 +29,6 @@ export async function GET(request: Request) {
       redirectTo: `${origin}/api/auth/callback`,
       queryParams: {
         access_type: "offline",
-        prompt: "consent",
         hd: "fanvue.com",
       },
       scopes: "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.modify",

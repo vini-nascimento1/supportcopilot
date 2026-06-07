@@ -43,18 +43,21 @@ export async function GET(request: Request) {
     const email = data.session.user.email
     const name = data.session.user.user_metadata?.full_name ?? null
 
-    const { error: tokenError } = await adminClient.from("agents").upsert(
-      {
-        email,
-        name,
-        google_token: data.session.provider_token ?? null,
-        google_refresh_token: data.session.provider_refresh_token ?? null,
-      },
+    // Upsert agent without touching google_refresh_token — only update it below
+    // when Google actually sends one (first login or explicit re-consent).
+    const { error: upsertError } = await adminClient.from("agents").upsert(
+      { email, name, google_token: data.session.provider_token ?? null },
       { onConflict: "email" }
     )
+    if (upsertError) console.error("Failed to upsert agent record", upsertError)
 
-    if (tokenError) {
-      console.error("Failed to store Google OAuth tokens", tokenError)
+    // Only persist the refresh token when Google sends a new one — avoids
+    // overwriting a valid stored token with null on re-logins.
+    if (data.session.provider_refresh_token) {
+      await adminClient
+        .from("agents")
+        .update({ google_refresh_token: data.session.provider_refresh_token })
+        .eq("email", email)
     }
 
     const { error: userIdError } = await adminClient

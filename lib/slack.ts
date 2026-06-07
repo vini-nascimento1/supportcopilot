@@ -36,6 +36,20 @@ async function getSupportChannelIds(): Promise<string[]> {
   return Array.isArray(v) ? (v as string[]) : (v as { ids?: string[] }).ids ?? []
 }
 
+// Reads a shared workspace bot token stored by the admin in the settings table.
+// Falls back when neither a per-agent token nor SLACK_BOT_TOKEN env var is set.
+export async function getSharedSlackBotToken(): Promise<string | null> {
+  const supabase = getSupabaseAdminClient()
+  if (!supabase) return null
+  const { data } = await supabase
+    .from("settings")
+    .select("value")
+    .eq("key", "slack_bot_token")
+    .maybeSingle()
+  if (!data?.value) return null
+  return typeof data.value === "string" ? data.value : null
+}
+
 async function countRecentMessages(
   token: string,
   channelIds: string[]
@@ -75,7 +89,7 @@ async function countRecentMessages(
 export async function getSlackActivity(
   agentSlackToken?: string | null
 ): Promise<SlackResult> {
-  const token = agentSlackToken ?? process.env.SLACK_BOT_TOKEN
+  const token = agentSlackToken ?? process.env.SLACK_BOT_TOKEN ?? await getSharedSlackBotToken()
   if (!token) return { connected: false }
 
   try {
@@ -198,7 +212,7 @@ async function fetchChannelMessages(
 }
 
 export async function getSlackFeed(agentSlackToken?: string | null): Promise<SlackFeedResult> {
-  const token = agentSlackToken ?? process.env.SLACK_BOT_TOKEN
+  const token = agentSlackToken ?? process.env.SLACK_BOT_TOKEN ?? await getSharedSlackBotToken()
   if (!token) return { connected: false }
 
   try {

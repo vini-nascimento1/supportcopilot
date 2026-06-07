@@ -38,6 +38,18 @@ async function getAgentRow(email: string) {
   return data
 }
 
+async function getSharedSlackToken(): Promise<string | null> {
+  const supabase = getSupabaseAdminClient()
+  if (!supabase) return null
+  const { data } = await supabase
+    .from("settings")
+    .select("value")
+    .eq("key", "slack_bot_token")
+    .maybeSingle()
+  if (!data?.value) return null
+  return typeof data.value === "string" ? data.value : null
+}
+
 async function updateProfile(formData: FormData) {
   "use server"
   const email = formData.get("email") as string
@@ -51,6 +63,26 @@ async function updateProfile(formData: FormData) {
       .update({ name: name || null, timezone: timezone || null })
       .eq("email", email)
   }
+  revalidatePath("/settings")
+}
+
+async function saveSharedSlackToken(formData: FormData) {
+  "use server"
+  const token = (formData.get("shared_slack_token") as string).trim()
+  const supabase = getSupabaseAdminClient()
+  if (!supabase || !token) return
+  await supabase.from("settings").upsert(
+    { key: "slack_bot_token", value: token, updated_at: new Date().toISOString() },
+    { onConflict: "key" }
+  )
+  revalidatePath("/settings")
+}
+
+async function clearSharedSlackToken() {
+  "use server"
+  const supabase = getSupabaseAdminClient()
+  if (!supabase) return
+  await supabase.from("settings").delete().eq("key", "slack_bot_token")
   revalidatePath("/settings")
 }
 
@@ -143,11 +175,14 @@ export default async function SettingsPage({
     getSignedInEmail(),
     searchParams,
   ])
-  const agent = email ? await getAgentRow(email) : null
+  const [agent, sharedSlackToken] = await Promise.all([
+    email ? getAgentRow(email) : Promise.resolve(null),
+    getSharedSlackToken(),
+  ])
   const notice = noticeKey ? NOTICES[noticeKey] : undefined
 
   const intercomConnected = Boolean(process.env.INTERCOM_ACCESS_TOKEN)
-  const slackConnected = Boolean(agent?.slack_token ?? process.env.SLACK_BOT_TOKEN)
+  const slackConnected = Boolean(agent?.slack_token ?? process.env.SLACK_BOT_TOKEN ?? sharedSlackToken)
   const notionConnected = Boolean(agent?.notion_token ?? process.env.NOTION_API_KEY)
 
   return (
@@ -277,14 +312,21 @@ export default async function SettingsPage({
 
             <Separator />
 
-            {/* Slack — per-agent OAuth */}
+            {/* Slack — per-agent OAuth or shared workspace bot token */}
             <IntegrationRow
               icon={<MessageSquareIcon className="size-4 text-muted-foreground" />}
               name="Slack"
-              blurb="Support channel feed · mentions"
+              blurb={
+                agent?.slack_token
+                  ? "Your personal workspace connection"
+                  : slackConnected
+                    ? "Workspace bot · shared for all agents"
+                    : "Paste a bot token to connect your Slack workspace"
+              }
               connected={slackConnected}
               action={
                 agent?.slack_token ? (
+                  // Per-agent OAuth token — allow disconnect
                   <form action={disconnectIntegration}>
                     <input type="hidden" name="email" value={email ?? ""} />
                     <input type="hidden" name="integration" value="slack" />
@@ -292,14 +334,38 @@ export default async function SettingsPage({
                       Disconnect
                     </Button>
                   </form>
-                ) : !slackConnected ? (
+                ) : process.env.SLACK_BOT_TOKEN ? (
+                  // Env-var bot token — managed externally, nothing to do here
+                  <span className="text-xs text-muted-foreground">via env</span>
+                ) : sharedSlackToken ? (
+                  // Shared token stored in settings — allow removal
+                  <form action={clearSharedSlackToken}>
+                    <Button size="sm" variant="ghost" type="submit">
+                      Remove
+                    </Button>
+                  </form>
+                ) : process.env.SLACK_CLIENT_ID ? (
+                  // Per-agent OAuth app is configured — OAuth flow
                   <Button size="sm" variant="outline" asChild>
                     <a href="/api/auth/slack">
                       <PlugIcon className="size-3.5" />
                       Connect
                     </a>
                   </Button>
-                ) : undefined
+                ) : (
+                  // No OAuth app — paste a shared workspace bot token (xoxb-...)
+                  <form action={saveSharedSlackToken} className="flex items-center gap-2">
+                    <Input
+                      name="shared_slack_token"
+                      type="password"
+                      placeholder="xoxb-..."
+                      className="h-7 w-40 font-mono text-xs"
+                    />
+                    <Button size="sm" variant="outline" type="submit" className="h-7 shrink-0">
+                      Save
+                    </Button>
+                  </form>
+                )
               }
             />
 
