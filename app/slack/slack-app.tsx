@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback, useRef } from "react"
+import { useEffect, useState, useRef } from "react"
 import {
   MessageSquareIcon,
   HashIcon,
@@ -10,7 +10,6 @@ import {
   SendIcon,
   MessageSquareReplyIcon,
   RefreshCwIcon,
-  ChevronLeftIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -206,6 +205,7 @@ export function SlackApp() {
   const [sendText, setSendText] = useState("")
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Fetch conversations
@@ -246,7 +246,7 @@ export function SlackApp() {
     }
     void load()
     return () => { cancelled = true }
-  }, [activeChannelId])
+  }, [activeChannelId, refreshKey])
 
   // Scroll to bottom
   useEffect(() => {
@@ -392,7 +392,7 @@ export function SlackApp() {
               <div className="flex items-center gap-2 border-b px-4 py-2">
                 <span className="text-xs font-medium text-muted-foreground">{channelName}</span>
                 <Button size="icon" variant="ghost" className="ml-auto size-6"
-                  onClick={() => setActiveChannelId(activeChannelId!)}
+                  onClick={() => setRefreshKey((k) => k + 1)}
                   title="Refresh messages">
                   <RefreshCwIcon className="size-3" />
                 </Button>
