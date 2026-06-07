@@ -383,31 +383,52 @@ export async function getUserConversations(
         unread_count?: number
       }>
     }
-    if (!convoData.ok) return { ok: false }
+    if (!convoData.ok) {
+      // Fallback: users.conversations not available (old token without users.conversations:read scope).
+      // Fall through — use empty channels so we fall to configured channels below.
+    }
 
-    // Collect DM user IDs to resolve names
-    const dmUserIds = (convoData.channels ?? [])
-      .filter((c) => c.is_im && c.user)
-      .map((c) => c.user!)
-    const users = dmUserIds.length > 0 ? await resolveSlackUsers(token, dmUserIds.slice(0, 30)) : {}
+    const rawChannels = convoData.channels ?? []
 
-    const conversations: SlackConversation[] = (convoData.channels ?? [])
-      .filter((c) => c.name !== "slack_app" && c.name !== "slackbot")
-      .map((c) => {
-        const isDm = !!c.is_im
-        const base: SlackConversation = {
-          id: c.id,
-          name: isDm ? (users[c.user ?? ""]?.name ?? c.user ?? "Unknown") : `#${c.name}`,
-          type: c.is_im ? "im" : c.is_mpim ? "mpim" : "channel",
-          unreadCount: c.unread_count ?? 0,
-        }
-        if (isDm && c.user) {
-          base.dmUser = users[c.user]?.name ?? c.user
-          base.dmColor = users[c.user]?.color ?? slackUserColor(c.user)
-        }
-        return base
-      })
-      .filter((c) => c.name) // remove nameless channels
+    // If users.conversations returned data, use it. Otherwise fall back to configured channels.
+    let conversations: SlackConversation[]
+    let resolvedFromConvo = false
+
+    if (rawChannels.length > 0) {
+      resolvedFromConvo = true
+      // Collect DM user IDs to resolve names
+      const dmUserIds = rawChannels
+        .filter((c) => c.is_im && c.user)
+        .map((c) => c.user!)
+      const users = dmUserIds.length > 0 ? await resolveSlackUsers(token, dmUserIds.slice(0, 30)) : {}
+
+      conversations = rawChannels
+        .filter((c) => c.name !== "slack_app" && c.name !== "slackbot")
+        .map((c) => {
+          const isDm = !!c.is_im
+          const base: SlackConversation = {
+            id: c.id,
+            name: isDm ? (users[c.user ?? ""]?.name ?? c.user ?? "Unknown") : `#${c.name}`,
+            type: c.is_im ? "im" : c.is_mpim ? "mpim" : "channel",
+            unreadCount: c.unread_count ?? 0,
+          }
+          if (isDm && c.user) {
+            base.dmUser = users[c.user]?.name ?? c.user
+            base.dmColor = users[c.user]?.color ?? slackUserColor(c.user)
+          }
+          return base
+        })
+        .filter((c) => c.name)
+    } else {
+      // Fallback: use configured support channels
+      const channelIds = await getSupportChannelIds()
+      const channels: SlackConversation[] = []
+      for (const id of channelIds) {
+        const name = await resolveSlackChannelName(token, id)
+        channels.push({ id, name: `#${name}`, type: "channel", unreadCount: 0 })
+      }
+      conversations = channels
+    }
 
     return {
       ok: true,
