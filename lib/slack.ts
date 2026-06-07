@@ -124,6 +124,18 @@ export type SlackMessage = {
   text: string
   ts: string
   threadCount?: number
+  threadTs?: string
+  parentTs?: string // if this is a thread reply, points to parent
+}
+
+export type SlackThreadReply = {
+  id: string
+  userId: string
+  userName: string
+  userColor: string
+  text: string
+  ts: string
+  parentTs: string
 }
 
 export type SlackChannel = {
@@ -191,7 +203,7 @@ async function fetchChannelMessages(
   token: string,
   channelId: string,
   limit = 30
-): Promise<Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number }>> {
+): Promise<Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number; thread_ts?: string }>> {
   try {
     const url = new URL("https://slack.com/api/conversations.history")
     url.searchParams.set("channel", channelId)
@@ -201,7 +213,7 @@ async function fetchChannelMessages(
     })
     const data = (await res.json()) as {
       ok: boolean
-      messages?: Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number }>
+      messages?: Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number; thread_ts?: string }>
     }
     if (!data.ok) return []
     return (data.messages ?? []).filter((m) => !m.subtype && m.user)
@@ -233,7 +245,7 @@ export async function getSlackFeed(agentSlackToken?: string | null): Promise<Sla
     ])
 
     // Resolve user names for all messages
-    const allUserIds = (channelMsgArrays as Array<Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number }>>)
+    const allUserIds = (channelMsgArrays as Array<Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number; thread_ts?: string }>>)
       .flat()
       .map((m) => m.user)
       .filter(Boolean) as string[]
@@ -246,7 +258,7 @@ export async function getSlackFeed(agentSlackToken?: string | null): Promise<Sla
 
     const messages: Record<string, SlackMessage[]> = {}
     channelIds.forEach((id, i) => {
-      const raw = (channelMsgArrays as Array<Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number }>>)[i]
+      const raw = (channelMsgArrays as Array<Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number; thread_ts?: string }>>)[i]
       messages[id] = [...raw].reverse().map((m) => ({
         id: m.ts,
         userId: m.user ?? "unknown",
@@ -255,6 +267,7 @@ export async function getSlackFeed(agentSlackToken?: string | null): Promise<Sla
         text: m.text ?? "",
         ts: m.ts,
         threadCount: m.reply_count,
+        threadTs: m.thread_ts,
       }))
     })
 
@@ -262,4 +275,71 @@ export async function getSlackFeed(agentSlackToken?: string | null): Promise<Sla
   } catch {
     return { connected: false }
   }
+}
+
+// ── thread replies ─────────────────────────────────────────────
+
+export type ThreadRepliesResult =
+  | { ok: true; replies: SlackThreadReply[] }
+  | { ok: false }
+
+export async function getThreadReplies(
+  agentSlackToken: string | null | undefined,
+  channelId: string,
+  threadTs: string
+): Promise<ThreadRepliesResult> {
+  const token = agentSlackToken ?? process.env.SLACK_BOT_TOKEN
+  if (!token) return { ok: false }
+
+  try {
+    const url = new URL("https://slack.com/api/conversations.replies")
+    url.searchParams.set("channel", channelId)
+    url.searchParams.set("ts", threadTs)
+    url.searchParams.set("limit", "50")
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const data = (await res.json()) as {
+      ok: boolean
+      messages?: Array<{ user?: string; text?: string; ts: string; parent_user_id?: string; subtype?: string }>
+    }
+    if (!data.ok) return { ok: false }
+
+    const replies = (data.messages ?? [])
+      .filter((m) => !m.subtype && m.user && m.ts !== threadTs) // exclude parent
+      .map((m) => ({
+        id: m.ts,
+        userId: m.user ?? "unknown",
+        userName: m.user ?? "Unknown",
+        userColor: slackUserColor(m.user ?? ""),
+        text: m.text ?? "",
+        ts: m.ts,
+        parentTs: threadTs,
+      }))
+
+    // Resolve user names
+    const userIds = replies.map((r) => r.userId).filter(Boolean)
+    const users = await resolveSlackUsers(token, userIds)
+    for (const reply of replies) {
+      const u = users[reply.userId]
+      if (u) {
+        reply.userName = u.name
+        reply.userColor = u.color
+      }
+    }
+
+    return { ok: true, replies }
+  } catch {
+    return { ok: false }
+  }
+}
+
+/** Build a permalink to a specific Slack message. */
+export function getMessagePermalink(
+  workspaceUrl: string,
+  channelId: string,
+  ts: string
+): string {
+  const tsClean = ts.replace(".", "")
+  return `${workspaceUrl}/archives/${channelId}/p${tsClean}`
 }

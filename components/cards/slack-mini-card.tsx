@@ -1,38 +1,53 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { GripVertical, MessageSquareIcon, RefreshCwIcon, ExternalLinkIcon } from "lucide-react"
+import {
+  GripVertical,
+  MessageSquareIcon,
+  RefreshCwIcon,
+  ExternalLinkIcon,
+  ChevronDownIcon,
+  MessageSquareReplyIcon,
+  Loader2Icon,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { SlackFeedResult, SlackMessage } from "@/lib/slack"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+} from "@/components/ui/dropdown-menu"
+import type { SlackFeedResult, SlackMessage, SlackThreadReply } from "@/lib/slack"
+import { getMessagePermalink } from "@/lib/slack-utils"
 
-// ── Slack text renderer ────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────
 
 function parseSlackText(text: string): string {
   return text
-    .replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, "$2")   // <url|display> → display
-    .replace(/<(https?:\/\/[^>]+)>/g, "$1")               // <url> → url
-    .replace(/<@[A-Z0-9]+\|([^>]+)>/g, "@$1")            // <@U|name> → @name
-    .replace(/<@([A-Z0-9]+)>/g, "@$1")                    // <@U> → @U
-    .replace(/<#[A-Z0-9]+\|([^>]+)>/g, "#$1")            // <#C|name> → #name
+    .replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, "$2")
+    .replace(/<(https?:\/\/[^>]+)>/g, "$1")
+    .replace(/<@[A-Z0-9]+\|([^>]+)>/g, "@$1")
+    .replace(/<@([A-Z0-9]+)>/g, "@$1")
+    .replace(/<#[A-Z0-9]+\|([^>]+)>/g, "#$1")
     .trim()
 }
 
-function formatSlackTs(ts: string): string {
+function relativeTime(ts: string): string {
   const ms = parseFloat(ts) * 1000
+  const diff = Date.now() - ms
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return "now"
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
   const d = new Date(ms)
-  const now = new Date()
-  const isToday = d.toDateString() === now.toDateString()
-  if (isToday) {
-    return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
-  }
-  return (
-    d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }) +
-    " " +
-    d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
-  )
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })
 }
 
 function initials(name: string): string {
@@ -41,48 +56,161 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
+// ── Thread replies component ───────────────────────────────────
+
+function ThreadRepliesView({
+  replies,
+  workspaceUrl,
+  channelId,
+}: {
+  replies: SlackThreadReply[]
+  workspaceUrl: string
+  channelId: string
+}) {
+  if (replies.length === 0) return null
+
+  return (
+    <div className="ml-9 border-l-2 border-muted-foreground/20 pl-3 pt-1">
+      {replies.map((reply) => (
+        <div
+          key={reply.id}
+          className="group flex items-start gap-2 py-1 hover:bg-muted/30"
+        >
+          <div
+            className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-[9px] font-bold text-white"
+            style={{ backgroundColor: reply.userColor }}
+          >
+            {initials(reply.userName)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xs font-semibold leading-tight">{reply.userName}</span>
+              <span className="text-[10px] text-muted-foreground">{relativeTime(reply.ts)}</span>
+            </div>
+            <p className="whitespace-pre-wrap break-words text-xs leading-snug text-foreground/90">
+              {parseSlackText(reply.text)}
+            </p>
+          </div>
+          <a
+            href={getMessagePermalink(workspaceUrl, channelId, reply.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground/40 opacity-0 transition-opacity hover:text-muted-foreground group-hover:opacity-100"
+            title="Open in Slack"
+          >
+            <ExternalLinkIcon className="size-3" />
+          </a>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── Message component ──────────────────────────────────────────
 
-function SlackMsg({ msg, prevMsg }: { msg: SlackMessage; prevMsg?: SlackMessage }) {
+function SlackMsg({
+  msg,
+  channelId,
+  workspaceUrl,
+  prevMsg,
+  threadReplies,
+  threadLoading,
+  threadExpanded,
+  onToggleThread,
+}: {
+  msg: SlackMessage
+  channelId: string
+  workspaceUrl: string
+  prevMsg?: SlackMessage
+  threadReplies: SlackThreadReply[] | null
+  threadLoading: boolean
+  threadExpanded: boolean
+  onToggleThread: () => void
+}) {
+  const isThreadReply = !!msg.parentTs
   const grouped =
+    !isThreadReply &&
     prevMsg?.userId === msg.userId &&
-    Math.abs(parseFloat(msg.ts) - parseFloat(prevMsg.ts)) < 300 // < 5 min
+    Math.abs(parseFloat(msg.ts) - parseFloat(prevMsg.ts)) < 300
 
   if (grouped) {
     return (
-      <div className="group flex items-start gap-2 px-3 py-0.5 hover:bg-muted/40">
+      <div className="group flex items-start gap-2 px-3 py-0.5 hover:bg-muted/30">
         <div className="w-7 shrink-0" />
-        <p className="flex-1 whitespace-pre-wrap break-words text-sm leading-snug text-foreground">
-          {parseSlackText(msg.text)}
-        </p>
-        <span className="shrink-0 text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">
-          {formatSlackTs(msg.ts)}
-        </span>
+        <div className="min-w-0 flex-1">
+          <p className="whitespace-pre-wrap break-words text-sm leading-snug text-foreground">
+            {parseSlackText(msg.text)}
+          </p>
+        </div>
+        <a
+          href={getMessagePermalink(workspaceUrl, channelId, msg.id)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground/40 opacity-0 transition-opacity hover:text-muted-foreground group-hover:opacity-100"
+          title="Open in Slack"
+        >
+          <ExternalLinkIcon className="size-3" />
+        </a>
       </div>
     )
   }
 
   return (
-    <div className="group flex items-start gap-2 px-3 py-1.5 hover:bg-muted/40">
-      <div
-        className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-white"
-        style={{ backgroundColor: msg.userColor }}
-      >
-        {initials(msg.userName)}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="text-sm font-semibold leading-tight">{msg.userName}</span>
-          <span className="text-[10px] text-muted-foreground">{formatSlackTs(msg.ts)}</span>
+    <div className="group px-3 py-1.5 hover:bg-muted/30">
+      <div className="flex items-start gap-2">
+        <div
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-white"
+          style={{ backgroundColor: msg.userColor }}
+        >
+          {initials(msg.userName)}
         </div>
-        <p className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-snug text-foreground">
-          {parseSlackText(msg.text)}
-        </p>
-        {msg.threadCount && msg.threadCount > 0 ? (
-          <p className="mt-0.5 text-[10px] text-primary">
-            {msg.threadCount} {msg.threadCount === 1 ? "reply" : "replies"}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm font-semibold leading-tight">{msg.userName}</span>
+            <span className="text-[10px] text-muted-foreground">{relativeTime(msg.ts)}</span>
+          </div>
+          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-snug text-foreground">
+            {parseSlackText(msg.text)}
           </p>
-        ) : null}
+
+          {/* Thread replies toggle */}
+          {msg.threadCount && msg.threadCount > 0 && !isThreadReply && (
+            <button
+              onClick={onToggleThread}
+              className="mt-1 flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+            >
+              {threadLoading ? (
+                <Loader2Icon className="size-3 animate-spin" />
+              ) : (
+                <MessageSquareReplyIcon className="size-3" />
+              )}
+              {msg.threadCount} {msg.threadCount === 1 ? "reply" : "replies"}
+              {threadExpanded && threadReplies && (
+                <span className="ml-1 text-muted-foreground">· {threadReplies.length} loaded</span>
+              )}
+            </button>
+          )}
+
+          {/* Expanded thread replies */}
+          {threadExpanded && threadReplies && (
+            <ThreadRepliesView
+              replies={threadReplies}
+              workspaceUrl={workspaceUrl}
+              channelId={channelId}
+            />
+          )}
+        </div>
+
+        {/* Hover action: Open in Slack */}
+        <a
+          href={getMessagePermalink(workspaceUrl, channelId, msg.id)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-0.5 shrink-0 rounded p-1 text-muted-foreground/40 opacity-0 transition-opacity hover:bg-muted hover:text-muted-foreground group-hover:opacity-100"
+          title="Open in Slack"
+        >
+          <ExternalLinkIcon className="size-3.5" />
+        </a>
       </div>
     </div>
   )
@@ -95,6 +223,9 @@ export function SlackMiniCard({ initialConnected }: { initialConnected: boolean 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [activeChannel, setActiveChannel] = useState<string | null>(null)
+  const [threadReplies, setThreadReplies] = useState<Record<string, SlackThreadReply[] | null>>({})
+  const [threadLoading, setThreadLoading] = useState<Record<string, boolean>>({})
+  const [threadExpanded, setThreadExpanded] = useState<Record<string, boolean>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const fetchFeed = useCallback(async (isRefresh = false) => {
@@ -120,12 +251,39 @@ export function SlackMiniCard({ initialConnected }: { initialConnected: boolean 
     return () => clearInterval(timer)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Scroll to bottom when messages change
+  // Scroll to bottom when messages or active channel change
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
     }
   }, [feed, activeChannel])
+
+  async function handleToggleThread(msgId: string, channelId: string, threadTs: string) {
+    // If already expanded, collapse
+    if (threadExpanded[msgId]) {
+      setThreadExpanded((prev) => ({ ...prev, [msgId]: false }))
+      return
+    }
+
+    // If already loaded, just expand
+    if (threadReplies[msgId]) {
+      setThreadExpanded((prev) => ({ ...prev, [msgId]: true }))
+      return
+    }
+
+    // Fetch thread replies
+    setThreadLoading((prev) => ({ ...prev, [msgId]: true }))
+    setThreadExpanded((prev) => ({ ...prev, [msgId]: true }))
+    try {
+      const res = await fetch(`/api/slack/thread?channel=${encodeURIComponent(channelId)}&ts=${encodeURIComponent(threadTs)}`)
+      const data = await res.json() as { ok: boolean; replies?: SlackThreadReply[] }
+      setThreadReplies((prev) => ({ ...prev, [msgId]: data.replies ?? null }))
+    } catch {
+      setThreadReplies((prev) => ({ ...prev, [msgId]: null }))
+    } finally {
+      setThreadLoading((prev) => ({ ...prev, [msgId]: false }))
+    }
+  }
 
   function ConnectedBadge() {
     return (
@@ -142,7 +300,7 @@ export function SlackMiniCard({ initialConnected }: { initialConnected: boolean 
     )
   }
 
-  // Not connected state
+  // ── Not connected state ──
   if (!initialConnected && (!feed || !feed.connected)) {
     return (
       <Card className="flex h-full flex-col overflow-hidden border-dashed">
@@ -172,6 +330,7 @@ export function SlackMiniCard({ initialConnected }: { initialConnected: boolean 
 
   const workspaceUrl = feed?.connected ? feed.workspaceUrl : "https://slack.com"
   const channels = feed?.connected ? feed.channels : []
+  const activeChannelName = channels.find((c) => c.id === activeChannel)?.name ?? "Slack"
 
   return (
     <Card className="flex h-full flex-col overflow-hidden">
@@ -192,34 +351,44 @@ export function SlackMiniCard({ initialConnected }: { initialConnected: boolean 
               <RefreshCwIcon className={`size-3 ${refreshing ? "animate-spin" : ""}`} />
             </button>
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" asChild>
-              <a href={workspaceUrl} target="_blank" rel="noopener noreferrer">
+              <a
+                href={activeChannel ? getMessagePermalink(workspaceUrl, activeChannel, "") : workspaceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 Open <ExternalLinkIcon className="size-3" />
               </a>
             </Button>
           </div>
         </div>
 
-        {/* Channel tabs */}
-        {channels.length > 1 && (
-          <div className="flex gap-1 overflow-x-auto pb-1 pt-2 [scrollbar-width:none]">
-            {channels.map((ch) => (
-              <button
-                key={ch.id}
-                onClick={() => setActiveChannel(ch.id)}
-                className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                  activeChannel === ch.id
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-              >
-                {ch.name}
-              </button>
-            ))}
+        {/* Channel selector dropdown */}
+        {channels.length > 1 ? (
+          <div className="pt-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                  <span className="text-foreground">{activeChannelName}</span>
+                  <ChevronDownIcon className="size-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuRadioGroup
+                  value={activeChannel ?? undefined}
+                  onValueChange={(value) => setActiveChannel(value)}
+                >
+                  {channels.map((ch) => (
+                    <DropdownMenuRadioItem key={ch.id} value={ch.id}>
+                      {ch.name}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-        )}
-        {channels.length === 1 && (
-          <p className="pt-1 text-xs text-muted-foreground">{channels[0]?.name} · support channel</p>
-        )}
+        ) : channels.length === 1 ? (
+          <p className="pt-1 text-xs text-muted-foreground">{channels[0]?.name}</p>
+        ) : null}
       </CardHeader>
 
       {/* Messages */}
@@ -248,7 +417,17 @@ export function SlackMiniCard({ initialConnected }: { initialConnected: boolean 
           <div className="flex flex-col justify-end">
             <div className="py-1">
               {activeMessages.map((msg, i) => (
-                <SlackMsg key={msg.id} msg={msg} prevMsg={activeMessages[i - 1]} />
+                <SlackMsg
+                  key={msg.id}
+                  msg={msg}
+                  channelId={activeChannel!}
+                  workspaceUrl={workspaceUrl}
+                  prevMsg={activeMessages[i - 1]}
+                  threadReplies={threadReplies[msg.id] ?? null}
+                  threadLoading={!!threadLoading[msg.id]}
+                  threadExpanded={!!threadExpanded[msg.id]}
+                  onToggleThread={() => handleToggleThread(msg.id, activeChannel!, msg.threadTs ?? msg.ts)}
+                />
               ))}
             </div>
             <div ref={messagesEndRef} />
