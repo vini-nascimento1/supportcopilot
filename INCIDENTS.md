@@ -36,6 +36,11 @@ throws at module initialisation before any user code runs.
    }
    ```
 
+**Follow-up (same deploy):** Adding a `webpack` config without a `turbopack` config caused
+a second build failure — Next.js 16 on Vercel uses Turbopack by default and treats this as
+an error. Removed the webpack polyfill (unnecessary for Turbopack, which handles `__dirname`
+correctly) and added `turbopack: {}` to `next.config.ts` to explicitly declare Turbopack support.
+
 **How to avoid in future**
 - When upgrading Next.js major versions, check the build output for deprecation warnings
   (`⚠ The "middleware" file convention is deprecated`) — treat them as blockers.
