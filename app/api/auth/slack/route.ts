@@ -31,8 +31,17 @@ export async function GET(request: Request) {
 
   const url = new URL("https://slack.com/oauth/v2/authorize")
   url.searchParams.set("client_id", clientId)
-  // User token: the feed shows the agent's own view, and we never post (ADR-0003).
-  url.searchParams.set("user_scope", "channels:history,channels:read")
+  // User token scopes — read channels/DMs, send and react as the signed-in user.
+  const userScopes = [
+    "channels:read", "channels:history",
+    "im:read", "im:history", "im:write",
+    "mpim:read", "mpim:history",
+    "chat:write",
+    "reactions:read", "reactions:write",
+    "users:read", "users:read.email",
+    "search:read",
+  ].join(",")
+  url.searchParams.set("user_scope", userScopes)
   url.searchParams.set("redirect_uri", `${origin}/api/auth/slack/callback`)
   url.searchParams.set("state", state)
 

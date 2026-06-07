@@ -38,18 +38,6 @@ async function getAgentRow(email: string) {
   return data
 }
 
-async function getSharedSlackToken(): Promise<string | null> {
-  const supabase = getSupabaseAdminClient()
-  if (!supabase) return null
-  const { data } = await supabase
-    .from("settings")
-    .select("value")
-    .eq("key", "slack_bot_token")
-    .maybeSingle()
-  if (!data?.value) return null
-  return typeof data.value === "string" ? data.value : null
-}
-
 async function updateProfile(formData: FormData) {
   "use server"
   const email = formData.get("email") as string
@@ -63,26 +51,6 @@ async function updateProfile(formData: FormData) {
       .update({ name: name || null, timezone: timezone || null })
       .eq("email", email)
   }
-  revalidatePath("/settings")
-}
-
-async function saveSharedSlackToken(formData: FormData) {
-  "use server"
-  const token = (formData.get("shared_slack_token") as string).trim()
-  const supabase = getSupabaseAdminClient()
-  if (!supabase || !token) return
-  await supabase.from("settings").upsert(
-    { key: "slack_bot_token", value: token, updated_at: new Date().toISOString() },
-    { onConflict: "key" }
-  )
-  revalidatePath("/settings")
-}
-
-async function clearSharedSlackToken() {
-  "use server"
-  const supabase = getSupabaseAdminClient()
-  if (!supabase) return
-  await supabase.from("settings").delete().eq("key", "slack_bot_token")
   revalidatePath("/settings")
 }
 
@@ -111,11 +79,11 @@ async function disconnectIntegration(formData: FormData) {
 // Agent-facing notices for the OAuth flows — friendly copy only, never
 // setup/env instructions (those live in web/README.md for admins).
 const NOTICES: Record<string, { tone: "ok" | "info" | "error"; text: string }> = {
-  "slack-connected": { tone: "ok", text: "Slack connected — your support channel feed is live." },
+  "slack-connected": { tone: "ok", text: "Slack connected — you can now read and send messages as yourself." },
   "slack-failed": { tone: "error", text: "Slack connection didn't complete. Please try again." },
   "slack-unavailable": {
     tone: "info",
-    text: "Slack connection isn't available yet — ask your workspace admin to enable it.",
+    text: "Slack integration isn't configured yet — ask your workspace admin to add SLACK_CLIENT_ID and SLACK_CLIENT_SECRET.",
   },
   "notion-connected": { tone: "ok", text: "Notion connected — knowledge base pages will now appear." },
   "notion-failed": { tone: "error", text: "Notion connection didn't complete. Please try again." },
@@ -175,14 +143,12 @@ export default async function SettingsPage({
     getSignedInEmail(),
     searchParams,
   ])
-  const [agent, sharedSlackToken] = await Promise.all([
-    email ? getAgentRow(email) : Promise.resolve(null),
-    getSharedSlackToken(),
-  ])
+  const agent = email ? await getAgentRow(email) : null
   const notice = noticeKey ? NOTICES[noticeKey] : undefined
 
+  const slackOAuthReady = Boolean(process.env.SLACK_CLIENT_ID)
   const intercomConnected = Boolean(process.env.INTERCOM_ACCESS_TOKEN)
-  const slackConnected = Boolean(agent?.slack_token ?? process.env.SLACK_BOT_TOKEN ?? sharedSlackToken)
+  const slackConnected = Boolean(agent?.slack_token ?? process.env.SLACK_BOT_TOKEN)
   const notionConnected = Boolean(agent?.notion_token ?? process.env.NOTION_API_KEY)
 
   return (
@@ -312,21 +278,20 @@ export default async function SettingsPage({
 
             <Separator />
 
-            {/* Slack — per-agent OAuth or shared workspace bot token */}
+            {/* Slack — per-user OAuth: each agent connects their own account */}
             <IntegrationRow
               icon={<MessageSquareIcon className="size-4 text-muted-foreground" />}
               name="Slack"
               blurb={
                 agent?.slack_token
-                  ? "Your personal workspace connection"
-                  : slackConnected
-                    ? "Workspace bot · shared for all agents"
-                    : "Paste a bot token to connect your Slack workspace"
+                  ? "Your personal Slack account — send, reply, and react as yourself"
+                  : slackOAuthReady
+                    ? "Connect your Slack account to read and send messages as you"
+                    : "Slack OAuth not configured — contact your workspace admin"
               }
               connected={slackConnected}
               action={
                 agent?.slack_token ? (
-                  // Per-agent OAuth token — allow disconnect
                   <form action={disconnectIntegration}>
                     <input type="hidden" name="email" value={email ?? ""} />
                     <input type="hidden" name="integration" value="slack" />
@@ -334,38 +299,14 @@ export default async function SettingsPage({
                       Disconnect
                     </Button>
                   </form>
-                ) : process.env.SLACK_BOT_TOKEN ? (
-                  // Env-var bot token — managed externally, nothing to do here
-                  <span className="text-xs text-muted-foreground">via env</span>
-                ) : sharedSlackToken ? (
-                  // Shared token stored in settings — allow removal
-                  <form action={clearSharedSlackToken}>
-                    <Button size="sm" variant="ghost" type="submit">
-                      Remove
-                    </Button>
-                  </form>
-                ) : process.env.SLACK_CLIENT_ID ? (
-                  // Per-agent OAuth app is configured — OAuth flow
+                ) : slackOAuthReady ? (
                   <Button size="sm" variant="outline" asChild>
                     <a href="/api/auth/slack">
                       <PlugIcon className="size-3.5" />
                       Connect
                     </a>
                   </Button>
-                ) : (
-                  // No OAuth app — paste a shared workspace bot token (xoxb-...)
-                  <form action={saveSharedSlackToken} className="flex items-center gap-2">
-                    <Input
-                      name="shared_slack_token"
-                      type="password"
-                      placeholder="xoxb-..."
-                      className="h-7 w-40 font-mono text-xs"
-                    />
-                    <Button size="sm" variant="outline" type="submit" className="h-7 shrink-0">
-                      Save
-                    </Button>
-                  </form>
-                )
+                ) : undefined
               }
             />
 
