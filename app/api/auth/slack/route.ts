@@ -34,6 +34,7 @@ export async function GET(request: Request) {
   // User token scopes — read channels/DMs, send and react as the signed-in user.
   const userScopes = [
     "channels:read", "channels:history",
+    "groups:read", "groups:history",
     "im:read", "im:history", "im:write",
     "mpim:read", "mpim:history",
     "chat:write",

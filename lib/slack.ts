@@ -357,7 +357,10 @@ export type ConversationsResult =
 // ── dynamic conversation discovery ────────────────────────────────
 
 /** Discover all conversations the user token has access to via `users.conversations`. */
-async function fetchAllUserConversations(token: string): Promise<SlackConversation[]> {
+async function fetchAllUserConversations(
+  token: string,
+  types = "public_channel,private_channel,im,mpim",
+): Promise<SlackConversation[]> {
   const all: SlackConversation[] = []
   const dmUserMap = new Map<string, string>() // conversationId → userId
   let cursor: string | undefined
@@ -365,7 +368,7 @@ async function fetchAllUserConversations(token: string): Promise<SlackConversati
   try {
     do {
       const url = new URL("https://slack.com/api/users.conversations")
-      url.searchParams.set("types", "public_channel,private_channel,im,mpim")
+      url.searchParams.set("types", types)
       url.searchParams.set("limit", "200")
       url.searchParams.set("exclude_archived", "true")
       if (cursor) url.searchParams.set("cursor", cursor)
@@ -375,6 +378,7 @@ async function fetchAllUserConversations(token: string): Promise<SlackConversati
       })
       const data = (await res.json()) as {
         ok: boolean
+        error?: string
         channels?: Array<{
           id: string; name?: string
           is_channel?: boolean; is_im?: boolean; is_mpim?: boolean
@@ -382,7 +386,14 @@ async function fetchAllUserConversations(token: string): Promise<SlackConversati
         }>
         response_metadata?: { next_cursor?: string }
       }
-      if (!data.ok) return []
+      if (!data.ok) {
+        console.error(`[slack] users.conversations failed:`, JSON.stringify(data))
+        // If private_channel scope (groups:read) is missing, retry without it
+        if (data.error === "missing_scope" && types.includes("private_channel")) {
+          return fetchAllUserConversations(token, "public_channel,im,mpim")
+        }
+        return []
+      }
 
       for (const ch of data.channels ?? []) {
         if (ch.is_im) {
@@ -443,10 +454,12 @@ export async function getUserConversations(
     // Dynamic discovery — show all conversations the user is actually in
     const all = await fetchAllUserConversations(token)
     if (all.length > 0) {
+      console.log(`[slack] users.conversations returned ${all.length} conversations (${all.filter(c => c.type === 'channel').length} channels, ${all.filter(c => c.type === 'im').length} DMs)`)
       return { ok: true, conversations: all, workspaceUrl }
     }
 
     // Fallback: use configured support channels
+    console.warn(`[slack] users.conversations returned empty — falling back to static channel config`)
     const channelIds = await getSupportChannelIds()
     const channels: SlackConversation[] = await Promise.all(
       channelIds.map(async (id) => {
