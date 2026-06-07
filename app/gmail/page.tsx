@@ -1,9 +1,9 @@
 import Link from "next/link"
+import { Suspense } from "react"
 import {
   MailIcon,
   MailOpenIcon,
   PenSquareIcon,
-  SearchIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -13,6 +13,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { WorkspaceLayout } from "@/components/workspace-layout"
 import { getAgentTokens } from "@/lib/auth"
 import { getInboxThreads } from "@/lib/gmail-client"
+import { GmailFilterBar, getFilterQuery } from "@/components/gmail-filter-bar"
 
 export const dynamic = "force-dynamic"
 
@@ -42,17 +43,24 @@ function avatarLetter(name: string, email: string): string {
 export default async function GmailPage({
   searchParams,
 }: {
-  searchParams: Promise<{ pageToken?: string; q?: string }>
+  searchParams: Promise<{ pageToken?: string; q?: string; filter?: string }>
 }) {
-  const { pageToken, q } = await searchParams
+  const { pageToken, q, filter } = await searchParams
   const tokens = await getAgentTokens()
+
+  const query = q ?? getFilterQuery(filter ?? "primary")
 
   const inbox = await getInboxThreads(
     tokens.googleToken,
     tokens.email,
     pageToken ?? null,
-    q ?? "in:inbox"
+    query
   )
+
+  // Sort threads by date descending (newest first)
+  const sortedThreads = inbox.connected
+    ? [...inbox.threads].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    : []
 
   return (
     <WorkspaceLayout>
@@ -76,6 +84,11 @@ export default async function GmailPage({
       </header>
 
       <main className="flex flex-col">
+        {/* Filter bar */}
+        <Suspense>
+          <GmailFilterBar />
+        </Suspense>
+
         {!inbox.connected ? (
           <div className="flex flex-col items-center gap-4 py-16 text-center">
             <MailIcon className="size-10 text-muted-foreground/40" />
@@ -96,7 +109,7 @@ export default async function GmailPage({
           </div>
         ) : (
           <div className="divide-y">
-            {inbox.threads.map((thread) => (
+            {sortedThreads.map((thread) => (
               <Link
                 key={thread.id}
                 href={`/gmail/${thread.id}`}
@@ -149,7 +162,7 @@ export default async function GmailPage({
         {inbox.connected && inbox.nextPageToken && (
           <div className="flex justify-center border-t p-4">
             <Button variant="outline" size="sm" asChild>
-              <Link href={`/gmail?pageToken=${inbox.nextPageToken}${q ? `&q=${encodeURIComponent(q)}` : ""}`}>
+              <Link href={`/gmail?pageToken=${inbox.nextPageToken}${filter ? `&filter=${filter}` : q ? `&q=${encodeURIComponent(q)}` : ""}`}>
                 Load more
               </Link>
             </Button>
