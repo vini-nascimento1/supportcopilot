@@ -155,28 +155,28 @@ describe("evaluateTree (DNF: OR across groups)", () => {
   })
 
   it("first_response_minutes SLA countdown: alerts when remaining ≤ threshold", () => {
-    // 30-min SLA, alert when ≤ 5 minutes remaining
-    const cond = { field: "first_response_minutes", op: "lte" as const, value: 5, sla: 30 }
+    // 30-min SLA, alert when ≤ 5 minutes remaining. Value is in SECONDS (UI convention).
+    const cond = { field: "first_response_minutes", op: "lte" as const, value: 300, sla: 30 }
 
-    // 26 minutes elapsed → 4 remaining → matches (4 ≤ 5)
+    // 26 minutes elapsed → 4 min remaining = 240s → matches (240 ≤ 300)
     expect(evaluateCondition(cond, ctx({ first_response_minutes: 26 }))).toBe(true)
-    // 20 minutes elapsed → 10 remaining → no match (10 > 5)
+    // 20 minutes elapsed → 10 min remaining = 600s → no match (600 > 300)
     expect(evaluateCondition(cond, ctx({ first_response_minutes: 20 }))).toBe(false)
-    // 30 minutes elapsed → 0 remaining → matches (0 ≤ 5) — SLA breached
+    // 30 minutes elapsed → 0 remaining → matches (0 ≤ 300) — SLA breached
     expect(evaluateCondition(cond, ctx({ first_response_minutes: 30 }))).toBe(true)
-    // 35 minutes elapsed → -5 remaining → matches (negative = breached)
+    // 35 minutes elapsed → -5 min = -300s → matches (negative = breached)
     expect(evaluateCondition(cond, ctx({ first_response_minutes: 35 }))).toBe(true)
     // No first_response_minutes field → false
     expect(evaluateCondition(cond, ctx({}))).toBe(false)
   })
 
   it("first_response_minutes SLA: gt operator for 'more than X minutes remaining'", () => {
-    // Alert when MORE than 10 minutes remaining on a 30-min SLA
-    const cond = { field: "first_response_minutes", op: "gt" as const, value: 10, sla: 30 }
+    // Alert when MORE than 10 minutes remaining on a 30-min SLA. Value in seconds.
+    const cond = { field: "first_response_minutes", op: "gt" as const, value: 600, sla: 30 }
 
-    // 15 min elapsed → 15 remaining → matches (15 > 10)
+    // 15 min elapsed → 15 min remaining = 900s → matches (900 > 600)
     expect(evaluateCondition(cond, ctx({ first_response_minutes: 15 }))).toBe(true)
-    // 25 min elapsed → 5 remaining → no match (5 ≤ 10)
+    // 25 min elapsed → 5 min remaining = 300s → no match (300 ≤ 600)
     expect(evaluateCondition(cond, ctx({ first_response_minutes: 25 }))).toBe(false)
   })
 })

@@ -37,8 +37,11 @@ export function evaluateCondition(cond: Condition, ctx: EvalContext): boolean {
   if (cond.sla != null && cond.field === "first_response_minutes") {
     const elapsed = typeof ctx.fields[cond.field] === "number" ? (ctx.fields[cond.field] as number) : null
     if (elapsed == null) return false
-    const remaining = cond.sla - elapsed
-    return applyOperator(cond.op, remaining, cond.value)
+    // Both `remaining` and `cond.value` are in SECONDS so the comparison is
+    // unit-consistent.  `cond.sla` is minutes, `elapsed` is minutes → convert
+    // the difference to seconds before comparing against the UI-stored value.
+    const remainingSec = (cond.sla - elapsed) * 60
+    return applyOperator(cond.op, remainingSec, cond.value)
   }
 
   const actual = ctx.fields[cond.field]
