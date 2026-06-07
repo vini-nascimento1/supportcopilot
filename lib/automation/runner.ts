@@ -92,6 +92,124 @@ export function metaRowToCaseMeta(row: CaseMetaRow | null): CaseMeta {
   }
 }
 
+type AgentTotals = {
+  matches: number
+  actionsApplied: number
+  casesEvaluated: number
+  errors: string[]
+}
+
+type DbClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>
+
+async function processAgent(
+  db: DbClient,
+  agent: { id: string; intercom_admin_id: string | null },
+  ownerRules: AutomationRule[],
+  nowMs: number
+): Promise<AgentTotals> {
+  const out: AgentTotals = { matches: 0, actionsApplied: 0, casesEvaluated: 0, errors: [] }
+  if (!agent.intercom_admin_id) {
+    out.errors.push(`agent ${agent.id}: no intercom_admin_id; skipping sweep`)
+    return out
+  }
+
+  let liveConvs: SweepConversation[]
+  try {
+    liveConvs = await searchOpenConversationsForAdmin(agent.intercom_admin_id)
+  } catch (e) {
+    out.errors.push(`intercom search (agent ${agent.id}): ${(e as Error).message}`)
+    return out
+  }
+  if (liveConvs.length === 0) return out
+
+  // Batch-load DB metadata for these conversations — scoped to THIS agent.
+  // Without owner_id filter we'd inherit auto_tags/priority_hint set by another
+  // agent's rules (cross-agent state leakage). When a conv is reassigned in
+  // Intercom, the new owner's sweep gets fresh meta and the lazy-upsert below
+  // re-attributes the row.
+  const convIds = liveConvs.map((c) => c.id)
+  const { data: metaRows, error: metaErr } = await db
+    .from("cases")
+    .select("id, intercom_conversation_id, owner_id, priority_hint, auto_tags, playbooks(case_type)")
+    .eq("owner_id", agent.id)
+    .in("intercom_conversation_id", convIds)
+  if (metaErr) out.errors.push(`cases meta: ${metaErr.message}`)
+  const metaByConvId = new Map<string, CaseMetaRow>()
+  for (const m of (metaRows ?? []) as unknown as CaseMetaRow[]) {
+    if (m.intercom_conversation_id) metaByConvId.set(m.intercom_conversation_id, m)
+  }
+
+  for (const conv of liveConvs) {
+    out.casesEvaluated += 1
+    const live = sweepConversationToLive(conv)
+    const meta = metaRowToCaseMeta(metaByConvId.get(conv.id) ?? null)
+
+    const ctx = buildContext(live, meta, null, nowMs)
+    const plan = planCaseActions(ownerRules, ctx)
+    if (plan.length === 0) continue
+
+    // Lazy-upsert: actions need a case_id. Create the metadata row on first match.
+    // On reassignment (existing row with a different owner_id), ON CONFLICT re-
+    // attributes the row to this agent AND resets rule-set state (auto_tags,
+    // priority_hint) — rules are per-agent (ADR-0007), so their side effects
+    // must not carry across owners.
+    // defaultToNull:false → omitted columns (customer_name when the live
+    // payload didn't carry one) keep their existing value instead of being
+    // overwritten with NULL.
+    let caseId = meta.caseId
+    if (!caseId) {
+      const upsertRow: Record<string, unknown> = {
+        intercom_conversation_id: conv.id,
+        owner_id: agent.id,
+        auto_tags: [],
+        priority_hint: null,
+      }
+      if (conv.customerName) upsertRow.customer_name = conv.customerName
+      const { data: created, error: upErr } = await db
+        .from("cases")
+        .upsert(upsertRow, { onConflict: "intercom_conversation_id", defaultToNull: false })
+        .select("id")
+        .maybeSingle()
+      if (upErr) {
+        out.errors.push(`case upsert (${conv.id}): ${upErr.message}`)
+        continue
+      }
+      caseId = created?.id ?? null
+      if (!caseId) continue
+    }
+
+    for (const { rule, actions } of plan) {
+      out.matches += 1
+      const taken: ActionResult[] = []
+      for (const action of actions) {
+        const res = await runAction(action, {
+          ruleId: rule.id,
+          ownerId: rule.ownerId,
+          caseId,
+          intercomConversationId: conv.id,
+          nowMs,
+        })
+        taken.push(res)
+        if (res.applied) out.actionsApplied += 1
+        else if (res.detail && !res.detail.startsWith("not implemented")) {
+          out.errors.push(`${rule.name}/${action.kind}: ${res.detail}`)
+        }
+      }
+
+      const { error: runErr } = await db.from("automation_runs").insert({
+        rule_id: rule.id,
+        case_id: caseId,
+        intercom_conversation_id: conv.id,
+        matched: true,
+        actions_taken: taken,
+        context: ctx.fields,
+      })
+      if (runErr) out.errors.push(`run insert: ${runErr.message}`)
+    }
+  }
+  return out
+}
+
 export async function runMonitorSweep(nowMs: number): Promise<SweepSummary> {
   const ranAt = new Date(nowMs).toISOString()
   const errors: string[] = []
@@ -129,108 +247,34 @@ export async function runMonitorSweep(nowMs: number): Promise<SweepSummary> {
   if (agentErr) errors.push(`agents: ${agentErr.message}`)
   const agents = (agentRows ?? []) as Array<{ id: string; intercom_admin_id: string | null }>
 
+  // Surface orphan rules: rule owner_id has no matching agent row. Without this
+  // the sweep would silently drop those rules — they'd still be counted in
+  // rulesEvaluated but never actually evaluated.
+  const knownAgentIds = new Set(agents.map((a) => a.id))
+  const orphanCount = agentIds.filter((id) => !knownAgentIds.has(id)).length
+  if (orphanCount > 0) {
+    errors.push(
+      `${orphanCount} agent id(s) referenced by automation_rules have no matching row in agents — rules orphaned`
+    )
+  }
+
+  // Process agents with bounded concurrency. Each agent fans out further inside
+  // (contact-attribute enrichment is concurrent within a batch), so keeping the
+  // outer loop small prevents the search-API rate limit from being saturated.
+  const AGENT_CONCURRENCY = 3
   let matches = 0
   let actionsApplied = 0
   let casesEvaluated = 0
-
-  for (const agent of agents) {
-    const ownerRules = rulesByOwner.get(agent.id) ?? []
-    if (ownerRules.length === 0) continue
-    if (!agent.intercom_admin_id) {
-      errors.push(`agent ${agent.id}: no intercom_admin_id; skipping sweep`)
-      continue
-    }
-
-    let liveConvs: SweepConversation[]
-    try {
-      liveConvs = await searchOpenConversationsForAdmin(agent.intercom_admin_id)
-    } catch (e) {
-      errors.push(`intercom search (agent ${agent.id}): ${(e as Error).message}`)
-      continue
-    }
-    if (liveConvs.length === 0) continue
-
-    // Batch-load DB metadata for these conversations — scoped to THIS agent.
-    // Without owner_id filter we'd inherit auto_tags/priority_hint set by another
-    // agent's rules (cross-agent state leakage). When a conv is reassigned in
-    // Intercom, the new owner's sweep gets fresh meta and the lazy-upsert below
-    // re-attributes the row.
-    const convIds = liveConvs.map((c) => c.id)
-    const { data: metaRows, error: metaErr } = await db
-      .from("cases")
-      .select("id, intercom_conversation_id, owner_id, priority_hint, auto_tags, playbooks(case_type)")
-      .eq("owner_id", agent.id)
-      .in("intercom_conversation_id", convIds)
-    if (metaErr) errors.push(`cases meta: ${metaErr.message}`)
-    const metaByConvId = new Map<string, CaseMetaRow>()
-    for (const m of (metaRows ?? []) as unknown as CaseMetaRow[]) {
-      if (m.intercom_conversation_id) metaByConvId.set(m.intercom_conversation_id, m)
-    }
-
-    for (const conv of liveConvs) {
-      casesEvaluated += 1
-      const live = sweepConversationToLive(conv)
-      const metaRow = metaByConvId.get(conv.id) ?? null
-      const meta = metaRowToCaseMeta(metaRow)
-
-      const ctx = buildContext(live, meta, null, nowMs)
-      const plan = planCaseActions(ownerRules, ctx)
-      if (plan.length === 0) continue
-
-      // Lazy-upsert: actions need a case_id. Create the metadata row on first match.
-      // On reassignment (existing row with a different owner_id), ON CONFLICT re-
-      // attributes the row to this agent AND resets the rule-set state (auto_tags,
-      // priority_hint) — rules are per-agent (ADR-0007), so their side effects must
-      // not carry across owners. customer_name is preserved if the live payload
-      // dropped it.
-      let caseId = meta.caseId
-      if (!caseId) {
-        const upsertRow: Record<string, unknown> = {
-          intercom_conversation_id: conv.id,
-          owner_id: agent.id,
-          auto_tags: [],
-          priority_hint: null,
-        }
-        if (conv.customerName) upsertRow.customer_name = conv.customerName
-        const { data: created, error: upErr } = await db
-          .from("cases")
-          .upsert(upsertRow, { onConflict: "intercom_conversation_id" })
-          .select("id")
-          .maybeSingle()
-        if (upErr) {
-          errors.push(`case upsert (${conv.id}): ${upErr.message}`)
-          continue
-        }
-        caseId = created?.id ?? null
-        if (!caseId) continue
-      }
-
-      for (const { rule, actions } of plan) {
-        matches += 1
-        const taken: ActionResult[] = []
-        for (const action of actions) {
-          const res = await runAction(action, {
-            ruleId: rule.id,
-            ownerId: rule.ownerId,
-            caseId,
-            intercomConversationId: conv.id,
-            nowMs,
-          })
-          taken.push(res)
-          if (res.applied) actionsApplied += 1
-          else if (res.detail && !res.detail.startsWith("not implemented")) errors.push(`${rule.name}/${action.kind}: ${res.detail}`)
-        }
-
-        const { error: runErr } = await db.from("automation_runs").insert({
-          rule_id: rule.id,
-          case_id: caseId,
-          intercom_conversation_id: conv.id,
-          matched: true,
-          actions_taken: taken,
-          context: ctx.fields,
-        })
-        if (runErr) errors.push(`run insert: ${runErr.message}`)
-      }
+  for (let i = 0; i < agents.length; i += AGENT_CONCURRENCY) {
+    const slice = agents.slice(i, i + AGENT_CONCURRENCY)
+    const results = await Promise.all(
+      slice.map((agent) => processAgent(db, agent, rulesByOwner.get(agent.id) ?? [], nowMs))
+    )
+    for (const r of results) {
+      matches += r.matches
+      actionsApplied += r.actionsApplied
+      casesEvaluated += r.casesEvaluated
+      if (r.errors.length) errors.push(...r.errors)
     }
   }
 

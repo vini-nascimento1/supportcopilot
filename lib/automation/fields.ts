@@ -79,7 +79,14 @@ export const FIELDS: FieldDef[] = [
   },
   {
     key: "tags",
-    label: "Tags (internal)",
+    label: "Tags (Intercom)",
+    type: "tags",
+    category: "Conversation",
+    appliesTo: ["trigger", "monitor"],
+  },
+  {
+    key: "auto_tags",
+    label: "Auto-tags (set by rules)",
     type: "tags",
     category: "Conversation",
     appliesTo: ["trigger", "monitor"],
@@ -107,9 +114,13 @@ export const FIELDS: FieldDef[] = [
   },
 
   // ── Time-based (monitors lean on these) ──
+  // NOTE: time_since_update is now Intercom's real `updated_at` (post live-Intercom
+  // refactor). Pre-refactor it was derived from `opened_at` (cases had no updated_at
+  // column). Use `time_since_created` for true age-since-open; use `time_since_update`
+  // for "no activity since last reply/admin action".
   {
     key: "time_since_update",
-    label: "Time since last update",
+    label: "Time since last update (Intercom)",
     type: "duration",
     category: "Time",
     appliesTo: ["monitor"],

@@ -199,7 +199,11 @@ export async function runTriggerForEvent(payload: IntercomNotification, nowMs: n
     if (live.customerName) upsertRow.customer_name = live.customerName
     const { data: upserted, error: upsertErr } = await db
       .from("cases")
-      .upsert(upsertRow, { onConflict: "intercom_conversation_id", ignoreDuplicates: false })
+      .upsert(upsertRow, {
+        onConflict: "intercom_conversation_id",
+        ignoreDuplicates: false,
+        defaultToNull: false,
+      })
       .select("id")
       .maybeSingle()
     if (upsertErr) out.errors.push(`case upsert: ${upsertErr.message}`)

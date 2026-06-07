@@ -59,7 +59,13 @@ export function buildContext(
   const fields: Record<string, FieldValue> = {
     status: conv?.intercomState ?? null,
     subject: conv?.subject ?? null,
-    tags: [...(conv?.tags ?? []), ...(meta?.autoTags ?? [])],
+    // tags = Intercom-side tags (applied by admins in Intercom).
+    // auto_tags = tags written by OUR rule actions (case.flag add_tags).
+    // Keeping them separate prevents rule self-loops: a rule that adds 'urgent'
+    // to auto_tags and conditions on `tags contains 'urgent'` would otherwise
+    // re-fire on every sweep.
+    tags: conv?.tags ?? [],
+    auto_tags: meta?.autoTags ?? [],
     // priority_hint = our rule-set state. priority = Intercom's native priority
     // flag (set by admins in the Intercom UI). Both are exposed independently.
     priority_hint: meta?.priorityHint ?? null,
