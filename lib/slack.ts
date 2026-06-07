@@ -32,8 +32,20 @@ async function getSupportChannelIds(): Promise<string[]> {
     .maybeSingle()
 
   if (!data?.value) return []
-  const v = data.value as { ids?: string[] } | string[]
-  return Array.isArray(v) ? (v as string[]) : (v as { ids?: string[] }).ids ?? []
+  const raw = data.value
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { ids?: unknown[] }).ids)
+      ? (raw as { ids: unknown[] }).ids
+      : []
+  return arr
+    .map((item) => {
+      if (typeof item === "string") return item
+      if (item && typeof item === "object" && "id" in item)
+        return String((item as { id: unknown }).id)
+      return null
+    })
+    .filter((id): id is string => id !== null)
 }
 
 
@@ -165,13 +177,13 @@ async function resolveSlackUsers(
 
 async function resolveSlackChannelName(token: string, channelId: string): Promise<string> {
   try {
-    const res = await fetch(`https://slack.com/api/conversations.info?channel=${channelId}`, {
+    const res = await fetch(`https://slack.com/api/conversations.info?channel=${encodeURIComponent(channelId)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     const data = (await res.json()) as { ok: boolean; channel?: { name?: string } }
-    return data.ok && data.channel?.name ? `#${data.channel.name}` : channelId
+    return data.ok && data.channel?.name ? `#${data.channel.name}` : String(channelId)
   } catch {
-    return channelId
+    return String(channelId)
   }
 }
 
