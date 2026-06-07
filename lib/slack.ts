@@ -215,7 +215,10 @@ async function fetchChannelMessages(
       ok: boolean
       messages?: Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number; thread_ts?: string }>
     }
-    if (!data.ok) return []
+    if (!data.ok) {
+      console.warn(`[slack] conversations.history error for ${channelId}:`, (data as Record<string, unknown>).error ?? "unknown")
+      return []
+    }
     return (data.messages ?? []).filter((m) => !m.subtype && m.user)
   } catch {
     return []
@@ -351,7 +354,77 @@ export type ConversationsResult =
   | { ok: true; conversations: SlackConversation[]; workspaceUrl: string }
   | { ok: false }
 
-/** List all available conversations (uses configured support channels — full listing requires users.conversations:read scope). */
+// ── dynamic conversation discovery ────────────────────────────────
+
+/** Discover all conversations the user token has access to via `users.conversations`. */
+async function fetchAllUserConversations(token: string): Promise<SlackConversation[]> {
+  const all: SlackConversation[] = []
+  const dmUserMap = new Map<string, string>() // conversationId → userId
+  let cursor: string | undefined
+
+  try {
+    do {
+      const url = new URL("https://slack.com/api/users.conversations")
+      url.searchParams.set("types", "public_channel,private_channel,im,mpim")
+      url.searchParams.set("limit", "200")
+      url.searchParams.set("exclude_archived", "true")
+      if (cursor) url.searchParams.set("cursor", cursor)
+
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = (await res.json()) as {
+        ok: boolean
+        channels?: Array<{
+          id: string; name?: string
+          is_channel?: boolean; is_im?: boolean; is_mpim?: boolean
+          user?: string
+        }>
+        response_metadata?: { next_cursor?: string }
+      }
+      if (!data.ok) return []
+
+      for (const ch of data.channels ?? []) {
+        if (ch.is_im) {
+          if (ch.user) dmUserMap.set(ch.id, ch.user)
+          all.push({ id: ch.id, name: "Loading...", type: "im", unreadCount: 0 })
+        } else if (ch.is_mpim) {
+          all.push({ id: ch.id, name: ch.name ?? ch.id, type: "mpim", unreadCount: 0 })
+        } else {
+          all.push({ id: ch.id, name: `#${ch.name ?? ch.id}`, type: "channel", unreadCount: 0 })
+        }
+      }
+
+      cursor = data.response_metadata?.next_cursor
+    } while (cursor)
+
+    // Resolve DM user names in batch
+    if (dmUserMap.size > 0) {
+      const userIds = [...dmUserMap.values()]
+      const users = await resolveSlackUsers(token, userIds)
+      for (const conv of all) {
+        if (conv.type === "im") {
+          const uid = dmUserMap.get(conv.id)
+          const user = uid ? users[uid] : undefined
+          if (user) {
+            conv.name = user.name
+            conv.dmUser = user.name
+            conv.dmColor = user.color
+          } else {
+            conv.name = uid ?? "Unknown"
+            conv.dmUser = uid ?? "Unknown"
+          }
+        }
+      }
+    }
+
+    return all
+  } catch {
+    return []
+  }
+}
+
+/** List all available conversations — uses `users.conversations` for dynamic discovery, falls back to configured support channels. */
 export async function getUserConversations(
   agentSlackToken?: string | null
 ): Promise<ConversationsResult> {
@@ -365,20 +438,24 @@ export async function getUserConversations(
     })
     const auth = (await authRes.json()) as { ok: boolean; url?: string }
     if (!auth.ok) return { ok: false }
+    const workspaceUrl = auth.url ?? "https://slack.com"
 
-    // Fallback: use configured support channels (SLACK_SUPPORT_CHANNEL_IDS or Supabase settings)
+    // Dynamic discovery — show all conversations the user is actually in
+    const all = await fetchAllUserConversations(token)
+    if (all.length > 0) {
+      return { ok: true, conversations: all, workspaceUrl }
+    }
+
+    // Fallback: use configured support channels
     const channelIds = await getSupportChannelIds()
-    const channels: SlackConversation[] = []
-    for (const id of channelIds) {
-      const name = await resolveSlackChannelName(token, id)
-      channels.push({ id, name: `#${name}`, type: "channel", unreadCount: 0 })
-    }
+    const channels: SlackConversation[] = await Promise.all(
+      channelIds.map(async (id) => {
+        const name = await resolveSlackChannelName(token, id)
+        return { id, name: `#${name}`, type: "channel" as const, unreadCount: 0 }
+      })
+    )
 
-    return {
-      ok: true,
-      conversations: channels,
-      workspaceUrl: auth.url ?? "https://slack.com",
-    }
+    return { ok: true, conversations: channels, workspaceUrl }
   } catch {
     return { ok: false }
   }
