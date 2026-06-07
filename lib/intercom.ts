@@ -221,14 +221,11 @@ export async function getOpenCasesQueue(
     return demoCases(playbooks)
   }
 
-  const response = await fetch("https://api.intercom.io/conversations/search", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${intercomToken}`,
-      "Content-Type": "application/json",
-      "Intercom-Version": "2.11",
-    },
-    body: JSON.stringify({
+  const allConversations: IntercomConversation[] = []
+  let startingAfter: string | undefined
+
+  do {
+    const body: Record<string, unknown> = {
       query: {
         operator: "AND",
         value: [
@@ -245,30 +242,51 @@ export async function getOpenCasesQueue(
         ],
       },
       pagination: {
-        per_page: 10,
+        per_page: 150,
       },
-    }),
-    cache: "no-store",
-  })
-
-  if (!response.ok) {
-    return {
-      mode: "error",
-      error: `Intercom returned ${response.status}`,
-      rows: demoCases(playbooks).rows,
     }
-  }
 
-  const payload = (await response.json()) as {
-    conversations?: IntercomConversation[]
-    data?: IntercomConversation[]
-  }
-  const conversations = payload.conversations ?? payload.data ?? []
+    if (startingAfter) {
+      (body.pagination as Record<string, unknown>).starting_after = startingAfter
+    }
+
+    const response = await fetch("https://api.intercom.io/conversations/search", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${intercomToken}`,
+        "Content-Type": "application/json",
+        "Intercom-Version": "2.11",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    })
+
+    if (!response.ok) {
+      return {
+        mode: "error",
+        error: `Intercom returned ${response.status}`,
+        rows: demoCases(playbooks).rows,
+      }
+    }
+
+    const payload = (await response.json()) as {
+      conversations?: IntercomConversation[]
+      data?: IntercomConversation[]
+      pages?: {
+        next?: { starting_after: string } | null
+      }
+    }
+
+    const conversations = payload.conversations ?? payload.data ?? []
+    allConversations.push(...conversations)
+
+    startingAfter = payload.pages?.next?.starting_after
+  } while (startingAfter)
 
   return {
     mode: "live",
     error: null,
-    rows: conversations.map((conversation) => {
+    rows: allConversations.map((conversation) => {
       const id = String(conversation.id)
       const snippet = getSnippet(conversation)
       const tip = getLiveTipForText(snippet, playbooks)
