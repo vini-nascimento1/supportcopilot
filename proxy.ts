@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const supabaseResponse = NextResponse.next({ request })
   const hasAuthCookie = request.cookies
     .getAll()
