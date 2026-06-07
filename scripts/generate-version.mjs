@@ -1,6 +1,6 @@
 // Generates public/version.json at build time so the client can detect new deploys.
 import { execSync } from "node:child_process"
-import { writeFileSync } from "node:fs"
+import { writeFileSync, mkdirSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -19,7 +19,15 @@ const version = {
   timestamp: new Date().toISOString(),
 }
 
-writeFileSync(
-  join(root, "public", "version.json"),
-  JSON.stringify(version, null, 2) + "\n",
-)
+const json = JSON.stringify(version, null, 2) + "\n"
+
+// Write to public/ (dev) and .next/public/ (build output)
+writeFileSync(join(root, "public", "version.json"), json)
+
+const nextPublic = join(root, ".next", "public")
+try {
+  mkdirSync(nextPublic, { recursive: true })
+  writeFileSync(join(nextPublic, "version.json"), json)
+} catch {
+  // .next might not exist yet during dev — that's fine.
+}

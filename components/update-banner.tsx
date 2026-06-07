@@ -18,35 +18,35 @@ export function UpdateBanner() {
   const currentVersion = useRef<Version | null>(null)
 
   useEffect(() => {
-    // Initial fetch — only writes to a ref, never calls setState.
-    async function init() {
+    let cancelled = false
+
+    async function checkVersion(isInitial = false) {
       try {
         const res = await fetch(`/version.json?t=${Date.now()}`)
-        if (res.ok) {
-          currentVersion.current = (await res.json()) as Version
+        if (!res.ok) return
+        const v: Version = await res.json()
+
+        if (isInitial) {
+          // First fetch — store baseline, don't show banner yet.
+          currentVersion.current = v
+        } else if (currentVersion.current && currentVersion.current.sha !== v.sha && !cancelled) {
+          setNewVersion(v)
         }
       } catch {
         // Ignore — user might be offline.
       }
     }
 
-    init()
+    // Check immediately on mount to set the baseline.
+    checkVersion(true)
 
-    // Poll for changes — this is the only path that calls setState.
-    const id = setInterval(async () => {
-      try {
-        const res = await fetch(`/version.json?t=${Date.now()}`)
-        if (!res.ok) return
-        const v: Version = await res.json()
-        if (currentVersion.current && currentVersion.current.sha !== v.sha) {
-          setNewVersion(v)
-        }
-      } catch {
-        // Ignore.
-      }
-    }, POLL_INTERVAL_MS)
+    // Then poll every 5 minutes.
+    const id = setInterval(() => checkVersion(false), POLL_INTERVAL_MS)
 
-    return () => clearInterval(id)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
   }, [])
 
   if (!newVersion || dismissed) return null
