@@ -6,7 +6,6 @@ import {
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -156,15 +155,6 @@ export default async function DraftsPage() {
                         )}
                       </CardDescription>
                     </div>
-                    <Badge
-                      variant={
-                        draft.intercomState === "closed"
-                          ? "secondary"
-                          : "outline"
-                      }
-                    >
-                      {draft.intercomState}
-                    </Badge>
                   </div>
                 </CardHeader>
 

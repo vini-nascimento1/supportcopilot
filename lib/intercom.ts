@@ -321,3 +321,123 @@ export async function getOpenCasesQueue(
     }),
   }
 }
+
+// ── Live conversation feed for the automation engine ──────────────────────
+// Returns the raw fields the eval context needs. Distinct from getOpenCasesQueue,
+// which shapes data for the UI. Multi-page; honours Intercom's pagination cursor.
+
+type IntercomSearchConversation = {
+  id?: string | number
+  state?: string | null
+  open?: boolean | null
+  updated_at?: number | null
+  created_at?: number | null
+  title?: string | null
+  priority?: string | null
+  admin_assignee_id?: number | string | null
+  source?: {
+    subject?: string | null
+    body?: string | null
+    author?: { name?: string | null; email?: string | null } | null
+  } | null
+  contacts?: {
+    contacts?: Array<{
+      id?: string
+      name?: string | null
+      email?: string | null
+      custom_attributes?: Record<string, unknown> | null
+    }>
+  } | null
+  tags?: { tags?: Array<{ name?: string | null }> } | null
+}
+
+export type SweepConversation = {
+  id: string
+  intercomState: string
+  subject: string | null
+  tags: string[]
+  customerName: string | null
+  isCreator: boolean | null
+  isAiCreator: boolean | null
+  priority: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+function coerceBool(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") {
+    const v = value.toLowerCase()
+    if (v === "true" || v === "yes" || v === "1") return true
+    if (v === "false" || v === "no" || v === "0") return false
+  }
+  return null
+}
+
+function toSweepConversation(c: IntercomSearchConversation): SweepConversation {
+  const contact = c.contacts?.contacts?.[0]
+  const attrs = contact?.custom_attributes ?? {}
+  return {
+    id: String(c.id ?? ""),
+    intercomState: c.state ?? (c.open ? "open" : "closed"),
+    subject: stripHtml(c.source?.subject ?? c.source?.body ?? c.title) || null,
+    tags: (c.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean),
+    customerName:
+      contact?.name ?? contact?.email ?? c.source?.author?.name ?? c.source?.author?.email ?? null,
+    // Intercom contact custom_attributes — naming intentionally loose; admins may
+    // use "Is Creator" / "is_creator" / "Creator?". Coerce common variants.
+    isCreator: coerceBool(attrs.is_creator ?? attrs.IsCreator ?? attrs["Is Creator"] ?? attrs.Creator),
+    isAiCreator: coerceBool(
+      attrs.is_ai_creator ?? attrs.IsAICreator ?? attrs["Is AI Creator"] ?? attrs["AI Creator"]
+    ),
+    priority: c.priority ?? null,
+    createdAt: toDate(c.created_at),
+    updatedAt: toDate(c.updated_at),
+  }
+}
+
+/** Live-fetch the agent's open Intercom queue. Caller passes the agent's intercom_admin_id. */
+export async function searchOpenConversationsForAdmin(adminId: string): Promise<SweepConversation[]> {
+  if (!intercomToken) return []
+  const out: SweepConversation[] = []
+  let startingAfter: string | undefined
+
+  do {
+    const body: Record<string, unknown> = {
+      query: {
+        operator: "AND",
+        value: [
+          { field: "admin_assignee_id", operator: "=", value: adminId },
+          { field: "open", operator: "=", value: true },
+        ],
+      },
+      pagination: { per_page: 150, ...(startingAfter ? { starting_after: startingAfter } : {}) },
+    }
+
+    const response = await fetch("https://api.intercom.io/conversations/search", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${intercomToken}`,
+        "Content-Type": "application/json",
+        "Intercom-Version": "2.11",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    })
+
+    if (!response.ok) throw new Error(`Intercom search ${response.status}`)
+
+    const payload = (await response.json()) as {
+      conversations?: IntercomSearchConversation[]
+      data?: IntercomSearchConversation[]
+      pages?: { next?: { starting_after: string } | null }
+    }
+
+    for (const c of payload.conversations ?? payload.data ?? []) {
+      out.push(toSweepConversation(c))
+    }
+    startingAfter = payload.pages?.next?.starting_after
+  } while (startingAfter)
+
+  return out
+}

@@ -60,7 +60,6 @@ export type SavedDraft = {
   caseId: string
   intercomConversationId: string | null
   customerName: string | null
-  intercomState: string
 }
 
 export async function getSavedDrafts(): Promise<SavedDraft[]> {
@@ -70,7 +69,7 @@ export async function getSavedDrafts(): Promise<SavedDraft[]> {
     .from("drafts")
     .select(
       `id, version, reply_body, next_steps, sources, created_at, case_id,
-       cases ( intercom_conversation_id, customer_name, intercom_state )`
+       cases ( intercom_conversation_id, customer_name )`
     )
     .order("created_at", { ascending: false })
     .limit(50)
@@ -87,7 +86,6 @@ export async function getSavedDrafts(): Promise<SavedDraft[]> {
       caseId: row.case_id,
       intercomConversationId: c?.intercom_conversation_id ?? null,
       customerName: c?.customer_name ?? null,
-      intercomState: c?.intercom_state ?? "open",
     }
   })
 }

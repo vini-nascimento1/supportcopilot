@@ -5,9 +5,10 @@ import "server-only"
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getSignedInEmail } from "@/lib/auth"
+import { searchOpenConversationsForAdmin } from "@/lib/intercom"
 import { evaluateTree, planCaseActions } from "./engine"
 import { buildContext } from "./context"
-import { caseToContextInput, type CaseRowForContext } from "./runner"
+import { metaRowToCaseMeta, sweepConversationToLive } from "./runner"
 import type { Action, AutomationRule, ConditionTree, RuleKind } from "./types"
 
 export type RuleInput = {
@@ -132,47 +133,61 @@ export async function deleteRule(
 }
 
 export type TestMatch = {
-  caseId: string
+  intercomConversationId: string
   customer: string | null
   intercomState: string | null
   actionKinds: string[]
 }
 
 /**
- * Dry-run: evaluate a candidate condition tree (+ actions) against this agent's
- * recent open cases. Returns which would match and what actions would run.
- * Pure decision — NO actions are executed and nothing is written.
+ * Dry-run: evaluate a candidate condition tree (+ actions) against the agent's
+ * live Intercom open queue, joined with our DB metadata. Pure decision —
+ * NO actions are executed and nothing is written.
  */
 export async function testRule(
   agentId: string,
   db: NonNullable<ReturnType<typeof getSupabaseAdminClient>>,
   candidate: { conditions: ConditionTree; actions: Action[] },
-  nowMs: number,
-  limit = 50
+  nowMs: number
 ): Promise<{ scanned: number; matches: TestMatch[] }> {
-  const { data, error } = await db
+  const { data: agent } = await db
+    .from("agents")
+    .select("intercom_admin_id")
+    .eq("id", agentId)
+    .maybeSingle()
+  const intercomAdminId = (agent?.intercom_admin_id as string | null | undefined) ?? null
+  if (!intercomAdminId) return { scanned: 0, matches: [] }
+
+  const liveConvs = await searchOpenConversationsForAdmin(intercomAdminId)
+  if (liveConvs.length === 0) return { scanned: 0, matches: [] }
+
+  const convIds = liveConvs.map((c) => c.id)
+  const { data: metaRows } = await db
     .from("cases")
-    .select("*, playbooks(case_type)")
-    .eq("owner_id", agentId)
-    .order("opened_at", { ascending: false })
-    .limit(limit)
-  if (error) throw new Error(error.message)
-  const cases = (data ?? []) as (CaseRowForContext & { customer_name?: string | null })[]
+    .select("id, intercom_conversation_id, owner_id, priority_hint, auto_tags, playbooks(case_type)")
+    .in("intercom_conversation_id", convIds)
+  const metaByConvId = new Map<string, NonNullable<typeof metaRows>[number]>()
+  for (const m of metaRows ?? []) {
+    const cid = m.intercom_conversation_id as string | null
+    if (cid) metaByConvId.set(cid, m)
+  }
 
   const matches: TestMatch[] = []
-  for (const c of cases) {
-    const ctx = buildContext(caseToContextInput(c), null, nowMs)
+  for (const conv of liveConvs) {
+    const live = sweepConversationToLive(conv)
+    const meta = metaRowToCaseMeta((metaByConvId.get(conv.id) ?? null) as never)
+    const ctx = buildContext(live, meta, null, nowMs)
     if (!evaluateTree(candidate.conditions, ctx)) continue
     const plan = planCaseActions(
       [{ id: "candidate", ownerId: agentId, name: "candidate", kind: "monitor", enabled: true, priority: 1, conditions: candidate.conditions, actions: candidate.actions, sweepEveryMins: 5 }],
       ctx
     )
     matches.push({
-      caseId: c.id,
-      customer: c.customer_name ?? null,
-      intercomState: c.intercom_state ?? null,
+      intercomConversationId: conv.id,
+      customer: conv.customerName,
+      intercomState: conv.intercomState,
       actionKinds: plan[0]?.actions.map((a) => a.kind) ?? [],
     })
   }
-  return { scanned: cases.length, matches }
+  return { scanned: liveConvs.length, matches }
 }

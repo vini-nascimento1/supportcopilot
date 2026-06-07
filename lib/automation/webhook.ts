@@ -1,16 +1,17 @@
 import "server-only"
 
 // Automation engine — Intercom webhook → trigger evaluation.
-// Verifies the Intercom signature, resolves the conversation's owning agent, builds
-// an eval context from the event payload, and runs that agent's enabled TRIGGER
-// rules whose on_events include this topic. Draft-only: actions only alert/flag.
+// Verifies the Intercom signature, resolves the conversation's owning agent,
+// builds an eval context from the event payload + DB metadata, and runs that
+// agent's enabled TRIGGER rules whose on_events include this topic.
+// Draft-only: actions only alert/flag.
 
 import { createHmac, timingSafeEqual } from "crypto"
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { planCaseActions } from "./engine"
 import { runAction, type ActionResult } from "./actions"
-import { buildContext, type CaseLike } from "./context"
+import { buildContext, type ConversationLive, type CaseMeta } from "./context"
 import type { AutomationRule, ConditionTree, Action } from "./types"
 
 /** Verify Intercom's `X-Hub-Signature: sha1=<hmac>` over the raw request body. */
@@ -35,21 +36,52 @@ type IntercomConversationItem = {
   updated_at?: number | null
   created_at?: number | null
   title?: string | null
-  source?: { subject?: string | null; body?: string | null } | null
+  priority?: string | null
+  source?: {
+    subject?: string | null
+    body?: string | null
+    author?: { name?: string | null; email?: string | null } | null
+  } | null
   tags?: { tags?: Array<{ name?: string | null }> } | null
+  contacts?: {
+    contacts?: Array<{
+      name?: string | null
+      email?: string | null
+      custom_attributes?: Record<string, unknown> | null
+    }>
+  } | null
 }
 
 const unixToIso = (s: number | null | undefined): string | null =>
   typeof s === "number" ? new Date(s * 1000).toISOString() : null
 
-function itemToCaseLike(item: IntercomConversationItem): CaseLike {
+function coerceBool(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") {
+    const v = value.toLowerCase()
+    if (v === "true" || v === "yes" || v === "1") return true
+    if (v === "false" || v === "no" || v === "0") return false
+  }
+  return null
+}
+
+function itemToConversationLive(item: IntercomConversationItem): ConversationLive {
+  const contact = item.contacts?.contacts?.[0]
+  const attrs = contact?.custom_attributes ?? {}
   return {
-    intercom_conversation_id: item.id != null ? String(item.id) : null,
-    intercom_state: item.state ?? null,
+    intercomConversationId: item.id != null ? String(item.id) : "",
+    intercomState: item.state ?? null,
     subject: item.source?.subject ?? item.source?.body ?? item.title ?? null,
     tags: (item.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean),
-    updated_at: unixToIso(item.updated_at),
-    opened_at: unixToIso(item.created_at),
+    customerName:
+      contact?.name ?? contact?.email ?? item.source?.author?.name ?? item.source?.author?.email ?? null,
+    isCreator: coerceBool(attrs.is_creator ?? attrs.IsCreator ?? attrs["Is Creator"] ?? attrs.Creator),
+    isAiCreator: coerceBool(
+      attrs.is_ai_creator ?? attrs.IsAICreator ?? attrs["Is AI Creator"] ?? attrs["AI Creator"]
+    ),
+    priority: item.priority ?? null,
+    createdAt: unixToIso(item.created_at),
+    updatedAt: unixToIso(item.updated_at),
   }
 }
 
@@ -129,35 +161,53 @@ export async function runTriggerForEvent(payload: IntercomNotification, nowMs: n
     }))
   if (rules.length === 0) return { ...out, handled: true, reason: "no matching trigger rules" }
 
-  // Upsert a local case row so monitors have data to sweep.
-  // intercom_state is the single source of truth for lifecycle.
-  const convId = item.id != null ? String(item.id) : null
-  let caseId: string | null = null
-  if (convId) {
-    const caseRow = {
-      intercom_conversation_id: convId,
-      owner_id: ownerId,
-      intercom_state: item.state ?? "open",
-      summary: item.source?.subject ?? item.source?.body ?? item.title ?? null,
-      opened_at: unixToIso(item.created_at),
-    }
+  const live = itemToConversationLive(item)
+  if (!live.intercomConversationId) return { ...out, reason: "no conversation id" }
+
+  // Pull our metadata for this conversation (if any).
+  const { data: metaRow } = await db
+    .from("cases")
+    .select("id, priority_hint, auto_tags, playbooks(case_type)")
+    .eq("intercom_conversation_id", live.intercomConversationId)
+    .maybeSingle()
+  const meta: CaseMeta = {
+    caseId: (metaRow?.id as string | undefined) ?? null,
+    priorityHint: (metaRow?.priority_hint as string | null) ?? null,
+    autoTags: (metaRow?.auto_tags as string[] | null) ?? [],
+    matchedPlaybook:
+      (Array.isArray(metaRow?.playbooks)
+        ? (metaRow?.playbooks[0]?.case_type as string | undefined)
+        : ((metaRow?.playbooks as { case_type: string | null } | null | undefined)?.case_type ?? null)) ?? null,
+  }
+
+  const ctx = buildContext(live, meta, topic, nowMs)
+  const plan = planCaseActions(rules, ctx)
+  if (plan.length === 0) return { ...out, handled: true, reason: "no rules matched" }
+
+  // Lazy-upsert metadata row only when at least one rule fires (gives the
+  // action handlers a case_id to write to without polluting the table with
+  // rows for every Intercom event).
+  let caseId = meta.caseId
+  if (!caseId) {
     const { data: upserted, error: upsertErr } = await db
       .from("cases")
-      .upsert(caseRow, { onConflict: "intercom_conversation_id", ignoreDuplicates: false })
+      .upsert(
+        { intercom_conversation_id: live.intercomConversationId, owner_id: ownerId, customer_name: live.customerName },
+        { onConflict: "intercom_conversation_id", ignoreDuplicates: false }
+      )
       .select("id")
       .maybeSingle()
     if (upsertErr) out.errors.push(`case upsert: ${upsertErr.message}`)
     caseId = (upserted?.id as string | undefined) ?? null
-
-    // Also try to find existing if upsert didn't return id (edge case).
     if (!caseId) {
-      const { data: existing } = await db.from("cases").select("id").eq("intercom_conversation_id", convId).maybeSingle()
+      const { data: existing } = await db
+        .from("cases")
+        .select("id")
+        .eq("intercom_conversation_id", live.intercomConversationId)
+        .maybeSingle()
       caseId = (existing?.id as string | undefined) ?? null
     }
   }
-
-  const ctx = buildContext(itemToCaseLike(item), topic, nowMs)
-  const plan = planCaseActions(rules, ctx)
 
   let actionsApplied = 0
   for (const { rule, actions } of plan) {
@@ -168,7 +218,7 @@ export async function runTriggerForEvent(payload: IntercomNotification, nowMs: n
         ruleId: rule.id,
         ownerId,
         caseId,
-        intercomConversationId: convId,
+        intercomConversationId: live.intercomConversationId,
         nowMs,
       })
       taken.push(res)
@@ -177,7 +227,7 @@ export async function runTriggerForEvent(payload: IntercomNotification, nowMs: n
     await db.from("automation_runs").insert({
       rule_id: rule.id,
       case_id: caseId,
-      intercom_conversation_id: convId,
+      intercom_conversation_id: live.intercomConversationId,
       matched: true,
       actions_taken: taken,
       context: ctx.fields,
