@@ -18,12 +18,12 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { SlackConversation, SlackMessage, SlackThreadReply } from "@/lib/slack"
-import { getMessagePermalink } from "@/lib/slack-utils"
+import { getMessagePermalink, parseSlackEmojis } from "@/lib/slack-utils"
 
 // ── Helpers ────────────────────────────────────────────────────
 
 function parseSlackText(text: string): string {
-  return text
+  return parseSlackEmojis(text)
     .replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, "$2")
     .replace(/<(https?:\/\/[^>]+)>/g, "$1")
     .replace(/<@[A-Z0-9]+\|([^>]+)>/g, "@$1")
@@ -89,14 +89,28 @@ function ThreadRepliesView({ replies, workspaceUrl, channelId }: {
 
 // ── Message ────────────────────────────────────────────────────
 
-function SlackMessageRow({ msg, channelId, workspaceUrl, prevMsg, threadReplies, threadLoading, threadExpanded, onToggleThread }: {
+function SlackMessageRow({ msg, channelId, workspaceUrl, prevMsg, threadReplies, threadLoading, threadExpanded, onToggleThread, onReply }: {
   msg: SlackMessage; channelId: string; workspaceUrl: string; prevMsg?: SlackMessage
   threadReplies: SlackThreadReply[] | null; threadLoading: boolean; threadExpanded: boolean
-  onToggleThread: () => void
+  onToggleThread: () => void; onReply?: (text: string, threadTs: string) => void
 }) {
+  const [replyText, setReplyText] = useState("")
+  const [replying, setReplying] = useState(false)
   const isThreadReply = !!msg.parentTs
   const grouped = !isThreadReply && prevMsg?.userId === msg.userId &&
     Math.abs(parseFloat(msg.ts) - parseFloat(prevMsg.ts)) < 300
+
+  async function handleReply(e: React.FormEvent) {
+    e.preventDefault()
+    if (!replyText.trim() || replying) return
+    setReplying(true)
+    try {
+      await onReply?.(replyText.trim(), msg.threadTs ?? msg.ts)
+      setReplyText("")
+    } finally {
+      setReplying(false)
+    }
+  }
 
   if (grouped) {
     return (
@@ -140,6 +154,19 @@ function SlackMessageRow({ msg, channelId, workspaceUrl, prevMsg, threadReplies,
           )}
           {threadExpanded && threadReplies && (
             <ThreadRepliesView replies={threadReplies} workspaceUrl={workspaceUrl} channelId={channelId} />
+          )}
+          {threadExpanded && (
+            <form onSubmit={handleReply} className="ml-9 mt-1 flex items-center gap-1.5 pr-2">
+              <Input value={replyText} onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Reply in thread…"
+                disabled={replying}
+                className="h-7 text-xs" />
+              <Button type="submit" size="icon" variant="ghost"
+                disabled={!replyText.trim() || replying}
+                className="size-7 shrink-0">
+                {replying ? <Loader2Icon className="size-3 animate-spin" /> : <SendIcon className="size-3" />}
+              </Button>
+            </form>
           )}
         </div>
         <a href={getMessagePermalink(workspaceUrl, channelId, msg.id)}
@@ -330,7 +357,7 @@ export function SlackApp() {
         {/* Conversations sidebar */}
         <aside className="w-64 shrink-0 overflow-y-auto border-r bg-muted/20 max-lg:hidden">
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-xs font-medium text-muted-foreground">Channels</span>
+            <span className="text-xs font-medium text-muted-foreground">Conversations</span>
             <Button size="icon" variant="ghost" className="size-6" onClick={() => window.location.reload()} title="Refresh">
               <RefreshCwIcon className="size-3" />
             </Button>
@@ -409,7 +436,22 @@ export function SlackApp() {
                       threadReplies={threadReplies[msg.id] ?? null}
                       threadLoading={!!threadLoading[msg.id]}
                       threadExpanded={!!threadExpanded[msg.id]}
-                      onToggleThread={() => handleToggleThread(msg.id, activeChannelId, msg.threadTs ?? msg.ts)} />
+                      onToggleThread={() => handleToggleThread(msg.id, activeChannelId, msg.threadTs ?? msg.ts)}
+                      onReply={async (text, threadTs) => {
+                        const res = await fetch("/api/slack/send", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ channel: activeChannelId, text, threadTs }),
+                        })
+                        const data = await res.json()
+                        if (data.ok) {
+                          setThreadLoading((p) => ({ ...p, [msg.id]: true }))
+                          const threadRes = await fetch(`/api/slack/thread?channel=${encodeURIComponent(activeChannelId)}&ts=${encodeURIComponent(threadTs)}`)
+                          const threadData = await threadRes.json() as { ok: boolean; replies?: SlackThreadReply[] }
+                          setThreadReplies((p) => ({ ...p, [msg.id]: threadData.replies ?? null }))
+                          setThreadLoading((p) => ({ ...p, [msg.id]: false }))
+                        }
+                      }} />
                   ))
                 )}
                 <div ref={messagesEndRef} />

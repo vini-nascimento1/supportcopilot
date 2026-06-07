@@ -193,7 +193,7 @@ async function resolveSlackChannelName(token: string, channelId: string): Promis
       headers: { Authorization: `Bearer ${token}` },
     })
     const data = (await res.json()) as { ok: boolean; channel?: { name?: string } }
-    return data.ok && data.channel?.name ? `#${data.channel.name}` : String(channelId)
+    return data.ok && data.channel?.name ? data.channel.name : String(channelId)
   } catch {
     return String(channelId)
   }
@@ -402,7 +402,7 @@ async function fetchAllUserConversations(
         } else if (ch.is_mpim) {
           all.push({ id: ch.id, name: ch.name ?? ch.id, type: "mpim", unreadCount: 0 })
         } else {
-          all.push({ id: ch.id, name: `#${ch.name ?? ch.id}`, type: "channel", unreadCount: 0 })
+          all.push({ id: ch.id, name: ch.name ?? ch.id, type: "channel", unreadCount: 0 })
         }
       }
 
@@ -464,7 +464,7 @@ export async function getUserConversations(
     const channels: SlackConversation[] = await Promise.all(
       channelIds.map(async (id) => {
         const name = await resolveSlackChannelName(token, id)
-        return { id, name: `#${name}`, type: "channel" as const, unreadCount: 0 }
+        return { id, name, type: "channel" as const, unreadCount: 0 }
       })
     )
 
