@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { CopyButton } from "@/components/copy-button"
+import { MarkdownPreview } from "@/components/markdown-preview"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { WorkspaceLayout } from "@/components/workspace-layout"
@@ -176,9 +177,7 @@ export default async function DraftsPage() {
                       </span>
                       <CopyButton text={draft.replyBody} />
                     </div>
-                    <pre className="whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-sans text-sm leading-relaxed">
-                      {draft.replyBody}
-                    </pre>
+                    <MarkdownPreview content={draft.replyBody} />
                   </div>
 
                   {/* next steps */}
@@ -187,9 +186,9 @@ export default async function DraftsPage() {
                       <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
                         ✅ Next steps for you
                       </summary>
-                      <pre className="mt-2 whitespace-pre-wrap font-sans text-sm leading-relaxed text-muted-foreground">
-                        {draft.nextSteps}
-                      </pre>
+                      <div className="mt-2">
+                        <MarkdownPreview content={draft.nextSteps} />
+                      </div>
                     </details>
                   )}
 
@@ -199,9 +198,9 @@ export default async function DraftsPage() {
                       <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
                         📚 Sources
                       </summary>
-                      <pre className="mt-2 whitespace-pre-wrap font-sans text-xs leading-relaxed text-muted-foreground">
-                        {draft.sources}
-                      </pre>
+                      <div className="mt-2">
+                        <MarkdownPreview content={draft.sources} />
+                      </div>
                     </details>
                   )}
                 </CardContent>

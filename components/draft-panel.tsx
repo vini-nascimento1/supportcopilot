@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { CopyButton } from "@/components/copy-button"
+import { MarkdownPreview } from "@/components/markdown-preview"
 
 interface Props {
   conversationId: string
@@ -110,9 +111,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName, existingD
               <span className="text-xs font-medium text-muted-foreground">Draft reply</span>
               <CopyButton text={draft.body} />
             </div>
-            <pre className="whitespace-pre-wrap rounded-md border bg-background p-3 font-sans text-sm leading-relaxed">
-              {draft.body}
-            </pre>
+            <MarkdownPreview content={draft.body} />
             <p className="text-xs text-muted-foreground">
               Copy into Intercom, review, then send.
             </p>

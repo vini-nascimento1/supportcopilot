@@ -20,6 +20,7 @@ import { Separator } from "@/components/ui/separator"
 import { PlaybookChecklist } from "@/components/playbook-checklist"
 import { parseSteps } from "@/lib/parse-steps"
 import { CopyButton } from "@/components/copy-button"
+import { MarkdownPreview } from "@/components/markdown-preview"
 import { DraftPanel } from "@/components/draft-panel"
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
@@ -99,9 +100,7 @@ function ResponseCard({ response }: { response: ResponseItem }) {
         </p>
         <CopyButton text={body} />
       </div>
-      <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-        {body}
-      </pre>
+      <MarkdownPreview content={body} />
     </div>
   )
 }
