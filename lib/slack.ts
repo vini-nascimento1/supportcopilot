@@ -125,7 +125,8 @@ export type SlackMessage = {
   ts: string
   threadCount?: number
   threadTs?: string
-  parentTs?: string // if this is a thread reply, points to parent
+  parentTs?: string
+  reactions?: SlackReaction[]
 }
 
 export type SlackThreadReply = {
@@ -203,7 +204,11 @@ async function fetchChannelMessages(
   token: string,
   channelId: string,
   limit = 30
-): Promise<Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number; thread_ts?: string }>> {
+): Promise<Array<{
+  user?: string; text?: string; ts: string; subtype?: string
+  reply_count?: number; thread_ts?: string
+  reactions?: Array<{ name: string; users: string[]; count: number }>
+}>> {
   try {
     const url = new URL("https://slack.com/api/conversations.history")
     url.searchParams.set("channel", channelId)
@@ -213,7 +218,11 @@ async function fetchChannelMessages(
     })
     const data = (await res.json()) as {
       ok: boolean
-      messages?: Array<{ user?: string; text?: string; ts: string; subtype?: string; reply_count?: number; thread_ts?: string }>
+      messages?: Array<{
+        user?: string; text?: string; ts: string; subtype?: string
+        reply_count?: number; thread_ts?: string
+        reactions?: Array<{ name: string; users: string[]; count: number }>
+      }>
     }
     if (!data.ok) {
       console.warn(`[slack] conversations.history error for ${channelId}:`, (data as Record<string, unknown>).error ?? "unknown")
@@ -339,6 +348,12 @@ export async function getThreadReplies(
 
 // ── conversation listing (Phase 2 — all user channels) ─────────
 
+export type SlackReaction = {
+  name: string
+  count: number
+  users: string[]
+}
+
 export type SlackConversation = {
   id: string
   name: string
@@ -348,6 +363,8 @@ export type SlackConversation = {
   dmUser?: string
   /** For DMs: the other user's color */
   dmColor?: string
+  /** Unix timestamp of the latest message (seconds), used for sorting */
+  latestTs?: number
 }
 
 export type ConversationsResult =
@@ -455,7 +472,10 @@ export async function getUserConversations(
     const all = await fetchAllUserConversations(token)
     if (all.length > 0) {
       console.log(`[slack] users.conversations returned ${all.length} conversations (${all.filter(c => c.type === 'channel').length} channels, ${all.filter(c => c.type === 'im').length} DMs)`)
-      return { ok: true, conversations: all, workspaceUrl }
+
+      // Fetch latest message timestamps for sorting — batch in chunks
+      const sorted = await attachLatestTimestamps(token, all)
+      return { ok: true, conversations: sorted, workspaceUrl }
     }
 
     // Fallback: use configured support channels
@@ -472,6 +492,35 @@ export async function getUserConversations(
   } catch {
     return { ok: false }
   }
+}
+
+/** Fetch latest message timestamps for each conversation and sort by most recent. */
+async function attachLatestTimestamps(
+  token: string,
+  conversations: SlackConversation[],
+): Promise<SlackConversation[]> {
+  const BATCH = 10
+  for (let i = 0; i < conversations.length; i += BATCH) {
+    const batch = conversations.slice(i, i + BATCH)
+    await Promise.allSettled(
+      batch.map(async (c) => {
+        try {
+          const res = await fetch(`https://slack.com/api/conversations.info?channel=${c.id}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          const data = (await res.json()) as {
+            ok: boolean
+            channel?: { latest?: { ts?: string } }
+          }
+          if (data.ok && data.channel?.latest?.ts) {
+            c.latestTs = parseFloat(data.channel.latest.ts)
+          }
+        } catch { /* skip */ }
+      })
+    )
+  }
+
+  return conversations.sort((a, b) => (b.latestTs ?? 0) - (a.latestTs ?? 0))
 }
 
 /** Fetch messages for a specific channel (public function version of fetchChannelMessages). */
@@ -501,6 +550,7 @@ export async function getConversationMessages(
       ts: m.ts,
       threadCount: m.reply_count,
       threadTs: m.thread_ts,
+      reactions: m.reactions?.map((r) => ({ name: r.name, count: r.count, users: r.users })),
     }))
 
     return { messages, channelName }
