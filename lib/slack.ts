@@ -351,7 +351,7 @@ export type ConversationsResult =
   | { ok: true; conversations: SlackConversation[]; workspaceUrl: string }
   | { ok: false }
 
-/** List all conversations the user has access to, with unread counts. */
+/** List all available conversations (uses configured support channels — full listing requires users.conversations:read scope). */
 export async function getUserConversations(
   agentSlackToken?: string | null
 ): Promise<ConversationsResult> {
@@ -366,73 +366,17 @@ export async function getUserConversations(
     const auth = (await authRes.json()) as { ok: boolean; url?: string }
     if (!auth.ok) return { ok: false }
 
-    // Fetch all conversations the user is in
-    const convoRes = await fetch(
-      "https://slack.com/api/users.conversations?types=public_channel,private_channel,im,mpim&limit=200&exclude_archived=true",
-      { headers: { Authorization: `Bearer ${token}` } }
-    )
-    const convoData = (await convoRes.json()) as {
-      ok: boolean
-      channels?: Array<{
-        id: string
-        name: string
-        is_channel?: boolean
-        is_im?: boolean
-        is_mpim?: boolean
-        user?: string // for DMs, the other user
-        unread_count?: number
-      }>
-    }
-    if (!convoData.ok) {
-      // Fallback: users.conversations not available (old token without users.conversations:read scope).
-      // Fall through — use empty channels so we fall to configured channels below.
-    }
-
-    const rawChannels = convoData.channels ?? []
-
-    // If users.conversations returned data, use it. Otherwise fall back to configured channels.
-    let conversations: SlackConversation[]
-    let resolvedFromConvo = false
-
-    if (rawChannels.length > 0) {
-      resolvedFromConvo = true
-      // Collect DM user IDs to resolve names
-      const dmUserIds = rawChannels
-        .filter((c) => c.is_im && c.user)
-        .map((c) => c.user!)
-      const users = dmUserIds.length > 0 ? await resolveSlackUsers(token, dmUserIds.slice(0, 30)) : {}
-
-      conversations = rawChannels
-        .filter((c) => c.name !== "slack_app" && c.name !== "slackbot")
-        .map((c) => {
-          const isDm = !!c.is_im
-          const base: SlackConversation = {
-            id: c.id,
-            name: isDm ? (users[c.user ?? ""]?.name ?? c.user ?? "Unknown") : `#${c.name}`,
-            type: c.is_im ? "im" : c.is_mpim ? "mpim" : "channel",
-            unreadCount: c.unread_count ?? 0,
-          }
-          if (isDm && c.user) {
-            base.dmUser = users[c.user]?.name ?? c.user
-            base.dmColor = users[c.user]?.color ?? slackUserColor(c.user)
-          }
-          return base
-        })
-        .filter((c) => c.name)
-    } else {
-      // Fallback: use configured support channels
-      const channelIds = await getSupportChannelIds()
-      const channels: SlackConversation[] = []
-      for (const id of channelIds) {
-        const name = await resolveSlackChannelName(token, id)
-        channels.push({ id, name: `#${name}`, type: "channel", unreadCount: 0 })
-      }
-      conversations = channels
+    // Fallback: use configured support channels (SLACK_SUPPORT_CHANNEL_IDS or Supabase settings)
+    const channelIds = await getSupportChannelIds()
+    const channels: SlackConversation[] = []
+    for (const id of channelIds) {
+      const name = await resolveSlackChannelName(token, id)
+      channels.push({ id, name: `#${name}`, type: "channel", unreadCount: 0 })
     }
 
     return {
       ok: true,
-      conversations,
+      conversations: channels,
       workspaceUrl: auth.url ?? "https://slack.com",
     }
   } catch {
@@ -475,7 +419,7 @@ export async function getConversationMessages(
   }
 }
 
-/** Get unread count summary for the dashboard card. */
+/** Get recent activity summary for the dashboard card. */
 export async function getSlackUnreadSummary(
   agentSlackToken?: string | null
 ): Promise<{ connected: boolean; unreadCount: number; workspaceUrl: string }> {
@@ -490,22 +434,10 @@ export async function getSlackUnreadSummary(
     const auth = (await authRes.json()) as { ok: boolean; url?: string }
     if (!auth.ok) return { connected: false, unreadCount: 0, workspaceUrl: "" }
 
-    const convoRes = await fetch(
-      "https://slack.com/api/users.conversations?types=public_channel,private_channel,im,mpim&limit=200&exclude_archived=true",
-      { headers: { Authorization: `Bearer ${token}` } }
-    )
-    const convoData = (await convoRes.json()) as {
-      ok: boolean
-      channels?: Array<{ unread_count?: number }>
-    }
-    if (!convoData.ok) return { connected: true, unreadCount: 0, workspaceUrl: auth.url ?? "https://slack.com" }
+    const channelIds = await getSupportChannelIds()
+    const messageCount = await countRecentMessages(token, channelIds)
 
-    const totalUnread = (convoData.channels ?? []).reduce(
-      (sum, c) => sum + (c.unread_count ?? 0),
-      0
-    )
-
-    return { connected: true, unreadCount: totalUnread, workspaceUrl: auth.url ?? "https://slack.com" }
+    return { connected: true, unreadCount: messageCount, workspaceUrl: auth.url ?? "https://slack.com" }
   } catch {
     return { connected: false, unreadCount: 0, workspaceUrl: "" }
   }
