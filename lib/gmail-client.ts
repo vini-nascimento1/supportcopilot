@@ -116,7 +116,7 @@ function apiMessageToGmailMessage(msg: GmailApiMessage): GmailMessage {
     subject: getHeader(headers, "Subject"),
     date: msg.internalDate
       ? new Date(Number(msg.internalDate)).toISOString()
-      : (dateHeader || new Date().toISOString()),
+      : (dateHeader || ""),
     messageId: getHeader(headers, "Message-ID"),
     inReplyTo: getHeader(headers, "In-Reply-To") || null,
     references: getHeader(headers, "References") || null,

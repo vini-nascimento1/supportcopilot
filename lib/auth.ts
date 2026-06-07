@@ -92,6 +92,8 @@ export async function getAgentTokens(): Promise<AgentTokens> {
       .from("agents")
       .update({ google_token: sessionGoogleToken })
       .eq("email", email)
+      .then()
+      .catch((e) => console.error("Failed to sync google_token:", e))
   }
 
   return {

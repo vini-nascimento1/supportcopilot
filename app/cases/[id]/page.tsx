@@ -46,7 +46,7 @@ function stripFrPrefix(text: string) {
 }
 
 function buildFallbackDraft(playbook: PlaybookListItem): ResponseItem {
-  const lines = ["Hey! 👋 Thanks for reaching out to Fanvue Support, I'm Vincenzo and I'll do my best to help! 😊"]
+  const lines = ["Hey! 👋 Thanks for reaching out to Fanvue Support, I'm Vinicius and I'll do my best to help! 😊"]
 
   if (playbook.resolution) {
     const steps = parseSteps(playbook.resolution)

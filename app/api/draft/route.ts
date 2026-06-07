@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server"
-import Anthropic from "@anthropic-ai/sdk"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { getSignedInEmail } from "@/lib/auth"
 import { getConversationDetail } from "@/lib/intercom"
 import { getPlaybooksDashboardData, getResponsesForPlaybookIds } from "@/lib/playbooks"
 import type { PlaybookListItem, ResponseItem } from "@/lib/playbooks"
@@ -78,10 +78,22 @@ async function persistDraft(
   conversationId: string,
   customerName: string,
   playbookId: string | null,
-  replyBody: string
+  replyBody: string,
+  email?: string | null
 ): Promise<void> {
   const supabase = getSupabaseAdminClient()
   if (!supabase || !replyBody.trim()) return
+
+  // Resolve agent id from email so RLS policies can enforce case ownership
+  let ownerId: string | undefined
+  if (email) {
+    const { data: agent } = await supabase
+      .from("agents")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle()
+    if (agent) ownerId = agent.id
+  }
 
   const { data: caseRow } = await supabase
     .from("cases")
@@ -91,6 +103,7 @@ async function persistDraft(
         customer_name: customerName,
         playbook_id: playbookId,
         status: "drafted",
+        owner_id: ownerId,
       },
       { onConflict: "intercom_conversation_id" }
     )
@@ -114,10 +127,76 @@ async function persistDraft(
   })
 }
 
+// ── OpenAI-compatible streaming via Verboo router ─────────────────────────
+
+const VERBOO_API_KEY = process.env.VERBOO_API_KEY
+const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
+
+type OpenAIMessage = {
+  role: "system" | "user" | "assistant"
+  content: string
+}
+
+async function* streamChatCompletion(
+  messages: OpenAIMessage[]
+): AsyncGenerator<string> {
+  const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${VERBOO_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "deepseek-chat",
+      max_tokens: 1024,
+      stream: true,
+      messages,
+    }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "unknown error")
+    throw new Error(`AI API error (${res.status}): ${text}`)
+  }
+
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error("No response body from AI API")
+
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || !trimmed.startsWith("data: ")) continue
+      const payload = trimmed.slice(6)
+      if (payload === "[DONE]") return
+
+      try {
+        const parsed = JSON.parse(payload) as {
+          choices?: { delta?: { content?: string } }[]
+        }
+        const content = parsed.choices?.[0]?.delta?.content
+        if (content) yield content
+      } catch {
+        // skip malformed JSON chunks
+      }
+    }
+  }
+}
+
+// ── Route handler ──────────────────────────────────────────────────────────
+
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    return new Response("ANTHROPIC_API_KEY is not configured", { status: 503 })
+  if (!VERBOO_API_KEY) {
+    return new Response("VERBOO_API_KEY is not configured", { status: 503 })
   }
 
   let body: { conversationId?: string; playbookId?: string }
@@ -130,6 +209,12 @@ export async function POST(req: NextRequest) {
   const { conversationId, playbookId } = body
   if (!conversationId) {
     return new Response("conversationId is required", { status: 400 })
+  }
+
+  // Require authenticated session
+  const email = await getSignedInEmail()
+  if (!email) {
+    return new Response("Authentication required", { status: 401 })
   }
 
   const [conversation, playbooksData] = await Promise.all([
@@ -152,36 +237,31 @@ export async function POST(req: NextRequest) {
   const systemPrompt = buildSystemPrompt(playbook, responseTemplates)
   const userMessage = buildUserMessage(conversation)
 
-  const anthropic = new Anthropic({ apiKey })
   const encoder = new TextEncoder()
   let fullText = ""
 
   const readable = new ReadableStream({
     async start(controller) {
       try {
-        const stream = await anthropic.messages.create({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1024,
-          system: systemPrompt,
-          messages: [{ role: "user", content: userMessage }],
-          stream: true,
-        })
+        const messages: OpenAIMessage[] = [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ]
 
-        for await (const event of stream) {
-          if (
-            event.type === "content_block_delta" &&
-            event.delta.type === "text_delta"
-          ) {
-            fullText += event.delta.text
-            controller.enqueue(encoder.encode(event.delta.text))
-          }
+        for await (const chunk of streamChatCompletion(messages)) {
+          fullText += chunk
+          controller.enqueue(encoder.encode(chunk))
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "AI generation failed"
         controller.enqueue(encoder.encode(`[Error: ${msg}]`))
       } finally {
+        try {
+          await persistDraft(conversationId, conversation.customer, playbookId ?? null, fullText, email)
+        } catch (err) {
+          console.error("Failed to persist draft:", err)
+        }
         controller.close()
-        void persistDraft(conversationId, conversation.customer, playbookId ?? null, fullText)
       }
     },
   })

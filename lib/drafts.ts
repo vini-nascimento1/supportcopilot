@@ -1,6 +1,22 @@
 import "server-only"
 
+import { createServerClient } from "@supabase/ssr"
+import { cookies } from "next/headers"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+
+async function getAuthClient() {
+  const cookieStore = await cookies()
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll: () => cookieStore.getAll(),
+        setAll() { /* read-only */ },
+      },
+    }
+  )
+}
 
 export type DraftForConversation = {
   version: number
@@ -48,8 +64,7 @@ export type SavedDraft = {
 }
 
 export async function getSavedDrafts(): Promise<SavedDraft[]> {
-  const supabase = getSupabaseAdminClient()
-  if (!supabase) return []
+  const supabase = await getAuthClient()
 
   const { data } = await supabase
     .from("drafts")

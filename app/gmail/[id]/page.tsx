@@ -14,6 +14,7 @@ import { getGmailThread, markThreadRead } from "@/lib/gmail-client"
 export const dynamic = "force-dynamic"
 
 function formatDate(iso: string): string {
+  if (!iso) return "Unknown date"
   return new Date(iso).toLocaleString("en-GB", {
     day: "numeric",
     month: "short",

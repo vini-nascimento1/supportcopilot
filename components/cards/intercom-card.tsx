@@ -30,9 +30,9 @@ export function IntercomCard({ cases, appId }: { cases: CasesQueueData; appId: s
           <CardDescription className="text-xs">Your case queue will appear here once Intercom is connected.</CardDescription>
         </CardHeader>
         <CardContent className="min-h-0 flex-1 overflow-y-auto pt-0">
-          <Button size="sm" variant="outline" className="w-full" asChild>
-            <Link href="/settings">Connect Intercom</Link>
-          </Button>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Intercom requires <code className="rounded bg-muted px-1">INTERCOM_ACCESS_TOKEN</code> in environment configuration.
+          </p>
         </CardContent>
       </Card>
     )

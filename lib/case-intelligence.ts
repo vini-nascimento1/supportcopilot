@@ -14,14 +14,18 @@ function normalize(value: string) {
 }
 
 const stopwords = new Set([
-  "and",
-  "but",
-  "can",
-  "for",
-  "not",
-  "the",
-  "this",
-  "with",
+  "and", "but", "can", "for", "not", "the", "this", "with",
+  "are", "did", "do", "get", "got", "has", "had", "its",
+  "was", "were", "will", "would", "could", "should",
+  "have", "been", "been", "from", "they", "them",
+  "my", "your", "our", "its", "his", "her",
+  "all", "any", "each", "every", "some", "that", "than",
+  "then", "just", "also", "very", "please", "help",
+  "you", "your", "have", "need", "know", "let", "like",
+  "make", "may", "more", "much", "now", "one", "see",
+  "way", "back", "been", "call", "come", "day", "even",
+  "how", "into", "made", "over", "still", "such",
+  "too", "try", "use", "used", "want",
 ])
 const domainTokens = new Set(["2fa", "aml", "kyc", "otp", "pep", "rfi"])
 
