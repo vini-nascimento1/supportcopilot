@@ -58,17 +58,16 @@ function buildUserMessage(conversation: {
   firstMessage: string
   messages: { role: string; body: string }[]
 }): string {
-  const parts = [`Customer: ${conversation.customer}`, `\nOriginal message:\n${conversation.firstMessage}`]
+  const parts = [`Customer: ${conversation.customer}`]
 
-  const followUps = conversation.messages
-    .filter((m) => m.role === "customer" && m.body.trim())
-    .slice(0, 3)
+  // Include the full conversation thread so the AI has complete context
+  parts.push(`\nConversation thread:`)
+  parts.push(`Customer: ${conversation.firstMessage}`)
 
-  if (followUps.length > 0) {
-    parts.push(`\nFollow-up messages from customer:`)
-    for (const msg of followUps) {
-      parts.push(`- ${msg.body}`)
-    }
+  for (const msg of conversation.messages) {
+    if (!msg.body.trim()) continue
+    const label = msg.role === "admin" ? "Agent" : "Customer"
+    parts.push(`${label}: ${msg.body}`)
   }
 
   parts.push(`\nDraft a reply following the playbook and tone rules above.`)

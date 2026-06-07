@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { SparklesIcon, Loader2Icon, AlertCircleIcon } from "lucide-react"
 
 import {
@@ -20,14 +20,38 @@ interface Props {
   existingDraft: { version: number; replyBody: string } | null
 }
 
+const LOADING_STEPS = [
+  "Reading the conversation thread…",
+  "Browsing internal articles…",
+  "Analyzing the playbook…",
+  "Drafting your reply…",
+]
+
 export function DraftPanel({ conversationId, playbookId, playbookName, existingDraft }: Props) {
   const [draft, setDraft] = useState<{ body: string; loading: boolean; error: string | null }>({
     body: existingDraft?.replyBody ?? "",
     loading: false,
     error: null,
   })
+  const [loadingStep, setLoadingStep] = useState(0)
+  const stepRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const hasExistingDraft = !!existingDraft
+
+  // Cycle through loading steps while generating
+  useEffect(() => {
+    if (!draft.loading) {
+      if (stepRef.current) clearInterval(stepRef.current)
+      return
+    }
+    setLoadingStep(0)
+    stepRef.current = setInterval(() => {
+      setLoadingStep((prev) => (prev + 1) % LOADING_STEPS.length)
+    }, 3000)
+    return () => {
+      if (stepRef.current) clearInterval(stepRef.current)
+    }
+  }, [draft.loading])
 
   async function generateDraft() {
     setDraft({ body: "", loading: true, error: null })
@@ -90,7 +114,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName, existingD
         {draft.loading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2Icon className="size-4 animate-spin" />
-            Generating draft…
+            {LOADING_STEPS[loadingStep]}
           </div>
         ) : draft.error ? (
           <div className="flex flex-col gap-2">
