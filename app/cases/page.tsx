@@ -16,12 +16,16 @@ import {
 import { WorkspaceLayout } from "@/components/workspace-layout"
 import { getOpenCasesQueue } from "@/lib/intercom"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
+import { getAgentProfile } from "@/lib/agent"
 
 export const dynamic = "force-dynamic"
 
 export default async function CasesPage() {
-  const playbooks = await getPlaybooksDashboardData()
-  const cases = await getOpenCasesQueue(playbooks.allRows)
+  const [playbooks, agent] = await Promise.all([
+    getPlaybooksDashboardData(),
+    getAgentProfile(),
+  ])
+  const cases = await getOpenCasesQueue(playbooks.allRows, agent.intercomAdminId)
 
   return (
     <WorkspaceLayout>

@@ -25,6 +25,7 @@ import { DraftPanel } from "@/components/draft-panel"
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
 import { getDraftForConversation } from "@/lib/drafts"
+import { getAgentProfile } from "@/lib/agent"
 import {
   getPlaybooksDashboardData,
   getResponsesForPlaybookIds,
@@ -46,8 +47,8 @@ function stripFrPrefix(text: string) {
   return text.replace(/^FR:\s*/i, "").trim()
 }
 
-function buildFallbackDraft(playbook: PlaybookListItem): ResponseItem {
-  const lines = ["Hey! 👋 Thanks for reaching out to Fanvue Support, I'm Vinicius and I'll do my best to help! 😊"]
+function buildFallbackDraft(playbook: PlaybookListItem, agentName: string): ResponseItem {
+  const lines = [`Hey! 👋 Thanks for reaching out to Fanvue Support, I'm ${agentName} and I'll do my best to help! 😊`]
 
   if (playbook.resolution) {
     const steps = parseSteps(playbook.resolution)
@@ -112,10 +113,11 @@ export default async function CasePage({
 }) {
   const { id } = await params
 
-  const [conversation, playbooksData, existingDraft] = await Promise.all([
+  const [conversation, playbooksData, existingDraft, agentProfile] = await Promise.all([
     getConversationDetail(id),
     getPlaybooksDashboardData(),
     getDraftForConversation(id),
+    getAgentProfile(),
   ])
 
   if (!conversation) {
@@ -243,7 +245,7 @@ export default async function CasePage({
               {matches.map(({ playbook, confidence, trigger }) => {
                 const responses = responseMap.get(playbook.id) ?? []
                 const displayResponses =
-                  responses.length > 0 ? responses : [buildFallbackDraft(playbook)]
+                  responses.length > 0 ? responses : [buildFallbackDraft(playbook, agentProfile.firstName)]
 
                 return (
                   <Card key={playbook.id}>

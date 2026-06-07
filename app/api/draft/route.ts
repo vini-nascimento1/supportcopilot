@@ -5,15 +5,25 @@ import { getConversationDetail } from "@/lib/intercom"
 import { getPlaybooksDashboardData, getResponsesForPlaybookIds } from "@/lib/playbooks"
 import type { PlaybookListItem, ResponseItem } from "@/lib/playbooks"
 
-const AGENT_NAME = "Vinicius"
+async function getAgentName(email: string): Promise<string> {
+  const supabase = getSupabaseAdminClient()
+  if (!supabase) return "the support team"
+  const { data } = await supabase
+    .from("agents")
+    .select("name")
+    .eq("email", email)
+    .maybeSingle()
+  return data?.name?.split(" ")[0] ?? "the support team"
+}
 
 function buildSystemPrompt(
   playbook: PlaybookListItem | undefined,
-  examples: ResponseItem[]
+  examples: ResponseItem[],
+  agentName: string
 ): string {
   const parts: string[] = []
 
-  parts.push(`You are a support copilot for ${AGENT_NAME}, a senior support agent at Fanvue — a creator subscription platform (AI creators and human creators both use it).
+  parts.push(`You are a support copilot for ${agentName}, a senior support agent at Fanvue — a creator subscription platform (AI creators and human creators both use it).
 
 Your task: write a warm, helpful customer-facing reply to the conversation below.
 
@@ -234,7 +244,8 @@ export async function POST(req: NextRequest) {
     ? ((await getResponsesForPlaybookIds([playbookId])).get(playbookId) ?? [])
     : []
 
-  const systemPrompt = buildSystemPrompt(playbook, responseTemplates)
+  const agentName = await getAgentName(email)
+  const systemPrompt = buildSystemPrompt(playbook, responseTemplates, agentName)
   const userMessage = buildUserMessage(conversation)
 
   const encoder = new TextEncoder()
