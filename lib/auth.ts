@@ -88,12 +88,12 @@ export async function getAgentTokens(): Promise<AgentTokens> {
 
   // Sync fresh session token back to DB in the background when it differs.
   if (sessionGoogleToken && adminClient && sessionGoogleToken !== data?.google_token) {
-    void adminClient
-      .from("agents")
-      .update({ google_token: sessionGoogleToken })
-      .eq("email", email)
-      .then()
-      .catch((e) => console.error("Failed to sync google_token:", e))
+    void Promise.resolve(
+      adminClient
+        .from("agents")
+        .update({ google_token: sessionGoogleToken })
+        .eq("email", email)
+    ).catch((e) => console.error("Failed to sync google_token:", e))
   }
 
   return {
