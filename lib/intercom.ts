@@ -6,6 +6,7 @@ import type { PlaybookListItem } from "@/lib/playbooks"
 export type SupportCase = {
   id: string
   customer: string
+  email: string | null
   state: string
   updatedAt: string | null
   snippet: string
@@ -36,6 +37,7 @@ type IntercomConversation = {
   } | null
   source?: {
     body?: string | null
+    author?: { name?: string | null; email?: string | null } | null
   } | null
   contacts?: {
     contacts?: IntercomContact[]
@@ -67,9 +69,21 @@ function getCustomerLabel(conversation: IntercomConversation) {
   return (
     contact?.name ??
     contact?.email ??
+    conversation.source?.author?.name ??
+    conversation.source?.author?.email ??
     conversation.user?.name ??
     conversation.user?.email ??
     "Unknown customer"
+  )
+}
+
+function getCustomerEmail(conversation: IntercomConversation): string | null {
+  const contact = conversation.contacts?.contacts?.[0]
+  return (
+    contact?.email ??
+    conversation.source?.author?.email ??
+    conversation.user?.email ??
+    null
   )
 }
 
@@ -95,6 +109,7 @@ function demoCases(playbooks: PlaybookListItem[]): CasesQueueData {
     {
       id: "demo-otp",
       customer: "Demo creator",
+      email: "creator@demo.com",
       state: "open",
       updatedAt: new Date().toISOString(),
       snippet: "I am not receiving the OTP code for my payout confirmation.",
@@ -102,6 +117,7 @@ function demoCases(playbooks: PlaybookListItem[]): CasesQueueData {
     {
       id: "demo-payout",
       customer: "Demo agency",
+      email: "agency@demo.com",
       state: "open",
       updatedAt: new Date().toISOString(),
       snippet: "The payout says under review and asks for more documents.",
@@ -294,6 +310,7 @@ export async function getOpenCasesQueue(
       return {
         id,
         customer: getCustomerLabel(conversation),
+        email: getCustomerEmail(conversation),
         state: conversation.state ?? (conversation.open ? "open" : "closed"),
         updatedAt: toDate(conversation.updated_at),
         snippet,

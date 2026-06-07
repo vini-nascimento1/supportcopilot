@@ -51,7 +51,7 @@ export function IntercomCard({ cases, appId }: { cases: CasesQueueData; appId: s
             <ConnectedBadge />
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" asChild>
               <a href={inboxLink} target="_blank" rel="noopener noreferrer">
-                Open <ExternalLinkIcon className="size-3" />
+                Open in Intercom <ExternalLinkIcon className="size-3" />
               </a>
             </Button>
           </div>
@@ -78,6 +78,9 @@ export function IntercomCard({ cases, appId }: { cases: CasesQueueData; appId: s
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{row.customer}</p>
+                  {row.email && (
+                    <p className="truncate text-xs text-muted-foreground">{row.email}</p>
+                  )}
                   <p className="truncate text-xs text-muted-foreground">{row.snippet}</p>
                 </div>
                 <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
