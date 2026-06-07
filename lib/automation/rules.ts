@@ -158,13 +158,22 @@ export async function testRule(
   const intercomAdminId = (agent?.intercom_admin_id as string | null | undefined) ?? null
   if (!intercomAdminId) return { scanned: 0, matches: [] }
 
-  const liveConvs = await searchOpenConversationsForAdmin(intercomAdminId)
+  // Cap the dry-run sample so heavy queues don't exceed Vercel's serverless timeout.
+  const DRY_RUN_LIMIT = 200
+  let liveConvs
+  try {
+    liveConvs = await searchOpenConversationsForAdmin(intercomAdminId)
+  } catch (e) {
+    throw new Error(`Intercom unavailable: ${(e as Error).message}`)
+  }
   if (liveConvs.length === 0) return { scanned: 0, matches: [] }
+  if (liveConvs.length > DRY_RUN_LIMIT) liveConvs = liveConvs.slice(0, DRY_RUN_LIMIT)
 
   const convIds = liveConvs.map((c) => c.id)
   const { data: metaRows } = await db
     .from("cases")
     .select("id, intercom_conversation_id, owner_id, priority_hint, auto_tags, playbooks(case_type)")
+    .eq("owner_id", agentId)
     .in("intercom_conversation_id", convIds)
   const metaByConvId = new Map<string, NonNullable<typeof metaRows>[number]>()
   for (const m of metaRows ?? []) {
@@ -175,7 +184,9 @@ export async function testRule(
   const matches: TestMatch[] = []
   for (const conv of liveConvs) {
     const live = sweepConversationToLive(conv)
-    const meta = metaRowToCaseMeta((metaByConvId.get(conv.id) ?? null) as never)
+    const meta = metaRowToCaseMeta(
+      (metaByConvId.get(conv.id) ?? null) as unknown as Parameters<typeof metaRowToCaseMeta>[0]
+    )
     const ctx = buildContext(live, meta, null, nowMs)
     if (!evaluateTree(candidate.conditions, ctx)) continue
     const plan = planCaseActions(

@@ -9,6 +9,7 @@ import "server-only"
 import { createHmac, timingSafeEqual } from "crypto"
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { readCreatorFlags } from "@/lib/intercom"
 import { planCaseActions } from "./engine"
 import { runAction, type ActionResult } from "./actions"
 import { buildContext, type ConversationLive, type CaseMeta } from "./context"
@@ -32,6 +33,7 @@ type IntercomNotification = {
 type IntercomConversationItem = {
   id?: string | number
   state?: string | null
+  open?: boolean | null
   admin_assignee_id?: number | string | null
   updated_at?: number | null
   created_at?: number | null
@@ -55,30 +57,24 @@ type IntercomConversationItem = {
 const unixToIso = (s: number | null | undefined): string | null =>
   typeof s === "number" ? new Date(s * 1000).toISOString() : null
 
-function coerceBool(value: unknown): boolean | null {
-  if (typeof value === "boolean") return value
-  if (typeof value === "string") {
-    const v = value.toLowerCase()
-    if (v === "true" || v === "yes" || v === "1") return true
-    if (v === "false" || v === "no" || v === "0") return false
-  }
-  return null
+function stripHtml(value: string | null | undefined): string | null {
+  if (!value) return null
+  const out = value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
+  return out || null
 }
 
 function itemToConversationLive(item: IntercomConversationItem): ConversationLive {
   const contact = item.contacts?.contacts?.[0]
-  const attrs = contact?.custom_attributes ?? {}
+  const flags = readCreatorFlags(contact?.custom_attributes)
   return {
     intercomConversationId: item.id != null ? String(item.id) : "",
-    intercomState: item.state ?? null,
-    subject: item.source?.subject ?? item.source?.body ?? item.title ?? null,
+    intercomState: item.state ?? (item.open ? "open" : item.open === false ? "closed" : null),
+    subject: stripHtml(item.source?.subject ?? item.source?.body ?? item.title),
     tags: (item.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean),
     customerName:
       contact?.name ?? contact?.email ?? item.source?.author?.name ?? item.source?.author?.email ?? null,
-    isCreator: coerceBool(attrs.is_creator ?? attrs.IsCreator ?? attrs["Is Creator"] ?? attrs.Creator),
-    isAiCreator: coerceBool(
-      attrs.is_ai_creator ?? attrs.IsAICreator ?? attrs["Is AI Creator"] ?? attrs["AI Creator"]
-    ),
+    isCreator: flags.isCreator,
+    isAiCreator: flags.isAiCreator,
     priority: item.priority ?? null,
     createdAt: unixToIso(item.created_at),
     updatedAt: unixToIso(item.updated_at),
@@ -164,11 +160,14 @@ export async function runTriggerForEvent(payload: IntercomNotification, nowMs: n
   const live = itemToConversationLive(item)
   if (!live.intercomConversationId) return { ...out, reason: "no conversation id" }
 
-  // Pull our metadata for this conversation (if any).
+  // Pull OUR metadata for this conversation — scoped to this owner. Without the
+  // owner_id filter, a previous owner's auto_tags / priority_hint would leak into
+  // the new owner's eval after reassignment.
   const { data: metaRow } = await db
     .from("cases")
     .select("id, priority_hint, auto_tags, playbooks(case_type)")
     .eq("intercom_conversation_id", live.intercomConversationId)
+    .eq("owner_id", ownerId)
     .maybeSingle()
   const meta: CaseMeta = {
     caseId: (metaRow?.id as string | undefined) ?? null,
@@ -184,17 +183,23 @@ export async function runTriggerForEvent(payload: IntercomNotification, nowMs: n
   const plan = planCaseActions(rules, ctx)
   if (plan.length === 0) return { ...out, handled: true, reason: "no rules matched" }
 
-  // Lazy-upsert metadata row only when at least one rule fires (gives the
-  // action handlers a case_id to write to without polluting the table with
-  // rows for every Intercom event).
+  // Lazy-upsert the metadata row only when at least one rule fires (avoids
+  // polluting cases with rows for events that never match anything). On
+  // conflict by intercom_conversation_id, re-attribute the row to this owner
+  // and reset rule-set state (auto_tags, priority_hint) — rules are per-agent,
+  // so their side effects must not carry across owners.
   let caseId = meta.caseId
   if (!caseId) {
+    const upsertRow: Record<string, unknown> = {
+      intercom_conversation_id: live.intercomConversationId,
+      owner_id: ownerId,
+      auto_tags: [],
+      priority_hint: null,
+    }
+    if (live.customerName) upsertRow.customer_name = live.customerName
     const { data: upserted, error: upsertErr } = await db
       .from("cases")
-      .upsert(
-        { intercom_conversation_id: live.intercomConversationId, owner_id: ownerId, customer_name: live.customerName },
-        { onConflict: "intercom_conversation_id", ignoreDuplicates: false }
-      )
+      .upsert(upsertRow, { onConflict: "intercom_conversation_id", ignoreDuplicates: false })
       .select("id")
       .maybeSingle()
     if (upsertErr) out.errors.push(`case upsert: ${upsertErr.message}`)

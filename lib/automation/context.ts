@@ -60,7 +60,10 @@ export function buildContext(
     status: conv?.intercomState ?? null,
     subject: conv?.subject ?? null,
     tags: [...(conv?.tags ?? []), ...(meta?.autoTags ?? [])],
+    // priority_hint = our rule-set state. priority = Intercom's native priority
+    // flag (set by admins in the Intercom UI). Both are exposed independently.
     priority_hint: meta?.priorityHint ?? null,
+    priority: conv?.priority ?? null,
     is_creator: conv?.isCreator ?? null,
     is_ai_creator: conv?.isAiCreator ?? null,
     matched_playbook: meta?.matchedPlaybook ?? null,

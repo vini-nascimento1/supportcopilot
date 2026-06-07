@@ -60,6 +60,17 @@ export const FIELDS: FieldDef[] = [
     ],
   },
   {
+    key: "priority",
+    label: "Intercom priority",
+    type: "enum",
+    category: "Conversation",
+    appliesTo: ["trigger", "monitor"],
+    options: [
+      { value: "priority", label: "Priority" },
+      { value: "not_priority", label: "Not priority" },
+    ],
+  },
+  {
     key: "subject",
     label: "Subject / snippet",
     type: "text",

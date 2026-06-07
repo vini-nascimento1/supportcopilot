@@ -44,7 +44,9 @@ type CaseMetaRow = {
   owner_id: string | null
   priority_hint: string | null
   auto_tags: string[] | null
-  playbooks?: { case_type: string | null } | null
+  // PostgREST embeds to-one FKs as an object, but supabase-js generated types
+  // sometimes type it as array — accept both at runtime.
+  playbooks?: { case_type: string | null } | Array<{ case_type: string | null }> | null
 }
 
 function toRule(r: RuleRow): AutomationRule {
@@ -81,11 +83,12 @@ export function metaRowToCaseMeta(row: CaseMetaRow | null): CaseMeta {
   if (!row) {
     return { caseId: null, priorityHint: null, autoTags: [], matchedPlaybook: null }
   }
+  const pb = Array.isArray(row.playbooks) ? row.playbooks[0] : row.playbooks
   return {
     caseId: row.id,
     priorityHint: row.priority_hint,
     autoTags: row.auto_tags ?? [],
-    matchedPlaybook: row.playbooks?.case_type ?? null,
+    matchedPlaybook: pb?.case_type ?? null,
   }
 }
 
@@ -147,11 +150,16 @@ export async function runMonitorSweep(nowMs: number): Promise<SweepSummary> {
     }
     if (liveConvs.length === 0) continue
 
-    // Batch-load DB metadata for these conversations.
+    // Batch-load DB metadata for these conversations — scoped to THIS agent.
+    // Without owner_id filter we'd inherit auto_tags/priority_hint set by another
+    // agent's rules (cross-agent state leakage). When a conv is reassigned in
+    // Intercom, the new owner's sweep gets fresh meta and the lazy-upsert below
+    // re-attributes the row.
     const convIds = liveConvs.map((c) => c.id)
     const { data: metaRows, error: metaErr } = await db
       .from("cases")
       .select("id, intercom_conversation_id, owner_id, priority_hint, auto_tags, playbooks(case_type)")
+      .eq("owner_id", agent.id)
       .in("intercom_conversation_id", convIds)
     if (metaErr) errors.push(`cases meta: ${metaErr.message}`)
     const metaByConvId = new Map<string, CaseMetaRow>()
@@ -169,15 +177,24 @@ export async function runMonitorSweep(nowMs: number): Promise<SweepSummary> {
       const plan = planCaseActions(ownerRules, ctx)
       if (plan.length === 0) continue
 
-      // Lazy-upsert: actions need a case_id. Create the minimal metadata row on first match.
+      // Lazy-upsert: actions need a case_id. Create the metadata row on first match.
+      // On reassignment (existing row with a different owner_id), ON CONFLICT re-
+      // attributes the row to this agent AND resets the rule-set state (auto_tags,
+      // priority_hint) — rules are per-agent (ADR-0007), so their side effects must
+      // not carry across owners. customer_name is preserved if the live payload
+      // dropped it.
       let caseId = meta.caseId
       if (!caseId) {
+        const upsertRow: Record<string, unknown> = {
+          intercom_conversation_id: conv.id,
+          owner_id: agent.id,
+          auto_tags: [],
+          priority_hint: null,
+        }
+        if (conv.customerName) upsertRow.customer_name = conv.customerName
         const { data: created, error: upErr } = await db
           .from("cases")
-          .upsert(
-            { intercom_conversation_id: conv.id, owner_id: agent.id, customer_name: conv.customerName },
-            { onConflict: "intercom_conversation_id" }
-          )
+          .upsert(upsertRow, { onConflict: "intercom_conversation_id" })
           .select("id")
           .maybeSingle()
         if (upErr) {
