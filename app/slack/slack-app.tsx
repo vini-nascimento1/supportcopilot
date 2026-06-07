@@ -26,14 +26,64 @@ import { getMessagePermalink, parseSlackEmojis } from "@/lib/slack-utils"
 
 // ── Helpers ────────────────────────────────────────────────────
 
-function parseSlackText(text: string): string {
-  return parseSlackEmojis(text)
-    .replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, "$2")
-    .replace(/<(https?:\/\/[^>]+)>/g, "$1")
-    .replace(/<@[A-Z0-9]+\|([^>]+)>/g, "@$1")
-    .replace(/<@([A-Z0-9]+)>/g, "@$1")
-    .replace(/<#[A-Z0-9]+\|([^>]+)>/g, "#$1")
+/** HTML-escape a string so it can be safely used with dangerouslySetInnerHTML. */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
+/** Convert Slack text to HTML: emojis, links, mailto, bold/italic/strikethrough. */
+function slackTextToHtml(text: string): string {
+  return escapeHtml(parseSlackEmojis(text))
+    // Slack link format <url|label>
+    .replace(/&lt;(https?:\/\/[^|&]+)\|([^&]+)&gt;/g, '<a href="$1" target="_blank" rel="noopener noreferrer" class="underline text-primary">$2</a>')
+    // Slack link format <url>
+    .replace(/&lt;(https?:\/\/[^&]+)&gt;/g, '<a href="$1" target="_blank" rel="noopener noreferrer" class="underline text-primary">$1</a>')
+    // Slack mailto <mailto:email|label>
+    .replace(/&lt;mailto:([^|&]+)\|([^&]+)&gt;/g, '<a href="mailto:$1" class="underline text-primary">$2</a>')
+    // Slack user mention <@USER|name>
+    .replace(/&lt;@([A-Z0-9]+)\|([^&]+)&gt;/g, '<strong class="text-foreground">@$2</strong>')
+    .replace(/&lt;@([A-Z0-9]+)&gt;/g, '<strong class="text-foreground">@$1</strong>')
+    // Slack channel mention <#CHANNEL|name>
+    .replace(/&lt;#([A-Z0-9]+)\|([^&]+)&gt;/g, '<strong class="text-foreground">#$2</strong>')
+    // Slack bold *text* (but not emoji shortcodes like :heart_hands:)
+    .replace(/\*([^*]+)\*/g, '<strong>$1</strong>')
+    // Slack strikethrough ~text~
+    .replace(/~([^~]+)~/g, '<s>$1</s>')
+    // Slack italic _text_ (only single _, not __like_this_)
+    .replace(/(?<![_:])\_([^_\s][^_]*[^_\s])\_(?![_:])/g, '<em>$1</em>')
+    // plain text URLs that aren't already linked
+    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" class="underline text-primary">$1</a>')
     .trim()
+}
+
+/** Message text component with expand/collapse for long content. */
+function SlackMessageText({ text, simple, className }: {
+  text: string; simple?: boolean; className?: string
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const html = slackTextToHtml(text)
+  const isLong = text.length > 250 || text.split("\n").length > 6
+
+  return (
+    <div>
+      <div
+        className={`whitespace-pre-wrap break-words text-sm leading-snug text-foreground ${className ?? ""} ${
+          !simple && !expanded && isLong ? "line-clamp-6" : ""
+        }`}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      {!simple && isLong && (
+        <button onClick={() => setExpanded(!expanded)}
+          className="mt-0.5 text-xs font-medium text-primary transition-colors hover:text-primary/80">
+          {expanded ? "Show less" : `Show more (${text.length} chars)`}
+        </button>
+      )}
+    </div>
+  )
 }
 
 function relativeTime(ts: string | number): string {
@@ -178,9 +228,7 @@ function ThreadRepliesView({ replies, workspaceUrl, channelId }: {
               <span className="text-xs font-semibold leading-tight">{reply.userName}</span>
               <span className="text-[10px] text-muted-foreground">{relativeTime(reply.ts)}</span>
             </div>
-            <p className="whitespace-pre-wrap break-words text-xs leading-snug text-foreground/90">
-              {parseSlackText(reply.text)}
-            </p>
+            <SlackMessageText text={reply.text} className="text-xs text-foreground/90" />
           </div>
           <a href={getMessagePermalink(workspaceUrl, channelId, reply.id)}
             target="_blank" rel="noopener noreferrer"
@@ -225,9 +273,7 @@ function SlackMessageRow({ msg, channelId, workspaceUrl, prevMsg, threadReplies,
       <div className="group flex items-start gap-2 px-4 py-0.5 hover:bg-muted/30">
         <div className="w-7 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="whitespace-pre-wrap break-words text-sm leading-snug text-foreground">
-            {parseSlackText(msg.text)}
-          </p>
+          <SlackMessageText text={msg.text} />
           {msg.reactions && msg.reactions.length > 0 && (
             <ReactionsBar reactions={msg.reactions} channelId={channelId}
               timestamp={msg.ts} onReacted={refreshMessages} />
@@ -264,9 +310,7 @@ function SlackMessageRow({ msg, channelId, workspaceUrl, prevMsg, threadReplies,
             <span className="text-sm font-semibold leading-tight">{msg.userName}</span>
             <span className="text-[10px] text-muted-foreground">{relativeTime(msg.ts)}</span>
           </div>
-          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-snug text-foreground">
-            {parseSlackText(msg.text)}
-          </p>
+          <SlackMessageText text={msg.text} />
           {msg.reactions && msg.reactions.length > 0 && (
             <ReactionsBar reactions={msg.reactions} channelId={channelId}
               timestamp={msg.ts} onReacted={refreshMessages} />
@@ -638,9 +682,9 @@ export function SlackApp() {
                             #{r.channelName}
                           </span>
                         </div>
-                        <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-sm leading-snug text-muted-foreground">
-                          {parseSlackText(r.text)}
-                        </p>
+                        <div className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">
+                          <SlackMessageText text={r.text} simple />
+                        </div>
                       </div>
                       <a href={r.permalink} target="_blank" rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
