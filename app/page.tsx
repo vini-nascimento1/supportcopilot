@@ -5,7 +5,7 @@ import { WorkspaceLayout } from "@/components/workspace-layout"
 import { DashboardGrid } from "@/components/dashboard-grid"
 import { CalendarCard } from "@/components/cards/calendar-card"
 import { IntercomCardLive } from "@/components/cards/intercom-card-live"
-import { GmailCard } from "@/components/cards/gmail-card"
+import { GmailCardLive } from "@/components/cards/gmail-card-live"
 import { NotionCard } from "@/components/cards/notion-card"
 import { SlackMiniCard } from "@/components/cards/slack-mini-card"
 import { getOpenCasesQueue } from "@/lib/intercom"
@@ -74,7 +74,7 @@ export default async function DashboardPage({
         <DashboardGrid
           calendarCard={<CalendarCard gcal={gcal} nowIso={nowIso} range={range} />}
           intercomCard={<IntercomCardLive initial={cases} appId={appId} />}
-          gmailCard={<GmailCard gmail={gmail} />}
+          gmailCard={<GmailCardLive initial={gmail} />}
           slackCard={<SlackMiniCard slack={slack} />}
           notionCard={<NotionCard />}
         />
