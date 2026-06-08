@@ -588,11 +588,12 @@ export async function searchMetricsForAdmin(
     if (!response.ok) throw new Error(`Intercom search ${response.status}`)
 
     const payload = (await response.json()) as {
+      conversations?: IntercomSearchConversation[]
       data?: IntercomSearchConversation[]
       pages?: { next?: { starting_after: string } | null }
     }
 
-    const convs = payload.data ?? []
+    const convs = payload.conversations ?? payload.data ?? []
     total += convs.length
 
     for (const c of convs) {
