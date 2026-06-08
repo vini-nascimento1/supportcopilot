@@ -109,8 +109,33 @@ export async function updateRule(
   if (patch.priority !== undefined) row.priority = patch.priority
   if (patch.conditions !== undefined) row.conditions = patch.conditions
   if (patch.actions !== undefined) row.actions = patch.actions
-  if (patch.sweepEveryMins !== undefined) row.sweep_every_mins = patch.sweepEveryMins
-  if (patch.onEvents !== undefined) row.on_events = patch.onEvents
+
+  // If onEvents or sweepEveryMins are being patched, we need the rule's kind
+  // to apply the same normalisation that toRow() does (e.g. monitor → on_events
+  // must be null, trigger → sweep_every_mins must be null).
+  if (patch.onEvents !== undefined || patch.sweepEveryMins !== undefined) {
+    const { data: current } = await db
+      .from("automation_rules")
+      .select("kind")
+      .eq("id", id)
+      .eq("owner_id", agentId)
+      .maybeSingle()
+    if (current) {
+      const isMonitor = current.kind === "monitor"
+      if (patch.sweepEveryMins !== undefined) {
+        row.sweep_every_mins = isMonitor ? patch.sweepEveryMins ?? 5 : null
+      }
+      if (patch.onEvents !== undefined) {
+        row.on_events = isMonitor
+          ? null
+          : patch.onEvents && patch.onEvents.length
+            ? patch.onEvents
+            : ["conversation.created", "conversation.updated"]
+      }
+    }
+    // If the row doesn't exist (shouldn't happen), fall through — the
+    // .update() will 0-row anyway and throw via the Supabase client.
+  }
 
   const { data, error } = await db
     .from("automation_rules")

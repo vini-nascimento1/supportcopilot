@@ -49,6 +49,13 @@ const intercomToken = process.env.INTERCOM_ACCESS_TOKEN
 const intercomAdminId = process.env.INTERCOM_ADMIN_ID
 const intercomAppId = process.env.INTERCOM_APP_ID
 
+/** Fetch wrapper with a 15-second timeout to prevent stalled handlers. */
+function fetchIntercom(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15_000)
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
 function stripHtml(value: string | null | undefined) {
   return (value ?? "")
     .replace(/<[^>]*>/g, " ")
@@ -189,7 +196,7 @@ export async function getConversationDetail(
 ): Promise<ConversationDetail | null> {
   if (!intercomToken) return null
 
-  const response = await fetch(`https://api.intercom.io/conversations/${id}`, {
+  const response = await fetchIntercom(`https://api.intercom.io/conversations/${id}`, {
     headers: {
       Authorization: `Bearer ${intercomToken}`,
       "Intercom-Version": "2.11",
@@ -266,7 +273,7 @@ export async function getOpenCasesQueue(
       (body.pagination as Record<string, unknown>).starting_after = startingAfter
     }
 
-    const response = await fetch("https://api.intercom.io/conversations/search", {
+    const response = await fetchIntercom("https://api.intercom.io/conversations/search", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${intercomToken}`,
@@ -420,7 +427,7 @@ function toSweepConversation(c: IntercomSearchConversation): {
 
 async function fetchContactAttributes(contactId: string): Promise<Record<string, unknown> | null> {
   if (!intercomToken) return null
-  const res = await fetch(`https://api.intercom.io/contacts/${contactId}`, {
+  const res = await fetchIntercom(`https://api.intercom.io/contacts/${contactId}`, {
     headers: {
       Authorization: `Bearer ${intercomToken}`,
       "Intercom-Version": "2.11",
@@ -494,7 +501,7 @@ export async function searchOpenConversationsForAdmin(adminId?: string): Promise
       pagination: { per_page: 150, ...(startingAfter ? { starting_after: startingAfter } : {}) },
     }
 
-    const response = await fetch("https://api.intercom.io/conversations/search", {
+    const response = await fetchIntercom("https://api.intercom.io/conversations/search", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${intercomToken}`,
@@ -536,7 +543,7 @@ export type IntercomAdmin = {
 export async function listIntercomAdmins(): Promise<IntercomAdmin[]> {
   if (!intercomToken) return []
   try {
-    const res = await fetch("https://api.intercom.io/admins", {
+    const res = await fetchIntercom("https://api.intercom.io/admins", {
       headers: { Authorization: `Bearer ${intercomToken}` },
       next: { revalidate: 60 },
     })

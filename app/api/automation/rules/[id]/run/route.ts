@@ -29,6 +29,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       .from("automation_rules")
       .select("*")
       .eq("id", id)
+      .eq("owner_id", agentId) // defense-in-depth: only own rules
       .maybeSingle()
 
     if (fetchErr) return NextResponse.json({ error: `DB error: ${fetchErr.message}` }, { status: 500 })

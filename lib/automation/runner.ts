@@ -73,15 +73,6 @@ function toRule(r: RuleRow): AutomationRule {
   }
 }
 
-/** A rule is "agent-scoped" if it references `teammate` with a scoping operator
- *  (is, is_not, contains, etc.).  `is_empty` / `not_empty` are non-scoping —
- *  they need the full queue to find unassigned or assigned conversations. */
-export function hasTeammateCondition(rule: AutomationRule): boolean {
-  return rule.conditions.groups.some((g) =>
-    g.conditions.some((c) => c.field === "teammate" && c.op !== "is_empty" && c.op !== "not_empty")
-  )
-}
-
 export function sweepConversationToLive(c: SweepConversation): ConversationLive {
   return {
     intercomConversationId: c.id,
