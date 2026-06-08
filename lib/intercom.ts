@@ -533,6 +533,8 @@ export type AgentMetrics = {
   perDayConversations: number | null
   /** Average number of CSAT ratings per day. */
   perDayCsat: number | null
+  /** Number of working days in the period (0=Sun..6=Sat). Set by API route (not by searchMetricsForAdmin). */
+  workingDays?: number | null
 }
 
 type MetricsWindowRaw = {

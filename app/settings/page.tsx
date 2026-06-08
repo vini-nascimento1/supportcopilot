@@ -32,7 +32,7 @@ async function getAgentRow(email: string) {
   if (!supabase) return null
   const { data } = await supabase
     .from("agents")
-    .select("id, name, email, timezone, intercom_admin_id, slack_token, notion_token")
+    .select("id, name, email, timezone, intercom_admin_id, slack_token, notion_token, working_days")
     .eq("email", email)
     .maybeSingle()
   return data
@@ -50,6 +50,20 @@ async function updateProfile(formData: FormData) {
       .from("agents")
       .update({ name: name || null, timezone: timezone || null })
       .eq("email", email)
+  }
+  revalidatePath("/settings")
+}
+
+async function updateWorkingDays(formData: FormData) {
+  "use server"
+  const email = formData.get("email") as string
+  const days: number[] = []
+  for (let d = 0; d <= 6; d++) {
+    if (formData.get(`day_${d}`) === "on") days.push(d)
+  }
+  const supabase = getSupabaseAdminClient()
+  if (supabase && email) {
+    await supabase.from("agents").update({ working_days: days.length > 0 ? days : null }).eq("email", email)
   }
   revalidatePath("/settings")
 }
@@ -229,6 +243,43 @@ export default async function SettingsPage({
 
               <div className="flex justify-end">
                 <Button type="submit" size="sm">Save changes</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Working days */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Working days</CardTitle>
+            <CardDescription>
+              Select the days you work. These are used to calculate per-day averages in Metrics.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form action={updateWorkingDays} className="flex flex-col gap-4">
+              <input type="hidden" name="email" value={email ?? ""} />
+              <div className="flex flex-wrap gap-2">
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label, d) => {
+                  const wd = (agent?.working_days ?? [1, 2, 3, 4, 5]) as number[]
+                  const checked = wd.includes(d)
+                  return (
+                    <label
+                      key={d}
+                      className={`flex cursor-pointer flex-col items-center gap-1 rounded-md border px-3 py-2 text-xs transition-colors ${
+                        checked
+                          ? "border-primary bg-primary/10 text-primary font-medium"
+                          : "border-muted-foreground/20 text-muted-foreground hover:border-muted-foreground/40"
+                      }`}
+                    >
+                      <input type="checkbox" name={`day_${d}`} defaultChecked={checked} className="sr-only" />
+                      {label}
+                    </label>
+                  )
+                })}
+              </div>
+              <div className="flex justify-end">
+                <Button type="submit" size="sm">Save</Button>
               </div>
             </form>
           </CardContent>

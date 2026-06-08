@@ -158,7 +158,7 @@ export default function MetricsClient() {
                   </CardHeader>
                   <CardContent>
                     <p className="text-3xl font-bold">{fmtPct(metrics.totalConversations)}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{fmtPct(metrics.perDayConversations ?? 0)} / day · {metrics.periodDays} days</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{fmtPct(metrics.perDayConversations ?? 0)} / work day · {metrics.workingDays ?? metrics.periodDays} working days</p>
                   </CardContent>
                 </Card>
 

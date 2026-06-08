@@ -41,9 +41,19 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Date range too large (max 365 days)" }, { status: 400 })
   }
 
-  const { data: agent } = await db.from("agents").select("intercom_admin_id").eq("id", agentId).maybeSingle()
+  const { data: agent } = await db.from("agents").select("intercom_admin_id, working_days").eq("id", agentId).maybeSingle()
   const adminId = agent?.intercom_admin_id as string | null | undefined
   if (!adminId) return NextResponse.json({ error: "No Intercom admin ID configured" }, { status: 400 })
+
+  // Count working days in the date range.
+  const wd = (agent?.working_days ?? [1, 2, 3, 4, 5]) as number[]
+  const startD = new Date(startTs * 1000)
+  const endD = new Date(endTs * 1000)
+  let workingDayCount = 0
+  for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+    if (wd.includes(d.getDay())) workingDayCount++
+  }
+  workingDayCount = Math.max(workingDayCount, 1)
 
   // Normalize to dates for cache key.
   const startDate = toDateStr(startTs)
@@ -69,17 +79,25 @@ export async function GET(req: Request) {
   try {
     const metrics = await searchMetricsForAdmin(adminId, startTs, endTs)
 
+    // Override per-day calculations with working days instead of calendar days.
+    const result = {
+      ...metrics,
+      workingDays: workingDayCount,
+      perDayConversations: metrics.totalConversations > 0 ? Math.round(metrics.totalConversations / workingDayCount) : null,
+      perDayCsat: (metrics.csatCount ?? 0) > 0 ? Math.round(((metrics.csatCount ?? 0) / workingDayCount) * 10) / 10 : null,
+    }
+
     await db.from("metrics_cache").upsert(
       {
         agent_id: agentId,
         start_date: startDate,
         end_date: endDate,
-        data: metrics as Record<string, unknown>,
+        data: result as Record<string, unknown>,
       },
       { onConflict: "agent_id,start_date,end_date", ignoreDuplicates: false }
     )
 
-    return NextResponse.json(metrics)
+    return NextResponse.json(result)
   } catch (e) {
     // If Intercom fails but we have stale cache, serve it as fallback.
     if (cached) {
