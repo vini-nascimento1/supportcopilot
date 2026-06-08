@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { SparklesIcon, Loader2Icon, AlertCircleIcon } from "lucide-react"
+import { SparklesIcon, Loader2Icon, AlertCircleIcon, SendIcon, CheckIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import {
   Card,
@@ -34,6 +35,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName }: Props) 
     error: null,
   })
   const [loadingStep, setLoadingStep] = useState(0)
+  const [sending, setSending] = useState(false)
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const previousBodyRef = useRef<string>("")
 
@@ -92,6 +94,32 @@ export function DraftPanel({ conversationId, playbookId, playbookName }: Props) 
     }
   }
 
+  async function handleSend() {
+    if (!draft.body) return
+    if (!confirm("Send this AI draft as a reply in Intercom?")) return
+
+    setSending(true)
+    try {
+      const res = await fetch("/api/draft/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId, body: draft.body }),
+      })
+
+      if (!res.ok) {
+        const text = await res.text()
+        toast.error(text || `Failed to send (${res.status})`)
+        return
+      }
+
+      toast.success("Reply sent to Intercom ✅")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Network error")
+    } finally {
+      setSending(false)
+    }
+  }
+
   return (
     <Card className="border-primary/20 bg-primary/5">
       <CardHeader className="pb-2">
@@ -137,11 +165,23 @@ export function DraftPanel({ conversationId, playbookId, playbookName }: Props) 
                   Regenerate
                 </button>
                 <CopyButton text={draft.body} htmlText={mdToHtml(draft.body)} />
+                <button
+                  onClick={handleSend}
+                  disabled={sending}
+                  className="flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {sending ? (
+                    <Loader2Icon className="size-3 animate-spin" />
+                  ) : (
+                    <SendIcon className="size-3" />
+                  )}
+                  {sending ? "Sending…" : "Send"}
+                </button>
               </div>
             </div>
             <MarkdownPreview content={draft.body} />
             <p className="text-xs text-muted-foreground">
-              Copy into Intercom, review, then send.
+              Review the draft, then copy or send directly to Intercom.
             </p>
           </div>
         ) : (
