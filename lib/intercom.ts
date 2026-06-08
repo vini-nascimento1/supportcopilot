@@ -524,3 +524,26 @@ export async function searchOpenConversationsForAdmin(adminId?: string): Promise
   await enrichCreatorFlags(out, contactIds)
   return out
 }
+
+// ── Intercom Admin listing ──────────────────────────────────────────────────
+
+export type IntercomAdmin = {
+  id: string
+  name: string
+  email: string | null
+}
+
+export async function listIntercomAdmins(): Promise<IntercomAdmin[]> {
+  if (!intercomToken) return []
+  try {
+    const res = await fetch("https://api.intercom.io/admins", {
+      headers: { Authorization: `Bearer ${intercomToken}` },
+      next: { revalidate: 60 },
+    })
+    if (!res.ok) return []
+    const data = (await res.json()) as { admins?: Array<{ id: string; name: string; email: string | null }> }
+    return (data.admins ?? []).map((a) => ({ id: a.id, name: a.name, email: a.email }))
+  } catch {
+    return []
+  }
+}
