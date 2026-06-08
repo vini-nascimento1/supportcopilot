@@ -23,6 +23,8 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { SlackConversation, SlackMessage, SlackThreadReply, SlackReaction } from "@/lib/slack"
 import { getMessagePermalink, parseSlackEmojis } from "@/lib/slack-utils"
+import type { EmojiMap } from "@/lib/slack-utils"
+import { useSlackEmojis } from "@/lib/use-slack-emoji"
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -36,8 +38,8 @@ function escapeHtml(text: string): string {
 }
 
 /** Convert Slack text to HTML: emojis, links, mailto, bold/italic/strikethrough. */
-function slackTextToHtml(text: string): string {
-  return escapeHtml(parseSlackEmojis(text))
+function slackTextToHtml(text: string, emojiMap?: EmojiMap): string {
+  return parseSlackEmojis(escapeHtml(text), emojiMap)
     // Slack link format <url|label>
     .replace(/&lt;(https?:\/\/[^|&]+)\|([^&]+)&gt;/g, '<a href="$1" target="_blank" rel="noopener noreferrer" class="underline text-primary">$2</a>')
     // Slack link format <url>
@@ -61,11 +63,11 @@ function slackTextToHtml(text: string): string {
 }
 
 /** Message text component with expand/collapse for long content. */
-function SlackMessageText({ text, simple, className }: {
-  text: string; simple?: boolean; className?: string
+function SlackMessageText({ text, simple, className, emojiMap }: {
+  text: string; simple?: boolean; className?: string; emojiMap?: EmojiMap
 }) {
   const [expanded, setExpanded] = useState(false)
-  const html = slackTextToHtml(text)
+  const html = slackTextToHtml(text, emojiMap)
   const isLong = text.length > 250 || text.split("\n").length > 6
 
   return (
@@ -124,9 +126,9 @@ const QUICK_REACTIONS = [
 
 // ── Reaction Picker ────────────────────────────────────────────
 
-function ReactionPicker({ onSelect, onClose, channelId, timestamp }: {
+function ReactionPicker({ onSelect, onClose, channelId, timestamp, emojiMap }: {
   onSelect: (emoji: string) => void; onClose: () => void
-  channelId: string; timestamp: string
+  channelId: string; timestamp: string; emojiMap?: EmojiMap
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [reacting, setReacting] = useState<string | null>(null)
@@ -161,7 +163,7 @@ function ReactionPicker({ onSelect, onClose, channelId, timestamp }: {
           }}
           disabled={reacting !== null}
           className="flex size-7 items-center justify-center rounded-md text-base transition-colors hover:bg-muted disabled:opacity-30">
-          {parseSlackEmojis(`:${emoji}:`)}
+          {parseSlackEmojis(`:${emoji}:`, emojiMap)}
         </button>
       ))}
     </div>
@@ -170,9 +172,9 @@ function ReactionPicker({ onSelect, onClose, channelId, timestamp }: {
 
 // ── Reactions Display ──────────────────────────────────────────
 
-function ReactionsBar({ reactions, channelId, timestamp, onReacted }: {
+function ReactionsBar({ reactions, channelId, timestamp, onReacted, emojiMap }: {
   reactions: SlackReaction[]; channelId: string; timestamp: string
-  onReacted: () => void
+  onReacted: () => void; emojiMap?: EmojiMap
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
 
@@ -190,13 +192,13 @@ function ReactionsBar({ reactions, channelId, timestamp, onReacted }: {
           onReacted()
         }}
           className="flex items-center gap-0.5 rounded-full border bg-muted/30 px-1.5 py-0.5 text-[10px] transition-colors hover:bg-muted">
-          <span className="text-xs">{parseSlackEmojis(`:${r.name}:`)}</span>
+          <span className="text-xs">{parseSlackEmojis(`:${r.name}:`, emojiMap)}</span>
           <span className="text-muted-foreground">{r.count}</span>
         </button>
       ))}
       {pickerOpen ? (
         <ReactionPicker
-          channelId={channelId} timestamp={timestamp}
+          channelId={channelId} timestamp={timestamp} emojiMap={emojiMap}
           onSelect={() => { setPickerOpen(false); onReacted() }}
           onClose={() => setPickerOpen(false)} />
       ) : (
@@ -211,8 +213,8 @@ function ReactionsBar({ reactions, channelId, timestamp, onReacted }: {
 
 // ── Thread Replies ─────────────────────────────────────────────
 
-function ThreadRepliesView({ replies, workspaceUrl, channelId }: {
-  replies: SlackThreadReply[]; workspaceUrl: string; channelId: string
+function ThreadRepliesView({ replies, workspaceUrl, channelId, emojiMap }: {
+  replies: SlackThreadReply[]; workspaceUrl: string; channelId: string; emojiMap?: EmojiMap
 }) {
   if (replies.length === 0) return null
   return (
@@ -228,7 +230,7 @@ function ThreadRepliesView({ replies, workspaceUrl, channelId }: {
               <span className="text-xs font-semibold leading-tight">{reply.userName}</span>
               <span className="text-[10px] text-muted-foreground">{relativeTime(reply.ts)}</span>
             </div>
-            <SlackMessageText text={reply.text} className="text-xs text-foreground/90" />
+            <SlackMessageText text={reply.text} emojiMap={emojiMap} className="text-xs text-foreground/90" />
           </div>
           <a href={getMessagePermalink(workspaceUrl, channelId, reply.id)}
             target="_blank" rel="noopener noreferrer"
@@ -244,11 +246,11 @@ function ThreadRepliesView({ replies, workspaceUrl, channelId }: {
 
 // ── Message ────────────────────────────────────────────────────
 
-function SlackMessageRow({ msg, channelId, workspaceUrl, prevMsg, threadReplies, threadLoading, threadExpanded, onToggleThread, onReply, refreshMessages }: {
+function SlackMessageRow({ msg, channelId, workspaceUrl, prevMsg, threadReplies, threadLoading, threadExpanded, onToggleThread, onReply, refreshMessages, emojiMap }: {
   msg: SlackMessage; channelId: string; workspaceUrl: string; prevMsg?: SlackMessage
   threadReplies: SlackThreadReply[] | null; threadLoading: boolean; threadExpanded: boolean
   onToggleThread: () => void; onReply?: (text: string, threadTs: string) => void
-  refreshMessages: () => void
+  refreshMessages: () => void; emojiMap?: EmojiMap
 }) {
   const [replyText, setReplyText] = useState("")
   const [replying, setReplying] = useState(false)
@@ -273,10 +275,10 @@ function SlackMessageRow({ msg, channelId, workspaceUrl, prevMsg, threadReplies,
       <div className="group flex items-start gap-2 px-4 py-0.5 hover:bg-muted/30">
         <div className="w-7 shrink-0" />
         <div className="min-w-0 flex-1">
-          <SlackMessageText text={msg.text} />
+          <SlackMessageText text={msg.text} emojiMap={emojiMap} />
           {msg.reactions && msg.reactions.length > 0 && (
             <ReactionsBar reactions={msg.reactions} channelId={channelId}
-              timestamp={msg.ts} onReacted={refreshMessages} />
+              timestamp={msg.ts} onReacted={refreshMessages} emojiMap={emojiMap} />
           )}
         </div>
         <div className="mt-0.5 flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
@@ -310,10 +312,10 @@ function SlackMessageRow({ msg, channelId, workspaceUrl, prevMsg, threadReplies,
             <span className="text-sm font-semibold leading-tight">{msg.userName}</span>
             <span className="text-[10px] text-muted-foreground">{relativeTime(msg.ts)}</span>
           </div>
-          <SlackMessageText text={msg.text} />
+          <SlackMessageText text={msg.text} emojiMap={emojiMap} />
           {msg.reactions && msg.reactions.length > 0 && (
             <ReactionsBar reactions={msg.reactions} channelId={channelId}
-              timestamp={msg.ts} onReacted={refreshMessages} />
+              timestamp={msg.ts} onReacted={refreshMessages} emojiMap={emojiMap} />
           )}
           {msg.threadCount && msg.threadCount > 0 && !isThreadReply && (
             <button onClick={onToggleThread}
@@ -323,7 +325,7 @@ function SlackMessageRow({ msg, channelId, workspaceUrl, prevMsg, threadReplies,
             </button>
           )}
           {threadExpanded && threadReplies && (
-            <ThreadRepliesView replies={threadReplies} workspaceUrl={workspaceUrl} channelId={channelId} />
+            <ThreadRepliesView replies={threadReplies} workspaceUrl={workspaceUrl} channelId={channelId} emojiMap={emojiMap} />
           )}
           {threadExpanded && (
             <form onSubmit={handleReply} className="ml-9 mt-1 flex items-center gap-1.5 pr-2">
@@ -406,6 +408,7 @@ function ConversationItem({ conv, active, onSelect }: {
 // ── Main App ───────────────────────────────────────────────────
 
 export function SlackApp() {
+  const { emojiMap } = useSlackEmojis()
   const [conversations, setConversations] = useState<SlackConversation[]>([])
   const [workspaceUrl, setWorkspaceUrl] = useState("https://slack.com")
   const [loading, setLoading] = useState(true)
@@ -683,7 +686,7 @@ export function SlackApp() {
                           </span>
                         </div>
                         <div className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">
-                          <SlackMessageText text={r.text} simple />
+                          <SlackMessageText text={r.text} emojiMap={emojiMap} simple />
                         </div>
                       </div>
                       <a href={r.permalink} target="_blank" rel="noopener noreferrer"
@@ -739,6 +742,7 @@ export function SlackApp() {
                       threadExpanded={!!threadExpanded[msg.id]}
                       onToggleThread={() => handleToggleThread(msg.id, activeChannelId, msg.threadTs ?? msg.ts)}
                       refreshMessages={refreshMessages}
+                      emojiMap={emojiMap}
                       onReply={async (text, threadTs) => {
                         const res = await fetch("/api/slack/send", {
                           method: "POST",
