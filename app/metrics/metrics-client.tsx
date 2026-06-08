@@ -128,6 +128,29 @@ export default function MetricsClient() {
             {loading ? "Loading…" : "Update"}
           </Button>
 
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            onClick={() => {
+              const startTs = Math.floor(startDate.getTime() / 1000)
+              const endTs = Math.floor(endDate.getTime() / 1000) + 86_400
+              setLoading(true)
+              setError(null)
+              fetch(`/api/metrics?start=${startTs}&end=${endTs}&refresh=1`)
+                .then((r) => r.json())
+                .then((data) => {
+                  if (data.error) { setError(data.error); setMetrics(null) }
+                  else { setMetrics(data) }
+                })
+                .catch((e) => { setError(e instanceof Error ? e.message : "Network error"); setMetrics(null) })
+                .finally(() => setLoading(false))
+            }}
+            disabled={loading}
+          >
+            Refresh from Intercom
+          </Button>
+
           {metrics && (
             <Badge variant="outline" className="text-xs">
               {metrics.periodDays} days

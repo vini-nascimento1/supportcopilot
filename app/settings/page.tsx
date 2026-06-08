@@ -12,18 +12,11 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { getSignedInEmail } from "@/lib/auth"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { SettingsForm } from "./settings-form"
 
 export const dynamic = "force-dynamic"
 
@@ -36,36 +29,6 @@ async function getAgentRow(email: string) {
     .eq("email", email)
     .maybeSingle()
   return data
-}
-
-async function updateProfile(formData: FormData) {
-  "use server"
-  const email = formData.get("email") as string
-  const name = (formData.get("name") as string).trim()
-  const timezone = (formData.get("timezone") as string).trim()
-
-  const supabase = getSupabaseAdminClient()
-  if (supabase && email) {
-    await supabase
-      .from("agents")
-      .update({ name: name || null, timezone: timezone || null })
-      .eq("email", email)
-  }
-  revalidatePath("/settings")
-}
-
-async function updateWorkingDays(formData: FormData) {
-  "use server"
-  const email = formData.get("email") as string
-  const days: number[] = []
-  for (let d = 0; d <= 6; d++) {
-    if (formData.get(`day_${d}`) === "on") days.push(d)
-  }
-  const supabase = getSupabaseAdminClient()
-  if (supabase && email) {
-    await supabase.from("agents").update({ working_days: days.length > 0 ? days : null }).eq("email", email)
-  }
-  revalidatePath("/settings")
 }
 
 async function disconnectIntegration(formData: FormData) {
@@ -195,95 +158,7 @@ export default async function SettingsPage({
           </div>
         )}
 
-        {/* Profile */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Profile</CardTitle>
-            <CardDescription>Your name and display preferences.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form action={updateProfile} className="flex flex-col gap-4">
-              <input type="hidden" name="email" value={email ?? ""} />
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="email-display">Email</Label>
-                <Input
-                  id="email-display"
-                  value={email ?? "Not signed in"}
-                  disabled
-                  className="bg-muted/50 text-muted-foreground"
-                />
-                <p className="text-xs text-muted-foreground">
-                  From your Google Workspace account — read-only.
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="name">Display name</Label>
-                <Input
-                  id="name"
-                  name="name"
-                  defaultValue={agent?.name ?? ""}
-                  placeholder="Your name"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="timezone">Timezone</Label>
-                <Input
-                  id="timezone"
-                  name="timezone"
-                  defaultValue={agent?.timezone ?? "Europe/London"}
-                  placeholder="e.g. Europe/London"
-                />
-                <p className="text-xs text-muted-foreground">
-                  IANA timezone name. Used for shift greetings on the dashboard.
-                </p>
-              </div>
-
-              <div className="flex justify-end">
-                <Button type="submit" size="sm">Save changes</Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Working days */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Working days</CardTitle>
-            <CardDescription>
-              Select the days you work. These are used to calculate per-day averages in Metrics.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form action={updateWorkingDays} className="flex flex-col gap-4">
-              <input type="hidden" name="email" value={email ?? ""} />
-              <div className="flex flex-wrap gap-2">
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label, d) => {
-                  const wd = (agent?.working_days ?? [1, 2, 3, 4, 5]) as number[]
-                  const checked = wd.includes(d)
-                  return (
-                    <label
-                      key={d}
-                      className={`flex cursor-pointer flex-col items-center gap-1 rounded-md border px-3 py-2 text-xs transition-colors ${
-                        checked
-                          ? "border-primary bg-primary/10 text-primary font-medium"
-                          : "border-muted-foreground/20 text-muted-foreground hover:border-muted-foreground/40"
-                      }`}
-                    >
-                      <input type="checkbox" name={`day_${d}`} defaultChecked={checked} className="sr-only" />
-                      {label}
-                    </label>
-                  )
-                })}
-              </div>
-              <div className="flex justify-end">
-                <Button type="submit" size="sm">Save</Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+        <SettingsForm email={email ?? ""} agent={agent ? { name: agent.name, timezone: agent.timezone, working_days: agent.working_days } : null} />
 
         {/* Connected integrations */}
         <Card>
