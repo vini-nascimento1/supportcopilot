@@ -193,7 +193,7 @@ export default function TemplatesPage() {
               <Input
                 value={form.recipient}
                 onChange={(e) => setForm({ ...form, recipient: e.target.value })}
-                placeholder="e.g. vipsupport@masspay.io"
+                placeholder="e.g. partner@fanvue.com"
               />
             </div>
             <div>
