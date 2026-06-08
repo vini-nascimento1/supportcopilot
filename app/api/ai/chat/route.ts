@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic"
 const VERBOO_API_KEY = process.env.VERBOO_API_KEY
 const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
 const MAX_TOOL_ROUNDS = 3
-const AI_TIMEOUT_MS = 30_000
+const AI_TIMEOUT_MS = 15_000
 
 // ── Tool definitions ───────────────────────────────────────────────────────
 
@@ -179,8 +179,7 @@ Example: { kind: "alert.slack", params: { text: "🚨 {{customer}} needs help wi
 - tags (tags) — Intercom-side tags on the conversation
 - auto_tags (tags) — tags set by rule actions themselves
 - teammate (text) — Intercom admin_assignee_id; omit for global rules, use "is_empty" for unassigned conversations
-- is_creator (boolean) — whether customer is a creator
-- is_ai_creator (boolean) — whether customer is an AI creator
+- is_creator (boolean) — whether the conversation has the CREATOR_TAG (derived from Intercom tags)
 - priority_hint (enum: urgent, normal, low) — internal priority set by rules
 - priority (enum: priority, not_priority) — Intercom's own priority flag
 - matched_playbook (text) — playbook case_type matched to this case
@@ -238,22 +237,14 @@ function validateRuleInput(args: Record<string, unknown>): string | null {
   if (kind && !["monitor", "trigger"].includes(kind)) {
     return `The rule kind must be "monitor" or "trigger", not "${kind}".`
   }
-  if (kind === "monitor") {
-    if (args.sweepEveryMins === undefined && args.sweep_every_mins === undefined) {
-      return "A monitor rule needs a sweep interval (sweepEveryMins). The default is 5 minutes — you can omit it or set a custom value."
-    }
-  }
-  if (kind === "trigger") {
-    if (!args.onEvents || (args.onEvents as unknown[]).length === 0) {
-      return "A trigger rule needs events (onEvents) to fire on. Use ['conversation.created'] for new conversations, or include 'conversation.updated' too."
-    }
-  }
   if (args.conditions) {
     const cond = args.conditions as Record<string, unknown>
     if (!cond.match || !Array.isArray(cond.groups)) {
       return "The conditions field should have a 'match' (all/any) and a 'groups' array. Please check the format."
     }
   }
+  // sweepEveryMins and onEvents have sensible defaults in toRow() —
+  // no need to require them explicitly from the AI.
   return null
 }
 
@@ -455,8 +446,7 @@ export async function POST(req: Request) {
             role: "tool",
             tool_call_id: tc.id,
             content: JSON.stringify({
-              _friendly: `The AI generated an invalid response for "${tc.function.name}". Please try again or report this to Vinicius if it persists.`,
-              _debug: `Invalid JSON: ${tc.function.arguments}`,
+              error: `The AI generated an invalid response. Please try again or report this to Vinicius if it persists.`,
             }),
           })
           continue
@@ -475,9 +465,8 @@ export async function POST(req: Request) {
             role: "tool",
             tool_call_id: tc.id,
             content: JSON.stringify({
-              _friendly: result.friendly,
-              _debug: result.debug,
-            }),
+              error: result.friendly,
+            })
           })
         }
       }
@@ -497,8 +486,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ message: reply })
 
   } catch (e) {
-    const msg = (e as Error).message
-    if (msg.includes("abort") || msg.includes("timeout")) {
+    const err = e as Error & { name: string }
+    if (err.name === "AbortError" || err.name === "TimeoutError") {
       return NextResponse.json({
         error: "The AI took too long to respond. Try a simpler request or try again.",
       }, { status: 504 })
