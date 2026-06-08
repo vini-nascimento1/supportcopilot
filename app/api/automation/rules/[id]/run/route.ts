@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server"
 
 import { getAgentContext } from "@/lib/automation/rules"
-import { processAgent } from "@/lib/automation/runner"
+import { sweepConversationToLive, metaRowToCaseMeta } from "@/lib/automation/runner"
 import type { AutomationRule } from "@/lib/automation/types"
+import { buildContext } from "@/lib/automation/context"
+import { searchOpenConversationsForAdmin } from "@/lib/intercom"
+import { planCaseActions } from "@/lib/automation/engine"
 
 export const dynamic = "force-dynamic"
 
 /**
- * Manually run a single monitor rule against the current agent's open queue.
- * Returns a summary of how many conversations matched and what actions fired.
+ * Manually run a single monitor rule against ALL open Intercom conversations.
+ * This ensures conditions like "teammate is <specific_id>" or
+ * "teammate is_empty" are evaluated on the full queue — not just the
+ * current agent's queue.
  */
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { db, agentId } = await getAgentContext()
@@ -44,26 +49,56 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ error: "Only monitor rules can be run manually" }, { status: 400 })
     }
 
-    // Resolve the current agent.
-    const { data: agent } = await db
-      .from("agents")
-      .select("id, intercom_admin_id")
-      .eq("id", agentId)
-      .maybeSingle()
-
-    if (!agent?.intercom_admin_id) {
-      return NextResponse.json({ error: "No Intercom admin ID configured" }, { status: 400 })
+    // Fetch ALL open conversations (no admin filter) so teammate conditions
+    // evaluate correctly against the full queue.
+    let liveConvs
+    try {
+      liveConvs = await searchOpenConversationsForAdmin()
+    } catch (e) {
+      return NextResponse.json({ error: `Intercom: ${(e as Error).message}` }, { status: 502 })
     }
 
-    // Run the rule for this agent.
-    const result = await processAgent(db, { id: agent.id, intercom_admin_id: agent.intercom_admin_id }, [rule], Date.now())
+    if (!liveConvs || liveConvs.length === 0) {
+      return NextResponse.json({ ruleName: rule.name, casesEvaluated: 0, matches: 0, actionsApplied: 0, errors: [] })
+    }
+
+    const nowMs = Date.now()
+    const convIds = liveConvs.map((c) => c.id)
+
+    // Batch-load DB metadata for these conversations.
+    const { data: metaRows } = await db
+      .from("cases")
+      .select("id, intercom_conversation_id, owner_id, priority_hint, auto_tags, playbooks(case_type)")
+      .in("intercom_conversation_id", convIds)
+
+    const metaByConvId = new Map<string, NonNullable<typeof metaRows>[number]>()
+    for (const m of metaRows ?? []) {
+      const cid = m.intercom_conversation_id as string | null
+      if (cid) metaByConvId.set(cid, m)
+    }
+
+    let matches = 0
+    let actionsApplied = 0
+    const errors: string[] = []
+
+    for (const conv of liveConvs) {
+      const live = sweepConversationToLive(conv)
+      const meta = metaRowToCaseMeta(
+        (metaByConvId.get(conv.id) ?? null) as Parameters<typeof metaRowToCaseMeta>[0]
+      )
+      const ctx = buildContext(live, meta, null, nowMs)
+      const plan = planCaseActions([rule], ctx)
+      if (plan.length === 0) continue
+      matches += 1
+      actionsApplied += plan[0].actions.length
+    }
 
     return NextResponse.json({
       ruleName: rule.name,
-      casesEvaluated: result.casesEvaluated,
-      matches: result.matches,
-      actionsApplied: result.actionsApplied,
-      errors: result.errors,
+      casesEvaluated: liveConvs.length,
+      matches,
+      actionsApplied,
+      errors: errors.length ? errors : undefined,
     })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })

@@ -281,65 +281,31 @@ export async function runMonitorSweep(nowMs: number): Promise<SweepSummary> {
   const skippedCount = allRules.length - rules.length
   if (skippedCount > 0) errors.push(`skipped ${skippedCount} rule(s) — sweep interval not yet elapsed`)
 
-  // Partition rules: "global" (no teammate condition → applies to ALL agents'
-  // queues) vs per-agent (has teammate condition → scoped to that owner's queue).
-  const globalRules: AutomationRule[] = []
-  const rulesByOwner = new Map<string, AutomationRule[]>()
-  for (const r of rules) {
-    if (!hasTeammateCondition(r)) {
-      globalRules.push(r)
-    } else {
-      const list = rulesByOwner.get(r.ownerId) ?? []
-      list.push(r)
-      rulesByOwner.set(r.ownerId, list)
-    }
-  }
-
-  const perAgentIds = Array.from(rulesByOwner.keys())
-  if (globalRules.length === 0 && perAgentIds.length === 0) {
+  // All rules are evaluated against every agent's queue. Teammate conditions
+  // (is, is_empty, etc.) are handled at evaluation time by the condition engine,
+  // so the sweep does NOT need to partition or route by owner — it just needs
+  // every agent's conversations.
+  if (rules.length === 0) {
     return { ranAt, rulesEvaluated: 0, casesEvaluated: 0, matches: 0, actionsApplied: 0, errors }
   }
 
-  // When global rules exist we must fetch ALL agents (not just those with rules)
-  // so every agent's queue is evaluated against the global conditions.
-  let agents: Array<{ id: string; intercom_admin_id: string | null }>
-  if (globalRules.length > 0) {
-    const { data: allAgentRows, error: allErr } = await db
-      .from("agents")
-      .select("id, intercom_admin_id")
-    if (allErr) errors.push(`agents: ${allErr.message}`)
-    agents = (allAgentRows ?? []) as Array<{ id: string; intercom_admin_id: string | null }>
+  const { data: agentRows, error: agentErr } = await db
+    .from("agents")
+    .select("id, intercom_admin_id")
+  if (agentErr) errors.push(`agents: ${agentErr.message}`)
+  const agents = (agentRows ?? []) as Array<{ id: string; intercom_admin_id: string | null }>
 
-    // Surface orphan rules: rule owner_id has no matching agent row.
-    const knownAgentIds = new Set(agents.map((a) => a.id))
-    const orphanCount = perAgentIds.filter((id) => !knownAgentIds.has(id)).length
-    if (orphanCount > 0) {
-      errors.push(
-        `${orphanCount} agent id(s) referenced by automation_rules have no matching row in agents — rules orphaned`
-      )
-    }
-  } else {
-    // No global rules — only fetch agents that actually have rules.
-    const { data: agentRows, error: agentErr } = await db
-      .from("agents")
-      .select("id, intercom_admin_id")
-      .in("id", perAgentIds)
-    if (agentErr) errors.push(`agents: ${agentErr.message}`)
-    agents = (agentRows ?? []) as Array<{ id: string; intercom_admin_id: string | null }>
-
-    const knownAgentIds = new Set(agents.map((a) => a.id))
-    const orphanCount = perAgentIds.filter((id) => !knownAgentIds.has(id)).length
-    if (orphanCount > 0) {
-      errors.push(
-        `${orphanCount} agent id(s) referenced by automation_rules have no matching row in agents — rules orphaned`
-      )
-    }
+  // Surface orphan rules: rule owner_id has no matching agent row.
+  const knownAgentIds = new Set(agents.map((a) => a.id))
+  const ownerIds = Array.from(new Set(rules.map((r) => r.ownerId)))
+  const orphanCount = ownerIds.filter((id) => !knownAgentIds.has(id)).length
+  if (orphanCount > 0) {
+    errors.push(
+      `${orphanCount} agent id(s) referenced by automation_rules have no matching row in agents — rules orphaned`
+    )
   }
 
-  // Process agents with bounded concurrency. Each agent fans out further inside
-  // (contact-attribute enrichment is concurrent within a batch), so keeping the
-  // outer loop small prevents the search-API rate limit from being saturated.
-  // Each agent is evaluated against: global rules + their own per-agent rules.
+  // Process agents with bounded concurrency.
   const AGENT_CONCURRENCY = 3
   let matches = 0
   let actionsApplied = 0
@@ -347,11 +313,7 @@ export async function runMonitorSweep(nowMs: number): Promise<SweepSummary> {
   for (let i = 0; i < agents.length; i += AGENT_CONCURRENCY) {
     const slice = agents.slice(i, i + AGENT_CONCURRENCY)
     const results = await Promise.all(
-      slice.map((agent) => {
-        const agentRules = rulesByOwner.get(agent.id) ?? []
-        const merged = globalRules.length > 0 ? [...globalRules, ...agentRules] : agentRules
-        return processAgent(db, agent, merged, nowMs)
-      })
+      slice.map((agent) => processAgent(db, agent, rules, nowMs))
     )
     for (const r of results) {
       matches += r.matches
