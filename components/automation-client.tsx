@@ -113,6 +113,7 @@ export function AutomationClient() {
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Partial<AutomationRule> | null>(null)
+  const [runningRules, setRunningRules] = useState<Set<string>>(new Set())
 
   const loadRules = useCallback(async () => {
     const res = await fetch("/api/automation/rules")
@@ -152,18 +153,27 @@ export function AutomationClient() {
   }
 
   async function runRule(id: string, name: string) {
-    const res = await fetch(`/api/automation/rules/${id}/run`, { method: "POST" })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      toast.error(data.error ?? "Failed to run rule")
-      return
-    }
-    const data = await res.json()
-    toast.success(
-      `${name}: ${data.matches} match(es) of ${data.casesEvaluated} case(s), ${data.actionsApplied} action(s) applied`
-    )
-    if (data.errors?.length) {
-      data.errors.forEach((e: string) => toast.error(e))
+    setRunningRules((prev) => new Set(prev).add(id))
+    try {
+      const res = await fetch(`/api/automation/rules/${id}/run`, { method: "POST" })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        toast.error(data.error ?? "Failed to run rule")
+        return
+      }
+      const data = await res.json()
+      toast.success(
+        `${name}: ${data.matches} match(es) of ${data.casesEvaluated} case(s), ${data.actionsApplied} action(s) applied`
+      )
+      if (data.errors?.length) {
+        data.errors.forEach((e: string) => toast.error(e))
+      }
+    } finally {
+      setRunningRules((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
     }
   }
 
@@ -279,9 +289,15 @@ export function AutomationClient() {
                         {r.kind === "monitor" && (
                           <button
                             onClick={(e) => { e.stopPropagation(); runRule(r.id, r.name) }}
-                            className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                            disabled={runningRules.has(r.id)}
+                            className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <ClockIcon className="size-3" /> Run
+                            {runningRules.has(r.id) ? (
+                              <span className="size-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                            ) : (
+                              <ClockIcon className="size-3" />
+                            )}{" "}
+                            {runningRules.has(r.id) ? "Running…" : "Run"}
                           </button>
                         )}
                       </div>
