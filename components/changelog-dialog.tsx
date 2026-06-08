@@ -58,7 +58,7 @@ export function ChangelogDialog({ open, onClose }: Props) {
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div className="flex items-center gap-2">
             <MegaphoneIcon className="size-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Novidades</h2>
+            <h2 className="text-sm font-semibold">New Features</h2>
           </div>
           <button
             onClick={onClose}
@@ -76,7 +76,7 @@ export function ChangelogDialog({ open, onClose }: Props) {
           {loading ? (
             <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
           ) : sortedDates.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No entries yet.</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">Nothing yet. Check back after the next deploy!</p>
           ) : (
             sortedDates.map((date) => (
               <div key={date} className="mb-4 last:mb-0">
