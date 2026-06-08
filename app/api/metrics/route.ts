@@ -2,8 +2,15 @@ import { NextResponse } from "next/server"
 
 import { getAgentContext } from "@/lib/automation/rules"
 import { searchMetricsForAdmin } from "@/lib/intercom"
+import type { AgentMetrics } from "@/lib/intercom"
 
 export const dynamic = "force-dynamic"
+
+const CACHE_TTL_MS = 3_600_000 // 1 hour
+
+function toDateStr(ts: number): string {
+  return new Date(ts * 1000).toISOString().slice(0, 10)
+}
 
 export async function GET(req: Request) {
   const { db, agentId } = await getAgentContext()
@@ -24,12 +31,10 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Invalid date range" }, { status: 400 })
     }
   } else {
-    // Default: last 30 days.
     startTs = Math.floor((now - 30 * 86_400_000) / 1000)
     endTs = Math.floor(now / 1000)
   }
 
-  // Sanity check: max 365 days.
   if (endTs - startTs > 365 * 86_400) {
     return NextResponse.json({ error: "Date range too large (max 365 days)" }, { status: 400 })
   }
@@ -38,10 +43,46 @@ export async function GET(req: Request) {
   const adminId = agent?.intercom_admin_id as string | null | undefined
   if (!adminId) return NextResponse.json({ error: "No Intercom admin ID configured" }, { status: 400 })
 
+  // Normalize to dates for cache key.
+  const startDate = toDateStr(startTs)
+  const endDate = toDateStr(endTs)
+
+  // Check cache (fresh within TTL).
+  const { data: cached } = await db
+    .from("metrics_cache")
+    .select("data, created_at")
+    .eq("agent_id", agentId)
+    .eq("start_date", startDate)
+    .eq("end_date", endDate)
+    .maybeSingle()
+
+  if (cached) {
+    const age = now - new Date(cached.created_at as string).getTime()
+    if (age < CACHE_TTL_MS) {
+      return NextResponse.json(cached.data as AgentMetrics)
+    }
+  }
+
+  // Fetch fresh from Intercom and store in cache.
   try {
     const metrics = await searchMetricsForAdmin(adminId, startTs, endTs)
+
+    await db.from("metrics_cache").upsert(
+      {
+        agent_id: agentId,
+        start_date: startDate,
+        end_date: endDate,
+        data: metrics as Record<string, unknown>,
+      },
+      { onConflict: "agent_id,start_date,end_date", ignoreDuplicates: false }
+    )
+
     return NextResponse.json(metrics)
   } catch (e) {
+    // If Intercom fails but we have stale cache, serve it as fallback.
+    if (cached) {
+      return NextResponse.json(cached.data as AgentMetrics)
+    }
     return NextResponse.json({ error: (e as Error).message }, { status: 502 })
   }
 }
