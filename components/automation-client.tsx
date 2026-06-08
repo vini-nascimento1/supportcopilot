@@ -150,6 +150,22 @@ export function AutomationClient() {
     } else toast.error("Failed to update rule")
   }
 
+  async function runRule(id: string, name: string) {
+    const res = await fetch(`/api/automation/rules/${id}/run`, { method: "POST" })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      toast.error(data.error ?? "Failed to run rule")
+      return
+    }
+    const data = await res.json()
+    toast.success(
+      `${name}: ${data.matches} match(es) of ${data.casesEvaluated} case(s), ${data.actionsApplied} action(s) applied`
+    )
+    if (data.errors?.length) {
+      data.errors.forEach((e: string) => toast.error(e))
+    }
+  }
+
   async function markAlertsRead(ids: string[]) {
     const res = await fetch("/api/automation/alerts", {
       method: "PATCH",
@@ -242,22 +258,32 @@ export function AutomationClient() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">{r.priority}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {r.actions.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {r.actions.slice(0, 3).map((a, i) => (
-                            <Badge key={i} variant="secondary" className="text-xs">
-                              {ACTION_KINDS.find((k) => k.kind === a.kind)?.label ?? a.kind}
-                            </Badge>
-                          ))}
-                          {r.actions.length > 3 && (
-                            <Badge variant="secondary" className="text-xs">
-                              +{r.actions.length - 3}
-                            </Badge>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="italic">No actions</span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {r.actions.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {r.actions.slice(0, 3).map((a, i) => (
+                              <Badge key={i} variant="secondary" className="text-xs">
+                                {ACTION_KINDS.find((k) => k.kind === a.kind)?.label ?? a.kind}
+                              </Badge>
+                            ))}
+                            {r.actions.length > 3 && (
+                              <Badge variant="secondary" className="text-xs">
+                                +{r.actions.length - 3}
+                              </Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="italic">No actions</span>
+                        )}
+                        {r.kind === "monitor" && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); runRule(r.id, r.name) }}
+                            className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                          >
+                            <ClockIcon className="size-3" /> Run
+                          </button>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <button

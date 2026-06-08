@@ -25,6 +25,15 @@ export type SweepSummary = {
   errors: string[]
 }
 
+export type AgentTotals = {
+  matches: number
+  actionsApplied: number
+  casesEvaluated: number
+  errors: string[]
+}
+
+type DbClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>
+
 type RuleRow = {
   id: string
   owner_id: string
@@ -65,7 +74,7 @@ function toRule(r: RuleRow): AutomationRule {
 }
 
 /** A rule is "global" if none of its condition groups reference the `teammate` field. */
-function hasTeammateCondition(rule: AutomationRule): boolean {
+export function hasTeammateCondition(rule: AutomationRule): boolean {
   return rule.conditions.groups.some((g) => g.conditions.some((c) => c.field === "teammate"))
 }
 
@@ -98,16 +107,7 @@ export function metaRowToCaseMeta(row: CaseMetaRow | null): CaseMeta {
   }
 }
 
-type AgentTotals = {
-  matches: number
-  actionsApplied: number
-  casesEvaluated: number
-  errors: string[]
-}
-
-type DbClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>
-
-async function processAgent(
+export async function processAgent(
   db: DbClient,
   agent: { id: string; intercom_admin_id: string | null },
   ownerRules: AutomationRule[],
@@ -221,6 +221,40 @@ async function processAgent(
   return out
 }
 
+/** Filter rules whose `sweep_every_mins` interval has elapsed since last run.
+ *  Rules with no interval set (null) are always eligible.
+ *  On query failure the full set passes through (fail-open). */
+async function filterEligibleRules(
+  db: DbClient,
+  rules: AutomationRule[],
+  nowMs: number
+): Promise<AutomationRule[]> {
+  const intervalRules = rules.filter((r) => r.sweepEveryMins != null)
+  if (intervalRules.length === 0) return rules
+
+  const ruleIds = intervalRules.map((r) => r.id)
+  const { data: runs } = await db
+    .from("automation_runs")
+    .select("rule_id, ran_at")
+    .in("rule_id", ruleIds)
+    .order("ran_at", { ascending: false })
+    .limit(10000)
+
+  const lastRunByRule = new Map<string, number>()
+  for (const r of runs ?? []) {
+    if (!lastRunByRule.has(r.rule_id)) {
+      lastRunByRule.set(r.rule_id, new Date(r.ran_at).getTime())
+    }
+  }
+
+  return rules.filter((r) => {
+    if (r.sweepEveryMins == null) return true
+    const lastRun = lastRunByRule.get(r.id)
+    if (lastRun == null) return true // never run before
+    return nowMs - lastRun >= r.sweepEveryMins * 60_000
+  })
+}
+
 export async function runMonitorSweep(nowMs: number): Promise<SweepSummary> {
   const ranAt = new Date(nowMs).toISOString()
   const errors: string[] = []
@@ -236,7 +270,12 @@ export async function runMonitorSweep(nowMs: number): Promise<SweepSummary> {
     .eq("kind", "monitor")
     .order("priority", { ascending: true })
   if (ruleErr) errors.push(`rules: ${ruleErr.message}`)
-  const rules = (ruleRows ?? []).map(toRule)
+  const allRules = (ruleRows ?? []).map(toRule)
+
+  // Filter by sweep interval — skip rules that haven't reached their cadence.
+  const rules = await filterEligibleRules(db, allRules, nowMs)
+  const skippedCount = allRules.length - rules.length
+  if (skippedCount > 0) errors.push(`skipped ${skippedCount} rule(s) — sweep interval not yet elapsed`)
 
   // Partition rules: "global" (no teammate condition → applies to ALL agents'
   // queues) vs per-agent (has teammate condition → scoped to that owner's queue).
