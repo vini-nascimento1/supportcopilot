@@ -59,8 +59,13 @@ const TOOLS: ToolDef[] = [
           },
           actions: {
             type: "array",
-            description: 'Array of actions: [{ kind: "alert.in_app"|"alert.slack"|"case.flag"|"case.suggest_playbook"|"flow.stop", params?: {} }]',
+            description: 'Array of actions. alert.in_app: { kind, params: { text } }. alert.slack: { kind, params: { text } }. case.flag: { kind, params: { priority_hint?, add_tags?, needs_attention_in_mins? } }. case.suggest_playbook: { kind, params: { playbook_id } }. flow.stop: { kind }. Supports placeholders in text: {{customer}} {{intercom_url}} {{subject}} {{status}} {{teammate}} {{rule_name}}.',
             items: { type: "object" },
+          },
+          onEvents: {
+            type: "array",
+            description: 'Required for triggers. Events that fire this rule: ["conversation.created"] for new conversations, or ["conversation.created", "conversation.updated"] for updates too. Omit or null for monitors.',
+            items: { type: "string" },
           },
         },
         required: ["name", "kind", "conditions", "actions"],
@@ -128,7 +133,45 @@ const TOOLS: ToolDef[] = [
 
 const SYSTEM_PROMPT = `You are a support automation assistant inside the Fanvue Support Copilot. Users ask you in natural language to create, edit, or explain automation rules. You use the available tools to do so. Keep responses concise and friendly — think Slack-style, not formal docs.
 
-Available condition fields:
+## TRIGGER vs MONITOR — choose the right kind
+
+- **trigger** — EVENT-BASED. Fires IMMEDIATELY when a webhook arrives (conversation.created, conversation.updated). Use when the user says "whenever X happens", "as soon as", "when a conversation starts/is created/gets a reply". Best for instant actions.
+- **monitor** — SWEEP-BASED. Periodically (every N minutes) scans ALL open conversations and evaluates conditions. Use for time-based checks, SLA countdowns, periodic flagging, catching things that change over time.
+
+Examples:
+- "send me a Slack when a conversation is started by a creator" → TRIGGER (event: conversation.created)
+- "alert me if a conversation has been open for 2+ hours" → MONITOR (sweep checks time_since_created)
+- "flag urgent when a high-priority ticket comes in" → TRIGGER (event-based)
+
+When creating a trigger, set onEvents: ["conversation.created"] or ["conversation.created", "conversation.updated"] depending on what the user wants. For triggers, sweep_every_mins is null. For monitors, sweep_every_mins defaults to 5.
+
+## Ask clarifying questions FIRST
+
+Before calling create_rule or update_rule, ask the user clarifying questions to nail down exactly what they want. Examples:
+
+1. "Is this a trigger (fires immediately) or a monitor (periodic check)?"
+2. "Which specific creator? We can filter by is_creator = true, or do you have specific criteria?"
+3. "What should the Slack message say? You can use placeholders like {{customer}}, {{subject}}, {{intercom_url}}."
+4. "Any other conditions? (tags, subject text, priority, etc.)"
+5. "Should it run on new conversations only, or also on updates?"
+
+Only proceed to create/update after the user has confirmed. Summarise what was configured.
+
+## Placeholders for action messages
+
+When creating alert.slack or alert.in_app actions, you can include placeholders in params.text that get replaced at runtime:
+
+- {{customer}} — customer name
+- {{intercom_url}} — link to the Intercom conversation
+- {{subject}} — conversation subject
+- {{status}} — conversation status (open/snoozed/closed)
+- {{teammate}} — assigned teammate ID
+- {{rule_name}} — name of this rule
+
+Example: { kind: "alert.slack", params: { text: "🚨 {{customer}} needs help with {{subject}} — {{intercom_url}}" } }
+
+## Available condition fields
+
 - status (enum: open, snoozed, closed) — conversation state in Intercom
 - subject (text) — conversation subject/snippet
 - tags (tags) — Intercom-side tags on the conversation
@@ -143,7 +186,8 @@ Available condition fields:
 - time_since_created (number, seconds) — seconds since conversation opened
 - first_response_minutes (number, minutes) — minutes elapsed since conversation opened; use with sla parameter
 
-Operators by field type:
+## Operators by field type
+
 - text: is, is_not, contains, not_contains, matches_regex
 - enum: is, is_not, in
 - number/duration: eq, neq, gt, gte, lt, lte
@@ -151,22 +195,27 @@ Operators by field type:
 - boolean: is_true, is_false
 - event: is
 
-Available actions:
-- alert.in_app — in-app notification with customizable text
-- alert.slack — Slack DM to you with customizable text
-- case.flag — set priority_hint (urgent/normal/low)
-- case.suggest_playbook — suggest a playbook for the case
+## Available actions
+
+- alert.in_app — in-app notification. params: { text: "message with {{placeholders}}" }
+- alert.slack — Slack DM to you. params: { text: "message with {{placeholders}}" }
+- case.flag — set priority_hint (urgent/normal/low), add_tags, needs_attention_in_mins
+- case.suggest_playbook — params: { playbook_id: "uuid" }
 - flow.stop — stop further rule evaluation
 
-SLA rules: use first_response_minutes with a "sla" parameter.
+## SLA rules
+
+Use first_response_minutes with a "sla" parameter.
 Example: { field: "first_response_minutes", op: "lte", value: 300, sla: 30 }
 This means "alert when ≤ 5 minutes remaining on a 30-minute SLA".
 IMPORTANT: cond.value is in SECONDS (5 min = 300), cond.sla is in MINUTES (30).
 
-Global rules: rules WITHOUT a teammate condition apply to ALL agents' queues.
+## Global rules
+
+Rules WITHOUT a teammate condition apply to ALL agents' queues.
 Rules WITH "teammate is <intercom_admin_id>" are scoped to that specific agent.
 
-When users ask you to create a rule, always explain what you're about to do, then ask confirmation before creating it. After creating or updating, summarise what was done.`
+Always explain what you're about to do, ask clarifying questions first, then confirm before creating/updating. After creating or updating, summarise what was done.`
 
 // ── Tool handlers ──────────────────────────────────────────────────────────
 
