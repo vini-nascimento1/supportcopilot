@@ -968,16 +968,21 @@ function ActionsStep({
             </Select>
 
             {action.kind === "alert.in_app" || action.kind === "alert.slack" ? (
-              <Input
-                className="h-9 flex-1 text-sm"
-                placeholder="Alert text (optional)"
-                value={String(action.params?.text ?? "")}
-                onChange={(e) => {
-                  const next = [...actions]
-                  next[i] = { ...action, params: { ...action.params, text: e.target.value } }
-                  onChange(next)
-                }}
-              />
+              <div className="flex flex-1 flex-col gap-1">
+                <Input
+                  className="h-9 text-sm"
+                  placeholder="Alert text (optional)"
+                  value={String(action.params?.text ?? "")}
+                  onChange={(e) => {
+                    const next = [...actions]
+                    next[i] = { ...action, params: { ...action.params, text: e.target.value } }
+                    onChange(next)
+                  }}
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  {"Placeholders: {{intercom_url}} {{customer}} {{subject}} {{status}} {{teammate}} {{rule_name}}"}
+                </span>
+              </div>
             ) : action.kind === "case.flag" ? (
               <Input
                 className="h-9 flex-1 text-sm"

@@ -230,6 +230,11 @@ export async function runTriggerForEvent(payload: IntercomNotification, nowMs: n
         caseId,
         intercomConversationId: live.intercomConversationId,
         nowMs,
+        customer: live.customerName,
+        subject: live.subject,
+        intercomState: live.intercomState,
+        adminAssigneeId: live.adminAssigneeId,
+        ruleName: rule.name,
       })
       taken.push(res)
       if (res.applied) actionsApplied += 1

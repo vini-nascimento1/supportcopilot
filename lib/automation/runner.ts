@@ -194,6 +194,11 @@ async function processAgent(
           caseId,
           intercomConversationId: conv.id,
           nowMs,
+          customer: live.customerName,
+          subject: live.subject,
+          intercomState: live.intercomState,
+          adminAssigneeId: live.adminAssigneeId,
+          ruleName: rule.name,
         })
         taken.push(res)
         if (res.applied) out.actionsApplied += 1

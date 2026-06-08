@@ -29,6 +29,12 @@ export type ActionTarget = {
   intercomConversationId?: string | null
   /** injected for determinism (sweeps/tests pass their own clock) */
   nowMs: number
+  // Conversation context for template placeholders in action text.
+  customer?: string | null
+  subject?: string | null
+  intercomState?: string | null
+  adminAssigneeId?: string | null
+  ruleName?: string
 }
 
 type Handler = (action: Action, target: ActionTarget) => Promise<ActionResult>
@@ -36,13 +42,37 @@ type Handler = (action: Action, target: ActionTarget) => Promise<ActionResult>
 const params = (action: Action): Record<string, unknown> => action.params ?? {}
 const asString = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null)
 
+// ── Template placeholders ──────────────────────────────────────────────────
+// Action text may contain {{placeholder}} tokens. resolveTemplate() replaces
+// them with values from the target context. Unknown placeholders stay as-is.
+type TemplateVars = Record<string, string | null | undefined>
+
+function resolveTemplate(text: string, vars: TemplateVars): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`)
+}
+
+function buildTemplateVars(target: ActionTarget): TemplateVars {
+  return {
+    intercom_url:
+      target.intercomConversationId && process.env.INTERCOM_APP_ID
+        ? `https://app.intercom.com/a/apps/${process.env.INTERCOM_APP_ID}/conversations/${target.intercomConversationId}`
+        : null,
+    customer: target.customer,
+    subject: target.subject,
+    status: target.intercomState,
+    teammate: target.adminAssigneeId,
+    rule_name: target.ruleName,
+  }
+}
+
 // ── alert.in_app ─────────────────────────────────────────────────────────────
 // Insert an alert into the agent's inbox. De-duped by the unique (rule,case,kind)
 // constraint so re-running monitors every 5 min doesn't pile up duplicates.
 const alertInApp: Handler = async (action, target) => {
   const db = getSupabaseAdminClient()
   if (!db) return { kind: action.kind, applied: false, detail: "no admin client" }
-  const body = asString(params(action).text) ?? "Automation matched this case."
+  const raw = asString(params(action).text) ?? "Automation matched this case."
+  const body = resolveTemplate(raw, buildTemplateVars(target))
   const { error } = await db
     .from("automation_alerts")
     .upsert(
@@ -126,7 +156,8 @@ const alertSlack: Handler = async (action, target) => {
   const email = (agent?.email as string | null) ?? null
   const botToken = process.env.SLACK_BOT_TOKEN ?? null
 
-  const text = "🤖 Automation: " + (asString(params(action).text) ?? "a rule matched a case.")
+  const raw = asString(params(action).text) ?? "a rule matched a case."
+  const text = "🤖 Automation: " + resolveTemplate(raw, buildTemplateVars(target))
 
   // Resolve the owner's Slack user id. Preferred path needs no special bot scope:
   // the owner's own token (auth.test) returns their user id. Optional fallback uses
