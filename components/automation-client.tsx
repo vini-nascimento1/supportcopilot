@@ -872,7 +872,7 @@ function ConditionRow({
                 <Input
                   type="number"
                   className="h-8 w-16 text-xs"
-                  placeholder="30"
+                  placeholder="min"
                   value={cond.sla ?? ""}
                   onChange={(e) => onChange({ ...cond, sla: Number(e.target.value) || undefined })}
                 />
