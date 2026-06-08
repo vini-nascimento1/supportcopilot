@@ -35,7 +35,9 @@ export async function proxy(request: NextRequest) {
   // caller (pg_cron, Intercom webhook) can never reach the handler. Each route
   // enforces its own auth (CRON_SECRET, webhook signature).
   const isMachineRoute =
-    pathname === "/api/automation/sweep" || pathname.startsWith("/api/webhooks/")
+    pathname === "/api/automation/sweep" ||
+    pathname === "/api/cron/refresh-metrics" ||
+    pathname.startsWith("/api/webhooks/")
 
   // Allow unauthenticated access to the login page, auth API routes, and machine routes.
   if (
