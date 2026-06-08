@@ -163,18 +163,11 @@ export async function testRule(
   let liveConvs: Awaited<ReturnType<typeof searchOpenConversationsForAdmin>> = []
 
   if (isGlobal) {
-    // Global rule — fetch conversations from ALL agents.
-    const { data: allAgents } = await db.from("agents").select("id, intercom_admin_id")
-    const agentList = (allAgents ?? []) as Array<{ id: string; intercom_admin_id: string | null }>
-    for (const a of agentList) {
-      if (!a.intercom_admin_id) continue
-      try {
-        const convs = await searchOpenConversationsForAdmin(a.intercom_admin_id)
-        liveConvs.push(...convs)
-      } catch {
-        // Skip agents whose Intercom fetch fails — don't abort the whole test.
-      }
-      if (liveConvs.length >= DRY_RUN_LIMIT) break
+    // Global rule — fetch ALL open conversations from Intercom (no admin filter).
+    try {
+      liveConvs = await searchOpenConversationsForAdmin()
+    } catch (e) {
+      throw new Error(`Intercom unavailable: ${(e as Error).message}`)
     }
   } else {
     // Per-agent rule — only scan the current user's queue.

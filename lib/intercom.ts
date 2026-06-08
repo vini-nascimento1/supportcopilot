@@ -467,23 +467,29 @@ async function enrichCreatorFlags(
  * @throws if INTERCOM_ACCESS_TOKEN is unset or the search request fails — the sweep
  *   runner catches and surfaces the error, so a missing token is loud, not silent.
  */
-export async function searchOpenConversationsForAdmin(adminId: string): Promise<SweepConversation[]> {
+export async function searchOpenConversationsForAdmin(adminId?: string): Promise<SweepConversation[]> {
   if (!intercomToken) throw new Error("INTERCOM_ACCESS_TOKEN is not set")
-  const adminIdNum = Number(adminId)
-  if (!Number.isFinite(adminIdNum)) throw new Error(`Invalid intercom_admin_id: ${adminId}`)
 
   const out: SweepConversation[] = []
   const contactIds: (string | null)[] = []
   let startingAfter: string | undefined
 
   do {
+    // When adminId is provided, scope to that agent's queue. When omitted,
+    // fetch ALL open conversations (used by global rule tests).
+    const queryFilters: Array<Record<string, unknown>> = [
+      { field: "open", operator: "=", value: true },
+    ]
+    if (adminId) {
+      const adminIdNum = Number(adminId)
+      if (!Number.isFinite(adminIdNum)) throw new Error(`Invalid intercom_admin_id: ${adminId}`)
+      queryFilters.push({ field: "admin_assignee_id", operator: "=", value: adminIdNum })
+    }
+
     const body: Record<string, unknown> = {
       query: {
         operator: "AND",
-        value: [
-          { field: "admin_assignee_id", operator: "=", value: adminIdNum },
-          { field: "open", operator: "=", value: true },
-        ],
+        value: queryFilters,
       },
       pagination: { per_page: 150, ...(startingAfter ? { starting_after: startingAfter } : {}) },
     }
