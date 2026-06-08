@@ -7,6 +7,22 @@ import type { ConditionTree } from "@/lib/automation/types"
 
 export const dynamic = "force-dynamic"
 
+// ── Error handling contract ──────────────────────────────────────────────────
+//
+// Every path in this route must return one of:
+//   1. { message: string }      — success (200), the AI's reply
+//   2. { error: string }        — client error (4xx), the user sees a toast
+//   3. { message: string }      — partial success (200), tools ran but summary failed
+//
+// Tool errors → { error: "friendly message" } in the tool response content,
+// which the model reads natively as a failure and explains to the user.
+//
+// Provider timeouts → 504 "The AI took too long…"
+// Unknown errors    → 500 "report this to Vinicius"
+// Network/config    → 500 with specific detail (missing API key, auth, etc.)
+// Intercom failures → included as _warnings in the tool data, not silently dropped
+//───────────────────────────────────────────────────────────────────────────────
+
 const VERBOO_API_KEY = process.env.VERBOO_API_KEY
 const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
 const MAX_TOOL_ROUNDS = 3
@@ -209,7 +225,9 @@ Example: { kind: "alert.slack", params: { text: "🚨 {{customer}} needs help wi
 Use first_response_minutes with a "sla" parameter.
 Example: { field: "first_response_minutes", op: "lte", value: 300, sla: 30 }
 This means "alert when ≤ 5 minutes remaining on a 30-minute SLA".
-IMPORTANT: cond.value is in SECONDS (5 min = 300), cond.sla is in MINUTES (30).
+
+**Important:** value is in SECONDS (5 min = 300). sla is in MINUTES (30).
+Do NOT confuse these — if you put 30 in value and 300 in sla, alerts will trigger 10× too early.
 
 ## Global rules
 
@@ -313,12 +331,15 @@ async function handleToolCall(
           .select("intercom_admin_id")
           .eq("id", agentId)
           .maybeSingle()
-        let openConvs = 0
+        let openConvs: number | null = null
+        let intercomError: string | null = null
         if (agent?.intercom_admin_id) {
           try {
             const convs = await searchOpenConversationsForAdmin(String(agent.intercom_admin_id))
             openConvs = convs.length
-          } catch { /* skip */ }
+          } catch (e) {
+            intercomError = "Could not reach Intercom to count open conversations."
+          }
         }
 
         return toolSuccess({
@@ -326,6 +347,7 @@ async function handleToolCall(
           enabledMonitors: monitorCount,
           enabledTriggers: triggerCount,
           openConversations: openConvs,
+          ...(intercomError ? { _warnings: [intercomError] } : {}),
         })
       }
 
@@ -423,6 +445,11 @@ export async function POST(req: Request) {
       ...body.messages.map((m) => ({ role: m.role, content: m.content })),
     ]
 
+    // Track what tools ran across rounds so we can report them even if the
+    // final summary call fails.
+    let totalToolsRun = 0
+    let totalToolErrors = 0
+
     let rounds = 0
     while (rounds < MAX_TOOL_ROUNDS) {
       rounds++
@@ -442,6 +469,7 @@ export async function POST(req: Request) {
         try {
           args = JSON.parse(tc.function.arguments)
         } catch {
+          totalToolErrors++
           toolResults.push({
             role: "tool",
             tool_call_id: tc.id,
@@ -455,12 +483,14 @@ export async function POST(req: Request) {
         const result = await handleToolCall(tc.function.name, args, agentId, db)
 
         if (result.success) {
+          totalToolsRun++
           toolResults.push({
             role: "tool",
             tool_call_id: tc.id,
             content: JSON.stringify(result.data),
           })
         } else {
+          totalToolErrors++
           toolResults.push({
             role: "tool",
             tool_call_id: tc.id,
@@ -481,9 +511,16 @@ export async function POST(req: Request) {
     }
 
     // Max tool rounds reached — ask for a final summary without tool access.
-    const finalResponse = await callVerboo(messages, { tool_choice: "none" })
-    const reply = finalResponse.content ?? "I completed the actions but couldn't generate a summary."
-    return NextResponse.json({ message: reply })
+    // If this fails, we still report what was already executed.
+    try {
+      const finalResponse = await callVerboo(messages, { tool_choice: "none" })
+      const reply = finalResponse.content ?? "I completed the actions but couldn't generate a summary."
+      return NextResponse.json({ message: reply })
+    } catch {
+      return NextResponse.json({
+        message: `I completed ${totalToolsRun} action(s) with ${totalToolErrors} error(s). The AI couldn't summarise the results — try asking "what did you just do?" to get a recap.`,
+      })
+    }
 
   } catch (e) {
     const err = e as Error & { name: string }

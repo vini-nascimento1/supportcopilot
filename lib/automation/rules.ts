@@ -101,40 +101,43 @@ export async function updateRule(
   id: string,
   patch: Partial<RuleInput>
 ) {
+  // Fetch current rule first so we can normalise fields that depend on kind.
+  const { data: current } = await db
+    .from("automation_rules")
+    .select("kind, sweep_every_mins, on_events")
+    .eq("id", id)
+    .eq("owner_id", agentId)
+    .maybeSingle()
+  if (!current) throw new Error("Rule not found")
+
+  const currentKind = current.kind as "monitor" | "trigger"
+
+  // Determine the effective kind after this patch (may not have changed).
+  const effectiveKind = (patch.kind ?? currentKind) as "monitor" | "trigger"
+  const becomingMonitor = effectiveKind === "monitor"
+
   // Build a column patch from whichever fields were provided.
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (patch.name !== undefined) row.name = patch.name.trim() || "Untitled rule"
   if (patch.description !== undefined) row.description = patch.description
   if (patch.enabled !== undefined) row.enabled = patch.enabled
+  if (patch.kind !== undefined) row.kind = patch.kind
   if (patch.priority !== undefined) row.priority = patch.priority
   if (patch.conditions !== undefined) row.conditions = patch.conditions
   if (patch.actions !== undefined) row.actions = patch.actions
 
-  // If onEvents or sweepEveryMins are being patched, we need the rule's kind
-  // to apply the same normalisation that toRow() does (e.g. monitor → on_events
-  // must be null, trigger → sweep_every_mins must be null).
-  if (patch.onEvents !== undefined || patch.sweepEveryMins !== undefined) {
-    const { data: current } = await db
-      .from("automation_rules")
-      .select("kind")
-      .eq("id", id)
-      .eq("owner_id", agentId)
-      .maybeSingle()
-    if (current) {
-      const isMonitor = current.kind === "monitor"
-      if (patch.sweepEveryMins !== undefined) {
-        row.sweep_every_mins = isMonitor ? patch.sweepEveryMins ?? 5 : null
-      }
-      if (patch.onEvents !== undefined) {
-        row.on_events = isMonitor
-          ? null
-          : patch.onEvents && patch.onEvents.length
-            ? patch.onEvents
-            : ["conversation.created", "conversation.updated"]
-      }
-    }
-    // If the row doesn't exist (shouldn't happen), fall through — the
-    // .update() will 0-row anyway and throw via the Supabase client.
+  // Normalise sweep_every_mins: monitors need a cadence, triggers get null.
+  if (patch.sweepEveryMins !== undefined || patch.kind !== undefined) {
+    row.sweep_every_mins = becomingMonitor ? patch.sweepEveryMins ?? 5 : null
+  }
+
+  // Normalise on_events: triggers need events, monitors get null.
+  if (patch.onEvents !== undefined || patch.kind !== undefined) {
+    row.on_events = becomingMonitor
+      ? null
+      : patch.onEvents && patch.onEvents.length
+        ? patch.onEvents
+        : ["conversation.created", "conversation.updated"]
   }
 
   const { data, error } = await db
