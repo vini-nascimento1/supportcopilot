@@ -2,10 +2,12 @@ import { NextResponse } from "next/server"
 
 import { getAgentContext } from "@/lib/automation/rules"
 import { sweepConversationToLive, metaRowToCaseMeta } from "@/lib/automation/runner"
-import type { AutomationRule } from "@/lib/automation/types"
+import type { AutomationRule, Action } from "@/lib/automation/types"
 import { buildContext } from "@/lib/automation/context"
 import { searchOpenConversationsForAdmin } from "@/lib/intercom"
 import { planCaseActions } from "@/lib/automation/engine"
+import { runAction } from "@/lib/automation/actions"
+import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 
 export const dynamic = "force-dynamic"
 
@@ -77,6 +79,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       if (cid) metaByConvId.set(cid, m)
     }
 
+    const adminDb = getSupabaseAdminClient()
+    if (!adminDb) return NextResponse.json({ error: "No admin client" }, { status: 500 })
+
     let matches = 0
     let actionsApplied = 0
     const errors: string[] = []
@@ -89,8 +94,64 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       const ctx = buildContext(live, meta, null, nowMs)
       const plan = planCaseActions([rule], ctx)
       if (plan.length === 0) continue
-      matches += 1
-      actionsApplied += plan[0].actions.length
+
+      // Upsert a cases row if none exists — actions like case.flag need a caseId.
+      let caseId = meta.caseId
+      if (!caseId) {
+        const upsertRow: Record<string, unknown> = {
+          intercom_conversation_id: conv.id,
+          owner_id: agentId,
+          auto_tags: [],
+          priority_hint: null,
+        }
+        if (conv.customerName) upsertRow.customer_name = conv.customerName
+        const { data: created, error: upErr } = await adminDb
+          .from("cases")
+          .upsert(upsertRow, { onConflict: "intercom_conversation_id", defaultToNull: false })
+          .select("id")
+          .maybeSingle()
+        if (upErr) {
+          errors.push(`case upsert (${conv.id}): ${upErr.message}`)
+          continue
+        }
+        caseId = created?.id ?? null
+        if (!caseId) continue
+      }
+
+      for (const { rule: matchedRule, actions } of plan) {
+        matches += 1
+        const taken: Array<{ kind: string; applied: boolean; detail: string }> = []
+        for (const action of actions as Action[]) {
+          const res = await runAction(action, {
+            ruleId: matchedRule.id,
+            ownerId: matchedRule.ownerId,
+            caseId,
+            intercomConversationId: conv.id,
+            nowMs,
+            customer: live.customerName,
+            subject: live.subject,
+            intercomState: live.intercomState,
+            adminAssigneeId: live.adminAssigneeId,
+            ruleName: matchedRule.name,
+          })
+          taken.push(res)
+          if (res.applied) actionsApplied += 1
+          else if (res.detail && !res.detail.startsWith("not implemented")) {
+            errors.push(`${matchedRule.name}/${action.kind}: ${res.detail}`)
+          }
+        }
+
+        // Record the run for audit trail (matches processAgent pattern).
+        const { error: runErr } = await adminDb.from("automation_runs").insert({
+          rule_id: matchedRule.id,
+          case_id: caseId,
+          intercom_conversation_id: conv.id,
+          matched: true,
+          actions_taken: taken,
+          context: ctx.fields,
+        })
+        if (runErr) errors.push(`run insert: ${runErr.message}`)
+      }
     }
 
     return NextResponse.json({

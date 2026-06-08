@@ -77,7 +77,7 @@ const alertInApp: Handler = async (action, target) => {
     .from("automation_alerts")
     .upsert(
       { rule_id: target.ruleId, case_id: target.caseId ?? null, kind: "alert.in_app", body },
-      { onConflict: "rule_id,case_id,kind", ignoreDuplicates: true }
+      { onConflict: "rule_id,case_id,kind", ignoreDuplicates: false }
     )
   return error
     ? { kind: action.kind, applied: false, detail: error.message }

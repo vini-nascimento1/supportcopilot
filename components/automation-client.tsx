@@ -125,6 +125,7 @@ export function AutomationClient() {
     const res = await fetch("/api/automation/alerts")
     const data = await res.json()
     if (res.ok) setAlerts(data.alerts ?? [])
+    else toast.error(data.error ?? "Failed to load alerts")
   }, [])
 
   useEffect(() => {
