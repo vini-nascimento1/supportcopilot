@@ -6,7 +6,8 @@ import type { AgentMetrics } from "@/lib/intercom"
 
 export const dynamic = "force-dynamic"
 
-const CACHE_TTL_MS = 3_600_000 // 1 hour
+// Aggregate KPIs — safe to serve up to a day old. Force refresh with ?refresh=1.
+const CACHE_TTL_MS = 24 * 3_600_000
 
 function toDateStr(ts: number): string {
   return new Date(ts * 1000).toISOString().slice(0, 10)
@@ -19,6 +20,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url)
   const startParam = url.searchParams.get("start")
   const endParam = url.searchParams.get("end")
+  const forceRefresh = url.searchParams.get("refresh") === "1"
   const now = Date.now()
 
   let startTs: number
@@ -56,7 +58,7 @@ export async function GET(req: Request) {
     .eq("end_date", endDate)
     .maybeSingle()
 
-  if (cached) {
+  if (cached && !forceRefresh) {
     const age = now - new Date(cached.created_at as string).getTime()
     if (age < CACHE_TTL_MS) {
       return NextResponse.json(cached.data as AgentMetrics)

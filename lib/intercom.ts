@@ -535,24 +535,22 @@ export type AgentMetrics = {
   perDayCsat: number | null
 }
 
-/**
- * Fetch the agent's conversation metrics from Intercom.
- * Searches for conversations assigned to this admin in the time range
- * and computes aggregate KPIs from the statistics.* and conversation_rating
- * fields that come back from the search API.
- *
- * Capped at 50 pages (7,500 conversations) to prevent timeout on wide ranges.
- */
-export async function searchMetricsForAdmin(
-  adminId: string,
+type MetricsWindowRaw = {
+  total: number
+  frtValues: number[]
+  resolveValues: number[]
+  assignmentCounts: number[]
+  reopenCounts: number[]
+  csatScores: number[]
+}
+
+// Intercom search uses cursor pagination, so a single date range can't be parallelised.
+// Splitting the time window into sub-ranges that each paginate independently is the workaround.
+async function fetchMetricsWindow(
+  adminIdNum: number,
   startTsSec: number,
   endTsSec: number
-): Promise<AgentMetrics> {
-  if (!intercomToken) throw new Error("INTERCOM_ACCESS_TOKEN is not set")
-
-  const adminIdNum = Number(adminId)
-  if (!Number.isFinite(adminIdNum)) throw new Error(`Invalid intercom_admin_id: ${adminId}`)
-
+): Promise<MetricsWindowRaw> {
   const frtValues: number[] = []
   const resolveValues: number[] = []
   const assignmentCounts: number[] = []
@@ -614,6 +612,55 @@ export async function searchMetricsForAdmin(
 
     startingAfter = payload.pages?.next?.starting_after
   } while (startingAfter && pageCount < MAX_PAGES)
+
+  return { total, frtValues, resolveValues, assignmentCounts, reopenCounts, csatScores }
+}
+
+/**
+ * Fetch the agent's conversation metrics from Intercom.
+ * Searches conversations assigned to this admin and computes aggregate KPIs
+ * from statistics.* and conversation_rating fields returned by the search API.
+ *
+ * Wide ranges are split into up to 6 parallel sub-windows (~7 days each) to
+ * cut wall-clock latency. Each window is capped at 50 pages (7,500 conversations).
+ */
+export async function searchMetricsForAdmin(
+  adminId: string,
+  startTsSec: number,
+  endTsSec: number
+): Promise<AgentMetrics> {
+  if (!intercomToken) throw new Error("INTERCOM_ACCESS_TOKEN is not set")
+
+  const adminIdNum = Number(adminId)
+  if (!Number.isFinite(adminIdNum)) throw new Error(`Invalid intercom_admin_id: ${adminId}`)
+
+  const PARALLEL_WINDOW_DAYS = 7
+  const MAX_PARALLEL_WINDOWS = 6
+  const windowSec = Math.max(1, endTsSec - startTsSec)
+  const dayCount = Math.ceil(windowSec / 86_400)
+  const windowCount = Math.min(
+    MAX_PARALLEL_WINDOWS,
+    Math.max(1, Math.ceil(dayCount / PARALLEL_WINDOW_DAYS))
+  )
+  const stride = Math.ceil(windowSec / windowCount)
+
+  const windows: Array<[number, number]> = []
+  for (let i = 0; i < windowCount; i++) {
+    const s = startTsSec + i * stride
+    const e = i === windowCount - 1 ? endTsSec : Math.min(endTsSec, s + stride)
+    windows.push([s, e])
+  }
+
+  const results = await Promise.all(
+    windows.map(([s, e]) => fetchMetricsWindow(adminIdNum, s, e))
+  )
+
+  const frtValues = results.flatMap((r) => r.frtValues)
+  const resolveValues = results.flatMap((r) => r.resolveValues)
+  const assignmentCounts = results.flatMap((r) => r.assignmentCounts)
+  const reopenCounts = results.flatMap((r) => r.reopenCounts)
+  const csatScores = results.flatMap((r) => r.csatScores)
+  const total = results.reduce((sum, r) => sum + r.total, 0)
 
   function median(values: number[]): number | null {
     if (values.length === 0) return null
