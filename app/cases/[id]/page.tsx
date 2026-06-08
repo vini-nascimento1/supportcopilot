@@ -24,7 +24,6 @@ import { MarkdownPreview } from "@/components/markdown-preview"
 import { DraftPanel } from "@/components/draft-panel"
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
-import { getDraftForConversation } from "@/lib/drafts"
 import { getAgentProfile } from "@/lib/agent"
 import {
   getPlaybooksDashboardData,
@@ -113,10 +112,9 @@ export default async function CasePage({
 }) {
   const { id } = await params
 
-  const [conversation, playbooksData, existingDraft, agentProfile] = await Promise.all([
+  const [conversation, playbooksData, agentProfile] = await Promise.all([
     getConversationDetail(id),
     getPlaybooksDashboardData(),
-    getDraftForConversation(id),
     getAgentProfile(),
   ])
 
@@ -335,7 +333,6 @@ export default async function CasePage({
             conversationId={id}
             playbookId={matches[0]?.playbook.id}
             playbookName={matches[0]?.playbook.caseType}
-            existingDraft={existingDraft}
           />
 
           <Card>

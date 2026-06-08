@@ -4,11 +4,27 @@ import { useState } from "react"
 import { CheckIcon, CopyIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-export function CopyButton({ text }: { text: string }) {
+interface Props {
+  text: string
+  /** Optional HTML version. When provided, copies as text/html so pasting
+   *  into Intercom renders formatting (bold, lists, links) seamlessly. */
+  htmlText?: string
+}
+
+export function CopyButton({ text, htmlText }: Props) {
   const [copied, setCopied] = useState(false)
 
   async function copy() {
-    await navigator.clipboard.writeText(text)
+    if (htmlText) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([htmlText], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" }),
+        }),
+      ])
+    } else {
+      await navigator.clipboard.writeText(text)
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

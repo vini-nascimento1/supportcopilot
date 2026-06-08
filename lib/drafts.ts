@@ -4,6 +4,68 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 
+// ── Persistence for explicit draft saving ──────────────────────────────────
+
+export async function persistDraft(
+  conversationId: string,
+  customerName: string,
+  playbookId: string | null,
+  replyBody: string,
+  email?: string | null,
+): Promise<{ id: string; version: number } | null> {
+  const supabase = getSupabaseAdminClient()
+  if (!supabase || !replyBody.trim()) return null
+
+  // Resolve agent id from email so RLS policies can enforce case ownership
+  let ownerId: string | undefined
+  if (email) {
+    const { data: agent } = await supabase
+      .from("agents")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle()
+    if (agent) ownerId = agent.id
+  }
+
+  const { data: caseRow } = await supabase
+    .from("cases")
+    .upsert(
+      {
+        intercom_conversation_id: conversationId,
+        customer_name: customerName,
+        playbook_id: playbookId,
+        owner_id: ownerId,
+      },
+      { onConflict: "intercom_conversation_id" },
+    )
+    .select("id")
+    .single()
+
+  if (!caseRow) return null
+
+  const { data: latestVersion } = await supabase
+    .from("drafts")
+    .select("version")
+    .eq("case_id", caseRow.id)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const version = (latestVersion?.version ?? 0) + 1
+
+  const { data: inserted } = await supabase
+    .from("drafts")
+    .insert({
+      case_id: caseRow.id,
+      version,
+      reply_body: replyBody,
+    })
+    .select("id, version")
+    .single()
+
+  return inserted ?? null
+}
+
 async function getAuthClient() {
   const cookieStore = await cookies()
   return createServerClient(

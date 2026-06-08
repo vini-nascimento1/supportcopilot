@@ -504,6 +504,65 @@ export async function searchOpenConversationsForAdmin(adminId?: string): Promise
   return out
 }
 
+// ── Intercom Help Center articles ───────────────────────────────────────────
+
+export type IntercomArticle = {
+  id: string
+  title: string
+  description: string
+  bodySnippet: string
+}
+
+/**
+ * Search Intercom Help Center articles by keyword query.
+ * Returns up to 5 matching articles with body truncated to ~1 200 chars each.
+ * Returns empty array if the token is missing, the request fails, or Help
+ * Center is not set up on this workspace.
+ */
+export async function searchArticles(query: string): Promise<IntercomArticle[]> {
+  if (!intercomToken || !query.trim()) return []
+
+  try {
+    const response = await fetchIntercom("https://api.intercom.io/articles/search", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${intercomToken}`,
+        "Content-Type": "application/json",
+        "Intercom-Version": "2.11",
+      },
+      body: JSON.stringify({
+        query: {
+          operator: "AND",
+          value: [{ field: "body", operator: "~", value: query }],
+        },
+        pagination: { per_page: 5 },
+      }),
+      cache: "no-store",
+      timeoutMs: 10_000,
+    })
+
+    if (!response.ok) return []
+
+    const payload = (await response.json()) as {
+      data?: Array<{
+        id: string
+        title?: string
+        description?: string
+        body?: string
+      }>
+    }
+
+    return (payload.data ?? []).map((a) => ({
+      id: a.id,
+      title: a.title ?? "",
+      description: a.description ?? "",
+      bodySnippet: stripHtml(a.body).slice(0, 1_200),
+    }))
+  } catch {
+    return []
+  }
+}
+
 // ── Intercom Admin listing ──────────────────────────────────────────────────
 
 export type IntercomAdmin = {

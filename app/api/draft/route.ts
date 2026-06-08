@@ -1,7 +1,8 @@
 import { type NextRequest } from "next/server"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getSignedInEmail } from "@/lib/auth"
-import { getConversationDetail } from "@/lib/intercom"
+import { getConversationDetail, searchArticles } from "@/lib/intercom"
+import type { IntercomArticle } from "@/lib/intercom"
 import { getPlaybooksDashboardData, getResponsesForPlaybookIds } from "@/lib/playbooks"
 import type { PlaybookListItem, ResponseItem } from "@/lib/playbooks"
 
@@ -19,7 +20,8 @@ async function getAgentName(email: string): Promise<string> {
 function buildSystemPrompt(
   playbook: PlaybookListItem | undefined,
   examples: ResponseItem[],
-  agentName: string
+  agentName: string,
+  articles: IntercomArticle[]
 ): string {
   const parts: string[] = []
 
@@ -34,14 +36,14 @@ Your task: write a warm, helpful customer-facing reply to the conversation below
 - Use short bullet lists when listing multiple steps (4 max).
 - End with exactly one clear call-to-action.
 - No sign-off footer (no "Warm regards", no name, no title).
-- Never promise timelines, refunds, or exceptions not stated in the playbook.
+- Never promise timelines, refunds, or exceptions not stated in the playbook or articles.
 
 ## Critical constraints
 - Output ONLY the customer-facing message text — ready to copy-paste.
 - The draft IS markdown: use **bold**, bullet lists, and line breaks for readability.
 - No intro like "Here's a draft:", no markdown headers (no ##, no ###), no internal commentary.
 - Personalize to the customer's specific situation without using their real name.
-- If the playbook doesn't cover the issue, acknowledge warmly and ask one focused clarifying question.`)
+- If the playbook and articles don't cover the issue, acknowledge warmly and ask one focused clarifying question.`)
 
   if (playbook) {
     const sections: string[] = [`\n## Playbook: ${playbook.caseType}`]
@@ -49,6 +51,17 @@ Your task: write a warm, helpful customer-facing reply to the conversation below
     if (playbook.resolution) sections.push(`**Resolution guidance:**\n${playbook.resolution}`)
     if (playbook.dosDonts) sections.push(`**Important — do not:** ${playbook.dosDonts}`)
     parts.push(sections.join("\n\n"))
+  }
+
+  if (articles.length > 0) {
+    const articleSection = [`\n## Internal knowledge base articles (use as reference)`]
+    for (const art of articles) {
+      const snippet = [`### ${art.title}`]
+      if (art.description) snippet.push(`*${art.description}*`)
+      snippet.push(art.bodySnippet)
+      articleSection.push(snippet.join("\n\n"))
+    }
+    parts.push(articleSection.join("\n\n"))
   }
 
   if (examples.length > 0) {
@@ -82,58 +95,6 @@ function buildUserMessage(conversation: {
 
   parts.push(`\nDraft a reply following the playbook and tone rules above.`)
   return parts.join("\n")
-}
-
-async function persistDraft(
-  conversationId: string,
-  customerName: string,
-  playbookId: string | null,
-  replyBody: string,
-  email?: string | null
-): Promise<void> {
-  const supabase = getSupabaseAdminClient()
-  if (!supabase || !replyBody.trim()) return
-
-  // Resolve agent id from email so RLS policies can enforce case ownership
-  let ownerId: string | undefined
-  if (email) {
-    const { data: agent } = await supabase
-      .from("agents")
-      .select("id")
-      .eq("email", email)
-      .maybeSingle()
-    if (agent) ownerId = agent.id
-  }
-
-  const { data: caseRow } = await supabase
-    .from("cases")
-    .upsert(
-      {
-        intercom_conversation_id: conversationId,
-        customer_name: customerName,
-        playbook_id: playbookId,
-        owner_id: ownerId,
-      },
-      { onConflict: "intercom_conversation_id" }
-    )
-    .select("id")
-    .single()
-
-  if (!caseRow) return
-
-  const { data: latestVersion } = await supabase
-    .from("drafts")
-    .select("version")
-    .eq("case_id", caseRow.id)
-    .order("version", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  await supabase.from("drafts").insert({
-    case_id: caseRow.id,
-    version: (latestVersion?.version ?? 0) + 1,
-    reply_body: replyBody,
-  })
 }
 
 // ── OpenAI-compatible streaming via Verboo router ─────────────────────────
@@ -243,8 +204,14 @@ export async function POST(req: NextRequest) {
     ? ((await getResponsesForPlaybookIds([playbookId])).get(playbookId) ?? [])
     : []
 
+  // Fetch relevant Intercom Help Center articles for extra context
+  const searchQuery = [conversation.subject, conversation.firstMessage]
+    .filter(Boolean)
+    .join(" ")
+  const articles = await searchArticles(searchQuery)
+
   const agentName = await getAgentName(email)
-  const systemPrompt = buildSystemPrompt(playbook, responseTemplates, agentName)
+  const systemPrompt = buildSystemPrompt(playbook, responseTemplates, agentName, articles)
   const userMessage = buildUserMessage(conversation)
 
   const encoder = new TextEncoder()
@@ -266,11 +233,6 @@ export async function POST(req: NextRequest) {
         const msg = err instanceof Error ? err.message : "AI generation failed"
         controller.enqueue(encoder.encode(`[Error: ${msg}]`))
       } finally {
-        try {
-          await persistDraft(conversationId, conversation.customer, playbookId ?? null, fullText, email)
-        } catch (err) {
-          console.error("Failed to persist draft:", err)
-        }
         controller.close()
       }
     },

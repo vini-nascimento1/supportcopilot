@@ -23,6 +23,20 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "All AI tool errors now show friendly messages. Timeout detection, input validation, and fallback summaries if the final response fails.",
   },
   {
+    id: "seed-2026-06-08-d",
+    date: "2026-06-08",
+    title: "Per-agent KPI metrics dashboard",
+    description:
+      "New Metrics tab with per-agent KPIs: first response time, CSAT score, conversation volume, reassignment rate, and reopen rate. Data sourced from Intercom with 24h cache and nightly cron pre-population.",
+  },
+  {
+    id: "seed-2026-06-08-e",
+    date: "2026-06-08",
+    title: "Settings page with working days configuration",
+    description:
+      "Unified settings form for configuring working days. Toggle individual days on/off so metrics divisor reflects actual working days. Cache invalidates automatically on save.",
+  },
+  {
     id: "seed-2026-06-08-a",
     date: "2026-06-08",
     title: "AI assistant with tool calling",

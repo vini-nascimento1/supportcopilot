@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card"
 import { CopyButton } from "@/components/copy-button"
 import { MarkdownPreview } from "@/components/markdown-preview"
+import { mdToHtml } from "@/lib/md-to-html"
 
 interface Props {
   conversationId: string
@@ -27,16 +28,15 @@ const LOADING_STEPS = [
   "Drafting your reply…",
 ]
 
-export function DraftPanel({ conversationId, playbookId, playbookName, existingDraft }: Props) {
+export function DraftPanel({ conversationId, playbookId, playbookName }: Props) {
   const [draft, setDraft] = useState<{ body: string; loading: boolean; error: string | null }>({
-    body: existingDraft?.replyBody ?? "",
+    body: "",
     loading: false,
     error: null,
   })
   const [loadingStep, setLoadingStep] = useState(0)
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const hasExistingDraft = !!existingDraft
+  const previousBodyRef = useRef<string>("")
 
   // Cycle through loading steps while generating
   useEffect(() => {
@@ -54,6 +54,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName, existingD
   }, [draft.loading])
 
   async function generateDraft() {
+    previousBodyRef.current = draft.body
     setDraft({ body: "", loading: true, error: null })
 
     try {
@@ -68,7 +69,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName, existingD
 
       if (!res.ok) {
         const text = await res.text()
-        setDraft({ body: "", loading: false, error: text || `Request failed (${res.status})` })
+        setDraft({ body: previousBodyRef.current, loading: false, error: text || `Request failed (${res.status})` })
         return
       }
 
@@ -88,7 +89,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName, existingD
 
       setDraft({ body, loading: false, error: null })
     } catch (e) {
-      setDraft({ body: "", loading: false, error: e instanceof Error ? e.message : "Network error" })
+      setDraft({ body: previousBodyRef.current, loading: false, error: e instanceof Error ? e.message : "Network error" })
     }
   }
 
@@ -102,11 +103,6 @@ export function DraftPanel({ conversationId, playbookId, playbookName, existingD
         {playbookName && (
           <CardDescription className="line-clamp-2 text-xs">
             Based on: {playbookName}
-          </CardDescription>
-        )}
-        {hasExistingDraft && !draft.loading && !draft.error && (
-          <CardDescription className="text-xs">
-            Version {existingDraft?.version} — generated via Claude Code
           </CardDescription>
         )}
       </CardHeader>
@@ -133,7 +129,16 @@ export function DraftPanel({ conversationId, playbookId, playbookName, existingD
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-muted-foreground">Draft reply</span>
-              <CopyButton text={draft.body} />
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={generateDraft}
+                  className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/50"
+                >
+                  <SparklesIcon className="size-3" />
+                  Regenerate
+                </button>
+                <CopyButton text={draft.body} htmlText={mdToHtml(draft.body)} />
+              </div>
             </div>
             <MarkdownPreview content={draft.body} />
             <p className="text-xs text-muted-foreground">
@@ -143,9 +148,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName, existingD
         ) : (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-muted-foreground">
-              {hasExistingDraft
-                ? "A draft from Claude Code was loaded above."
-                : "Generate an AI-powered draft reply based on the matched playbook."}
+              Generate an AI-powered draft reply based on the matched playbook.
             </p>
             <button
               onClick={generateDraft}
