@@ -144,9 +144,9 @@ export type TestMatch = {
  * open queues, joined with our DB metadata. Pure decision — NO actions are
  * executed and nothing is written.
  *
- * If the candidate rule has NO teammate condition (global rule), conversations
- * are fetched from ALL agents. If it has a teammate condition, only the current
- * agent's queue is scanned.
+ * Always fetches ALL open conversations (no admin filter) so that conditions
+ * like "teammate is <id>" or "teammate is_empty" are evaluated correctly
+ * against the full queue, not just the current agent's queue.
  */
 export async function testRule(
   agentId: string,
@@ -154,35 +154,18 @@ export async function testRule(
   candidate: { conditions: ConditionTree; actions: Action[] },
   nowMs: number
 ): Promise<{ scanned: number; matches: TestMatch[] }> {
-  // Determine if this is a global rule (no teammate condition) or per-agent.
-  const isGlobal = !candidate.conditions.groups.some((g) =>
-    g.conditions.some((c) => c.field === "teammate")
-  )
-
   const DRY_RUN_LIMIT = 200
   let liveConvs: Awaited<ReturnType<typeof searchOpenConversationsForAdmin>> = []
 
-  if (isGlobal) {
-    // Global rule — fetch ALL open conversations from Intercom (no admin filter).
-    try {
-      liveConvs = await searchOpenConversationsForAdmin()
-    } catch (e) {
-      throw new Error(`Intercom unavailable: ${(e as Error).message}`)
-    }
-  } else {
-    // Per-agent rule — only scan the current user's queue.
-    const { data: agent } = await db
-      .from("agents")
-      .select("intercom_admin_id")
-      .eq("id", agentId)
-      .maybeSingle()
-    const intercomAdminId = (agent?.intercom_admin_id as string | null | undefined) ?? null
-    if (!intercomAdminId) return { scanned: 0, matches: [] }
-    try {
-      liveConvs = await searchOpenConversationsForAdmin(intercomAdminId)
-    } catch (e) {
-      throw new Error(`Intercom unavailable: ${(e as Error).message}`)
-    }
+  // When the candidate has a teammate condition, we MUST fetch ALL open
+  // conversations (no admin filter) so the evaluator can check against the
+  // right assignee. If we scoped to the current user's queue, "teammate is FIN"
+  // would only scan the current user's conversations — never finding FIN's.
+  // Similarly, "teammate is_empty" must scan all conversations for unassigned.
+  try {
+    liveConvs = await searchOpenConversationsForAdmin()
+  } catch (e) {
+    throw new Error(`Intercom unavailable: ${(e as Error).message}`)
   }
 
   if (liveConvs.length === 0) return { scanned: 0, matches: [] }
