@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic"
 
 const VERBOO_API_KEY = process.env.VERBOO_API_KEY
 const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
+const MAX_TOOL_ROUNDS = 3
+const AI_TIMEOUT_MS = 30_000
 
 // ── Tool definitions ───────────────────────────────────────────────────────
 
@@ -217,6 +219,44 @@ Rules WITH "teammate is <intercom_admin_id>" are scoped to that specific agent.
 
 Always explain what you're about to do, ask clarifying questions first, then confirm before creating/updating. After creating or updating, summarise what was done.`
 
+// ── Tool result type ────────────────────────────────────────────────────────
+
+type ToolResult = { success: true; data: unknown } | { success: false; friendly: string; debug: string }
+
+function toolSuccess(data: unknown): ToolResult {
+  return { success: true, data }
+}
+
+function toolError(friendly: string, debug: string): ToolResult {
+  return { success: false, friendly, debug }
+}
+
+// ── Input validation ────────────────────────────────────────────────────────
+
+function validateRuleInput(args: Record<string, unknown>): string | null {
+  const kind = args.kind as string | undefined
+  if (kind && !["monitor", "trigger"].includes(kind)) {
+    return `The rule kind must be "monitor" or "trigger", not "${kind}".`
+  }
+  if (kind === "monitor") {
+    if (args.sweepEveryMins === undefined && args.sweep_every_mins === undefined) {
+      return "A monitor rule needs a sweep interval (sweepEveryMins). The default is 5 minutes — you can omit it or set a custom value."
+    }
+  }
+  if (kind === "trigger") {
+    if (!args.onEvents || (args.onEvents as unknown[]).length === 0) {
+      return "A trigger rule needs events (onEvents) to fire on. Use ['conversation.created'] for new conversations, or include 'conversation.updated' too."
+    }
+  }
+  if (args.conditions) {
+    const cond = args.conditions as Record<string, unknown>
+    if (!cond.match || !Array.isArray(cond.groups)) {
+      return "The conditions field should have a 'match' (all/any) and a 'groups' array. Please check the format."
+    }
+  }
+  return null
+}
+
 // ── Tool handlers ──────────────────────────────────────────────────────────
 
 async function handleToolCall(
@@ -224,42 +264,52 @@ async function handleToolCall(
   args: Record<string, unknown>,
   agentId: string,
   db: NonNullable<ReturnType<typeof getSupabaseAdminClient>>
-): Promise<{ result: unknown; error?: string }> {
+): Promise<ToolResult> {
   try {
     switch (name) {
       case "list_rules": {
         const rules = await listRules(agentId, db)
-        return { result: rules.map((r) => ({ id: r.id, name: r.name, kind: r.kind, enabled: r.enabled, priority: r.priority, conditions: r.conditions, actions: r.actions })) }
+        return toolSuccess(rules.map((r) => ({ id: r.id, name: r.name, kind: r.kind, enabled: r.enabled, priority: r.priority, conditions: r.conditions, actions: r.actions })))
       }
 
       case "get_rule": {
         const rules = await listRules(agentId, db)
         const rule = rules.find((r) => r.id === args.id)
-        if (!rule) return { result: null, error: "Rule not found" }
-        return { result: rule }
+        if (!rule) return toolError("I couldn't find a rule with that ID. Check the ID and try again.", "Rule not found")
+        return toolSuccess(rule)
       }
 
       case "create_rule": {
+        const validationMsg = validateRuleInput(args)
+        if (validationMsg) return toolError(validationMsg, `Validation failed: ${validationMsg}`)
         const rule = await createRule(agentId, db, args as Parameters<typeof createRule>[2])
-        return { result: rule }
+        return toolSuccess(rule)
       }
 
       case "update_rule": {
         const { id, patch } = args as { id: string; patch: Record<string, unknown> }
+        const validationMsg = validateRuleInput(patch)
+        if (validationMsg) return toolError(validationMsg, `Validation failed: ${validationMsg}`)
         const rule = await updateRule(agentId, db, id, patch)
-        return { result: rule }
+        return toolSuccess(rule)
       }
 
       case "delete_rule": {
         const { id } = args as { id: string }
         await deleteRule(agentId, db, id)
-        return { result: { deleted: true } }
+        return toolSuccess({ deleted: true })
       }
 
       case "test_rule": {
         const { conditions } = args as { conditions: ConditionTree }
+        if (!conditions || !conditions.match || !conditions.groups) {
+          return toolError(
+            "The conditions format seems wrong — it needs a 'match' field (all/any) and a 'groups' array. Please check and try again.",
+            "Invalid conditions structure"
+          )
+        }
         const result = await testRule(agentId, db, { conditions, actions: [] }, Date.now())
-        return { result }
+        return toolSuccess(result)
       }
 
       case "get_insights": {
@@ -267,7 +317,6 @@ async function handleToolCall(
         const monitorCount = rules.filter((r) => r.kind === "monitor" && r.enabled).length
         const triggerCount = rules.filter((r) => r.kind === "trigger" && r.enabled).length
 
-        // Try to fetch open conversation counts for this agent.
         const { data: agent } = await db
           .from("agents")
           .select("intercom_admin_id")
@@ -281,21 +330,86 @@ async function handleToolCall(
           } catch { /* skip */ }
         }
 
-        return {
-          result: {
-            totalRules: rules.length,
-            enabledMonitors: monitorCount,
-            enabledTriggers: triggerCount,
-            openConversations: openConvs,
-          },
-        }
+        return toolSuccess({
+          totalRules: rules.length,
+          enabledMonitors: monitorCount,
+          enabledTriggers: triggerCount,
+          openConversations: openConvs,
+        })
       }
 
       default:
-        return { result: null, error: `Unknown tool: ${name}` }
+        return toolError(
+          `I tried to use an unknown tool "${name}". Please try again or report this to Vinicius if it persists.`,
+          `Unknown tool: ${name}`
+        )
     }
   } catch (e) {
-    return { result: null, error: (e as Error).message }
+    const msg = (e as Error).message
+    return toolError(
+      `Something went wrong while running "${name}". Please try again or report this to Vinicius if it persists.`,
+      msg
+    )
+  }
+}
+
+// ── Verboo Router helper ────────────────────────────────────────────────────
+
+async function callVerboo(
+  messages: Array<Record<string, unknown>>,
+  options?: { tool_choice?: "auto" | "none" }
+): Promise<{
+  content: string | null
+  tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>
+}> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${VERBOO_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "deepseek-v4-flash",
+        max_tokens: 4096,
+        stream: false,
+        messages,
+        tools: TOOLS,
+        tool_choice: options?.tool_choice ?? "auto",
+      }),
+      signal: controller.signal,
+    })
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "unknown")
+      throw new Error(`AI provider error (${res.status}): ${errText}`)
+    }
+
+    const data = (await res.json()) as {
+      choices: Array<{
+        message: {
+          content?: string | null
+          tool_calls?: Array<{
+            id: string
+            type: "function"
+            function: { name: string; arguments: string }
+          }>
+        }
+      }>
+    }
+
+    const choice = data.choices?.[0]?.message
+    if (!choice) throw new Error("No AI response (empty choices)")
+
+    return {
+      content: choice.content ?? null,
+      tool_calls: choice.tool_calls,
+    }
+  } finally {
+    clearTimeout(timeout)
   }
 }
 
@@ -313,100 +427,84 @@ export async function POST(req: Request) {
   if (!VERBOO_API_KEY) return NextResponse.json({ error: "VERBOO_API_KEY not configured" }, { status: 500 })
 
   try {
-    // Call Verboo Router with function calling.
-    const routerMessages = [
+    const messages: Array<Record<string, unknown>> = [
       { role: "system", content: SYSTEM_PROMPT },
       ...body.messages.map((m) => ({ role: m.role, content: m.content })),
     ]
 
-    const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${VERBOO_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "deepseek-v4-flash",
-        max_tokens: 4096,
-        stream: false,
-        messages: routerMessages,
-        tools: TOOLS,
-        tool_choice: "auto",
-      }),
-    })
+    let rounds = 0
+    while (rounds < MAX_TOOL_ROUNDS) {
+      rounds++
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "unknown")
-      return NextResponse.json({ error: `AI provider: ${res.status} ${errText}` }, { status: 502 })
-    }
+      const response = await callVerboo(messages)
 
-    const data = (await res.json()) as {
-      choices: Array<{
-        message: {
-          content?: string | null
-          tool_calls?: Array<{
-            id: string
-            type: "function"
-            function: { name: string; arguments: string }
-          }>
-        }
-      }>
-    }
+      if (!response.tool_calls || response.tool_calls.length === 0) {
+        // No more tools — return the final answer.
+        const reply = response.content ?? "I'm not sure how to respond."
+        return NextResponse.json({ message: reply })
+      }
 
-    const choice = data.choices?.[0]?.message
-    if (!choice) return NextResponse.json({ error: "No AI response" }, { status: 502 })
-
-    // Process tool calls if the model requested any.
-    if (choice.tool_calls && choice.tool_calls.length > 0) {
       // Execute each tool call.
-      const toolResults = await Promise.all(
-        choice.tool_calls.map(async (tc) => {
-          let args: Record<string, unknown> = {}
-          try { args = JSON.parse(tc.function.arguments) } catch { /* empty */ }
-          const { result, error } = await handleToolCall(tc.function.name, args, agentId, db)
-          return {
+      const toolResults: Array<Record<string, unknown>> = []
+      for (const tc of response.tool_calls) {
+        let args: Record<string, unknown> = {}
+        try {
+          args = JSON.parse(tc.function.arguments)
+        } catch {
+          toolResults.push({
             role: "tool",
             tool_call_id: tc.id,
-            content: error ? JSON.stringify({ error }) : JSON.stringify(result),
-          }
-        })
-      )
+            content: JSON.stringify({
+              _friendly: `The AI generated an invalid response for "${tc.function.name}". Please try again or report this to Vinicius if it persists.`,
+              _debug: `Invalid JSON: ${tc.function.arguments}`,
+            }),
+          })
+          continue
+        }
 
-      // Send tool results back to the model for the final answer.
-      const followUpRes = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${VERBOO_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "deepseek-v4-flash",
-          max_tokens: 4096,
-          stream: false,
-          messages: [
-            ...routerMessages,
-            { role: "assistant", content: choice.content ?? null, tool_calls: choice.tool_calls },
-            ...toolResults,
-          ],
-        }),
+        const result = await handleToolCall(tc.function.name, args, agentId, db)
+
+        if (result.success) {
+          toolResults.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify(result.data),
+          })
+        } else {
+          toolResults.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify({
+              _friendly: result.friendly,
+              _debug: result.debug,
+            }),
+          })
+        }
+      }
+
+      // Append assistant message + tool results for the next round.
+      messages.push({
+        role: "assistant",
+        content: response.content ?? null,
+        tool_calls: response.tool_calls,
       })
-
-      if (!followUpRes.ok) {
-        const errText = await followUpRes.text().catch(() => "unknown")
-        return NextResponse.json({ error: `AI follow-up: ${followUpRes.status} ${errText}` }, { status: 502 })
-      }
-
-      const followUpData = (await followUpRes.json()) as {
-        choices: Array<{ message: { content?: string | null } }>
-      }
-      const reply = followUpData.choices?.[0]?.message?.content ?? "Done."
-      return NextResponse.json({ message: reply })
+      messages.push(...toolResults)
     }
 
-    // No tool calls — direct reply.
-    const reply = choice.content ?? "I'm not sure how to respond."
+    // Max tool rounds reached — ask for a final summary without tool access.
+    const finalResponse = await callVerboo(messages, { tool_choice: "none" })
+    const reply = finalResponse.content ?? "I completed the actions but couldn't generate a summary."
     return NextResponse.json({ message: reply })
+
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    const msg = (e as Error).message
+    if (msg.includes("abort") || msg.includes("timeout")) {
+      return NextResponse.json({
+        error: "The AI took too long to respond. Try a simpler request or try again.",
+      }, { status: 504 })
+    }
+    return NextResponse.json({
+      error: "Something went wrong with the AI assistant. Please try again or report this to Vinicius if it persists.",
+    }, { status: 500 })
   }
 }
