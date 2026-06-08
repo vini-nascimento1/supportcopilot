@@ -15,7 +15,7 @@ export type FieldDef = {
   type: FieldType
   category: string
   /** enum option list, when type === "enum" | "event" */
-  options?: { value: string; label: string }[]
+  options?: { value: string; label: string; description?: string }[]
   /** which rule kinds this field is available in */
   appliesTo: RuleKind[]
   /** UI hint, e.g. durations are entered in minutes but stored/evaluated in seconds */
@@ -152,11 +152,40 @@ export const FIELDS: FieldDef[] = [
     type: "event",
     category: "Event",
     appliesTo: ["trigger"],
+    // Topic strings must match what Intercom delivers in webhook payloads —
+    // see https://developers.intercom.com/docs/references/webhooks/topics.
+    // Anything else makes runTriggerForEvent skip the rule silently.
     options: [
-      { value: "conversation.created", label: "Conversation created" },
-      { value: "conversation.updated", label: "Conversation updated" },
-      { value: "conversation.user.replied", label: "Customer replied" },
-      { value: "conversation.admin.assigned", label: "Assigned to an admin" },
+      {
+        value: "conversation.user.created",
+        label: "New conversation from customer",
+        description: "A customer started a new conversation.",
+      },
+      {
+        value: "conversation.user.replied",
+        label: "Customer replied",
+        description: "A customer added a message to an existing conversation.",
+      },
+      {
+        value: "conversation.admin.assigned",
+        label: "Assigned to a teammate",
+        description: "A conversation was assigned to a teammate (incl. Fin/AI).",
+      },
+      {
+        value: "conversation.admin.replied",
+        label: "Teammate replied",
+        description: "A teammate sent a reply.",
+      },
+      {
+        value: "conversation.admin.closed",
+        label: "Conversation closed",
+        description: "A teammate closed the conversation.",
+      },
+      {
+        value: "conversation.rating.added",
+        label: "CSAT rating received",
+        description: "A customer submitted a CSAT rating.",
+      },
     ],
   },
 ]

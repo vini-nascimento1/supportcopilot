@@ -95,9 +95,13 @@ function blankRule(kind: RuleKind): Partial<AutomationRule> {
     conditions: emptyTree(),
     actions: [{ kind: "alert.in_app" }],
     sweepEveryMins: kind === "monitor" ? 5 : null,
-    onEvents: kind === "trigger" ? ["conversation.created", "conversation.updated"] : null,
+    onEvents: kind === "trigger" ? [...DEFAULT_TRIGGER_EVENTS] : null,
   }
 }
+
+// Sensible default topics for a brand-new trigger rule: fires when a conversation
+// first lands with an admin (creation + assignment). Users can edit in BasicsStep.
+const DEFAULT_TRIGGER_EVENTS = ["conversation.user.created", "conversation.admin.assigned"] as const
 
 // ── component ─────────────────────────────────────────────────────────────────
 type Alert = {
@@ -600,7 +604,7 @@ function blankWithKind(draft: Partial<AutomationRule>, kind: RuleKind): Partial<
     ...draft,
     kind,
     sweepEveryMins: kind === "monitor" ? draft.sweepEveryMins ?? 5 : null,
-    onEvents: kind === "trigger" ? draft.onEvents ?? ["conversation.created", "conversation.updated"] : null,
+    onEvents: kind === "trigger" ? draft.onEvents ?? [...DEFAULT_TRIGGER_EVENTS] : null,
   }
 }
 
@@ -698,6 +702,63 @@ function BasicsStep({
           </div>
         )}
       </div>
+
+      {kind === "trigger" && <EventsPicker draft={draft} setDraft={setDraft} />}
+    </div>
+  )
+}
+
+function EventsPicker({
+  draft,
+  setDraft,
+}: {
+  draft: Partial<AutomationRule>
+  setDraft: (d: Partial<AutomationRule>) => void
+}) {
+  const options = getField("event")?.options ?? []
+  const selected = new Set(draft.onEvents ?? [])
+  const isEmpty = selected.size === 0
+
+  function toggle(value: string, checked: boolean) {
+    const next = new Set(selected)
+    if (checked) next.add(value)
+    else next.delete(value)
+    setDraft({ ...draft, onEvents: Array.from(next) })
+  }
+
+  return (
+    <div className="grid gap-1.5">
+      <Label className="text-sm font-medium">Fire on Intercom events</Label>
+      <div className="grid gap-2 rounded-md border p-3">
+        {options.map((opt) => {
+          const checked = selected.has(opt.value)
+          return (
+            <label
+              key={opt.value}
+              className="flex cursor-pointer items-start gap-2.5 rounded-sm px-1 py-0.5 hover:bg-muted/40"
+            >
+              <input
+                type="checkbox"
+                className="mt-1 size-4 accent-primary"
+                checked={checked}
+                onChange={(e) => toggle(opt.value, e.target.checked)}
+              />
+              <div className="grid gap-0.5">
+                <span className="text-sm font-medium">{opt.label}</span>
+                {opt.description && (
+                  <span className="text-xs text-muted-foreground">{opt.description}</span>
+                )}
+                <code className="font-mono text-[10px] text-muted-foreground/70">{opt.value}</code>
+              </div>
+            </label>
+          )
+        })}
+      </div>
+      <p className={`text-xs ${isEmpty ? "text-destructive" : "text-muted-foreground"}`}>
+        {isEmpty
+          ? "Pick at least one event — without any, the rule will never fire."
+          : "The rule evaluates only when Intercom sends one of these events."}
+      </p>
     </div>
   )
 }
