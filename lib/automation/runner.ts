@@ -81,7 +81,6 @@ export function sweepConversationToLive(c: SweepConversation): ConversationLive 
     tags: c.tags,
     customerName: c.customerName,
     isCreator: c.isCreator,
-    isAiCreator: c.isAiCreator,
     priority: c.priority,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,

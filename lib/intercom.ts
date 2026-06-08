@@ -332,9 +332,6 @@ export async function getOpenCasesQueue(
 // ── Live conversation feed for the automation engine ──────────────────────
 // Returns the raw fields the eval context needs. Distinct from getOpenCasesQueue,
 // which shapes data for the UI. Multi-page; honours Intercom's pagination cursor.
-// After the search, we enrich each conversation with the contact's custom_attributes
-// (Intercom's search endpoint does NOT embed those, so is_creator / is_ai_creator
-// would otherwise always be null — see Fix #1 in the live-Intercom refactor review).
 
 type IntercomSearchConversation = {
   id?: string | number
@@ -368,122 +365,50 @@ export type SweepConversation = {
   tags: string[]
   customerName: string | null
   isCreator: boolean | null
-  isAiCreator: boolean | null
   priority: string | null
   createdAt: string | null
   updatedAt: string | null
   adminAssigneeId: string | null
 }
 
-export function coerceCustomBool(value: unknown): boolean | null {
-  if (typeof value === "boolean") return value
-  if (typeof value === "string") {
-    const v = value.toLowerCase()
-    if (v === "true" || v === "yes" || v === "1") return true
-    if (v === "false" || v === "no" || v === "0") return false
-  }
-  return null
-}
-
-/** Read creator flags from a contact's custom_attributes — keys are deliberately loose
- * because Intercom admins use varied spellings ("Is Creator" / "is_creator" / "Creator"). */
-export function readCreatorFlags(attrs: Record<string, unknown> | null | undefined): {
-  isCreator: boolean | null
-  isAiCreator: boolean | null
-} {
-  const a = attrs ?? {}
-  return {
-    isCreator: coerceCustomBool(a.is_creator ?? a.IsCreator ?? a["Is Creator"] ?? a.Creator),
-    isAiCreator: coerceCustomBool(
-      a.is_ai_creator ?? a.IsAICreator ?? a["Is AI Creator"] ?? a["AI Creator"]
-    ),
-  }
-}
-
 function toSweepConversation(c: IntercomSearchConversation): {
   conv: SweepConversation
-  contactId: string | null
 } {
   const contact = c.contacts?.contacts?.[0]
-  const flags = readCreatorFlags(contact?.custom_attributes)
+  const tags = (c.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean)
   return {
     conv: {
       id: String(c.id ?? ""),
       intercomState: c.state ?? (c.open ? "open" : "closed"),
       subject: stripHtml(c.source?.subject ?? c.source?.body ?? c.title) || null,
-      tags: (c.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean),
+      tags,
       customerName:
         contact?.name ?? contact?.email ?? c.source?.author?.name ?? c.source?.author?.email ?? null,
-      isCreator: flags.isCreator,
-      isAiCreator: flags.isAiCreator,
+      // isCreator is derived from the CREATOR_TAG on the conversation.
+      // The Intercom search API does not embed contact custom_attributes,
+      // and in practice those fields are not populated on leads anyway.
+      isCreator: tags.includes("CREATOR_TAG") || null,
       priority: c.priority ?? null,
       createdAt: toDate(c.created_at),
       updatedAt: toDate(c.updated_at),
       adminAssigneeId: c.admin_assignee_id != null ? String(c.admin_assignee_id) : null,
     },
-    contactId: contact?.id ?? null,
-  }
-}
-
-async function fetchContactAttributes(contactId: string): Promise<Record<string, unknown> | null> {
-  if (!intercomToken) return null
-  const res = await fetchIntercom(`https://api.intercom.io/contacts/${contactId}`, {
-    headers: {
-      Authorization: `Bearer ${intercomToken}`,
-      "Intercom-Version": "2.11",
-    },
-    cache: "no-store",
-  })
-  if (!res.ok) return null
-  const data = (await res.json()) as { custom_attributes?: Record<string, unknown> }
-  return data.custom_attributes ?? {}
-}
-
-async function enrichCreatorFlags(
-  convs: SweepConversation[],
-  contactIds: (string | null)[]
-): Promise<void> {
-  const unique = Array.from(new Set(contactIds.filter((id): id is string => !!id)))
-  if (unique.length === 0) return
-
-  // Bounded-concurrency fan-out (Intercom limit ~1000 req/min; sweeps are infrequent).
-  const attrsByContact = new Map<string, Record<string, unknown>>()
-  const BATCH = 8
-  for (let i = 0; i < unique.length; i += BATCH) {
-    const slice = unique.slice(i, i + BATCH)
-    const results = await Promise.all(
-      slice.map(async (id) => [id, await fetchContactAttributes(id)] as const)
-    )
-    for (const [id, attrs] of results) if (attrs) attrsByContact.set(id, attrs)
-  }
-
-  for (let i = 0; i < convs.length; i++) {
-    const cid = contactIds[i]
-    if (!cid) continue
-    const attrs = attrsByContact.get(cid)
-    if (!attrs) continue
-    const flags = readCreatorFlags(attrs)
-    convs[i].isCreator = flags.isCreator
-    convs[i].isAiCreator = flags.isAiCreator
   }
 }
 
 /**
- * Live-fetch the agent's open Intercom queue, with contact custom_attributes enriched.
- * @param adminId numeric Intercom admin id (string is accepted but coerced to number for the API).
- * @throws if INTERCOM_ACCESS_TOKEN is unset or the search request fails — the sweep
- *   runner catches and surfaces the error, so a missing token is loud, not silent.
+ * Live-fetch open Intercom conversations for the automation engine.
+ * @param adminId optional — when provided scopes to that agent's queue;
+ *   when omitted fetches ALL open conversations.
+ * @throws if INTERCOM_ACCESS_TOKEN is unset or the search request fails.
  */
 export async function searchOpenConversationsForAdmin(adminId?: string): Promise<SweepConversation[]> {
   if (!intercomToken) throw new Error("INTERCOM_ACCESS_TOKEN is not set")
 
   const out: SweepConversation[] = []
-  const contactIds: (string | null)[] = []
   let startingAfter: string | undefined
 
   do {
-    // When adminId is provided, scope to that agent's queue. When omitted,
-    // fetch ALL open conversations (used by global rule tests).
     const queryFilters: Array<Record<string, unknown>> = [
       { field: "open", operator: "=", value: true },
     ]
@@ -494,10 +419,7 @@ export async function searchOpenConversationsForAdmin(adminId?: string): Promise
     }
 
     const body: Record<string, unknown> = {
-      query: {
-        operator: "AND",
-        value: queryFilters,
-      },
+      query: { operator: "AND", value: queryFilters },
       pagination: { per_page: 150, ...(startingAfter ? { starting_after: startingAfter } : {}) },
     }
 
@@ -521,14 +443,12 @@ export async function searchOpenConversationsForAdmin(adminId?: string): Promise
     }
 
     for (const c of payload.conversations ?? payload.data ?? []) {
-      const { conv, contactId } = toSweepConversation(c)
+      const { conv } = toSweepConversation(c)
       out.push(conv)
-      contactIds.push(contactId)
     }
     startingAfter = payload.pages?.next?.starting_after
   } while (startingAfter)
 
-  await enrichCreatorFlags(out, contactIds)
   return out
 }
 

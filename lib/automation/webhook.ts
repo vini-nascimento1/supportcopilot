@@ -9,7 +9,6 @@ import "server-only"
 import { createHmac, timingSafeEqual } from "crypto"
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
-import { readCreatorFlags } from "@/lib/intercom"
 import { planCaseActions } from "./engine"
 import { runAction, type ActionResult } from "./actions"
 import { buildContext, type ConversationLive, type CaseMeta } from "./context"
@@ -65,16 +64,15 @@ function stripHtml(value: string | null | undefined): string | null {
 
 function itemToConversationLive(item: IntercomConversationItem): ConversationLive {
   const contact = item.contacts?.contacts?.[0]
-  const flags = readCreatorFlags(contact?.custom_attributes)
+  const tags = (item.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean)
   return {
     intercomConversationId: item.id != null ? String(item.id) : "",
     intercomState: item.state ?? (item.open ? "open" : item.open === false ? "closed" : null),
     subject: stripHtml(item.source?.subject ?? item.source?.body ?? item.title),
-    tags: (item.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean),
+    tags,
     customerName:
       contact?.name ?? contact?.email ?? item.source?.author?.name ?? item.source?.author?.email ?? null,
-    isCreator: flags.isCreator,
-    isAiCreator: flags.isAiCreator,
+    isCreator: tags.includes("CREATOR_TAG") || null,
     priority: item.priority ?? null,
     createdAt: unixToIso(item.created_at),
     updatedAt: unixToIso(item.updated_at),

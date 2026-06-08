@@ -934,6 +934,14 @@ function ConditionRow({
               ))}
             </SelectContent>
           </Select>
+        ) : field?.type === "tags" && (cond.op === "contains" || cond.op === "not_contains") ? (
+          <TagPicker value={String(cond.value ?? "")} multi={false} onChange={(v) => onChange({ ...cond, value: v })} />
+        ) : field?.type === "tags" && cond.op === "in" ? (
+          <TagPicker
+            value={Array.isArray(cond.value) ? cond.value : []}
+            multi={true}
+            onChange={(v) => onChange({ ...cond, value: Array.isArray(v) ? v : v ? [v] : [] })}
+          />
         ) : isDuration ? (
           <div className="flex items-center gap-1.5">
             {cond.field === "first_response_minutes" && (
@@ -1164,6 +1172,97 @@ function TextWithPlaceholders({ value, onChange }: { value: string; onChange: (v
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ── Tag picker ───────────────────────────────────────────────────────────────────
+
+type TagItem = { id: string; name: string }
+
+function TagPicker({
+  value,
+  multi,
+  onChange,
+}: {
+  value: string | string[]
+  multi: boolean
+  onChange: (v: string | string[]) => void
+}) {
+  const fetched = useRef(false)
+  const [tags, setTags] = useState<TagItem[]>([])
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (fetched.current) return
+    fetched.current = true
+    fetch("/api/tags")
+      .then((r) => r.json())
+      .then((d) => setTags(d.tags ?? []))
+      .catch(() => {})
+  }, [])
+
+  if (!multi) {
+    return (
+      <Select value={String(value ?? "")} onValueChange={onChange}>
+        <SelectTrigger className="h-8 w-[180px] text-xs">
+          <SelectValue placeholder="Select tag…" />
+        </SelectTrigger>
+        <SelectContent>
+          {tags.map((t) => (
+            <SelectItem key={t.id} value={t.name}>
+              {t.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    )
+  }
+
+  const selected = Array.isArray(value) ? value : []
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex h-8 min-w-[160px] max-w-[240px] items-center gap-1 rounded-md border border-input bg-background px-2 text-xs text-left"
+      >
+        {selected.length === 0 ? (
+          <span className="text-muted-foreground">Select tags…</span>
+        ) : (
+          <span className="truncate">{selected.join(", ")}</span>
+        )}
+        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{selected.length}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-50 mt-1 max-h-48 w-[220px] overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
+            {tags.map((t) => {
+              const isSelected = selected.includes(t.name)
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`flex w-full items-center gap-2 rounded-sm px-2 py-1 text-xs hover:bg-accent ${
+                    isSelected ? "bg-accent/60 font-medium" : ""
+                  }`}
+                  onClick={() => {
+                    const next = isSelected ? selected.filter((s) => s !== t.name) : [...selected, t.name]
+                    onChange(next)
+                  }}
+                >
+                  <span className="size-3 rounded border border-input flex items-center justify-center">
+                    {isSelected && <span className="size-2 rounded-sm bg-primary" />}
+                  </span>
+                  {t.name}
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
     </div>
   )
 }

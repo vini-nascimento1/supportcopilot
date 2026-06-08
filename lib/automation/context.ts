@@ -16,7 +16,6 @@ export type ConversationLive = {
   tags: string[]
   customerName: string | null
   isCreator: boolean | null
-  isAiCreator: boolean | null
   priority: string | null
   createdAt: string | null
   updatedAt: string | null
@@ -73,7 +72,6 @@ export function buildContext(
     priority_hint: meta?.priorityHint ?? null,
     priority: conv?.priority ?? null,
     is_creator: conv?.isCreator ?? null,
-    is_ai_creator: conv?.isAiCreator ?? null,
     matched_playbook: meta?.matchedPlaybook ?? null,
     time_since_update: ageSeconds(updatedAt, nowMs),
     time_since_created: openedAgeSec,

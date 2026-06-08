@@ -99,13 +99,6 @@ export const FIELDS: FieldDef[] = [
     appliesTo: ["trigger", "monitor"],
   },
   {
-    key: "is_ai_creator",
-    label: "Customer is an AI creator",
-    type: "boolean",
-    category: "Requester",
-    appliesTo: ["trigger", "monitor"],
-  },
-  {
     key: "matched_playbook",
     label: "Matched playbook (case type)",
     type: "text",
