@@ -333,6 +333,36 @@ export async function getOpenCasesQueue(
 // Returns the raw fields the eval context needs. Distinct from getOpenCasesQueue,
 // which shapes data for the UI. Multi-page; honours Intercom's pagination cursor.
 
+type ConversationStatistics = {
+  time_to_assignment?: number | null
+  time_to_admin_reply?: number | null
+  time_to_first_close?: number | null
+  time_to_last_close?: number | null
+  median_time_to_reply?: number | null
+  first_contact_reply_at?: number | null
+  first_assignment_at?: number | null
+  first_admin_reply_at?: number | null
+  first_close_at?: number | null
+  last_assignment_at?: number | null
+  last_assignment_admin_reply_at?: number | null
+  last_contact_reply_at?: number | null
+  last_admin_reply_at?: number | null
+  last_close_at?: number | null
+  last_closed_by_id?: string | null
+  count_reopens?: number | null
+  count_assignments?: number | null
+  count_conversation_parts?: number | null
+}
+
+type ConversationRating = {
+  score?: number | null
+  remark?: string | null
+  created_at?: number | null
+  replied_at?: number | null
+  contact_id?: string | null
+  teammate?: { id?: string | null } | null
+}
+
 type IntercomSearchConversation = {
   id?: string | number
   state?: string | null
@@ -342,6 +372,8 @@ type IntercomSearchConversation = {
   title?: string | null
   priority?: string | null
   admin_assignee_id?: number | string | null
+  statistics?: ConversationStatistics | null
+  conversation_rating?: ConversationRating | null
   source?: {
     subject?: string | null
     body?: string | null
@@ -472,5 +504,126 @@ export async function listIntercomAdmins(): Promise<IntercomAdmin[]> {
     return (data.admins ?? []).map((a) => ({ id: a.id, name: a.name, email: a.email }))
   } catch {
     return []
+  }
+}
+
+// ── Agent metrics (conversation stats for the Metrics tab) ──────────────────
+
+export type AgentMetrics = {
+  /** Number of closed conversations in the period. */
+  totalConversations: number
+  /** Average first response time in seconds (null if no data). */
+  avgFrtSec: number | null
+  /** Median first response time in seconds (null if no data). */
+  medianFrtSec: number | null
+  /** Average time to first close in seconds (null if no data). */
+  avgTimeToResolveSec: number | null
+  /** Average number of assignments per conversation. */
+  avgAssignments: number | null
+  /** Average number of reopens per conversation. */
+  avgReopens: number | null
+  /** Average CSAT score (1-5, null if no ratings). */
+  avgCsat: number | null
+  /** Number of conversations with a CSAT rating. */
+  csatCount: number | null
+  /** Period in days. */
+  periodDays: number
+}
+
+/**
+ * Fetch the agent's conversation metrics from Intercom.
+ * Searches for conversations assigned to this admin in the last N days
+ * and computes aggregate KPIs from the statistics.* and conversation_rating
+ * fields that come back from the search API.
+ */
+export async function searchMetricsForAdmin(
+  adminId: string,
+  days: number
+): Promise<AgentMetrics> {
+  if (!intercomToken) throw new Error("INTERCOM_ACCESS_TOKEN is not set")
+
+  const adminIdNum = Number(adminId)
+  if (!Number.isFinite(adminIdNum)) throw new Error(`Invalid intercom_admin_id: ${adminId}`)
+
+  const since = Math.floor((Date.now() - days * 86_400_000) / 1000)
+
+  const frtValues: number[] = []
+  const resolveValues: number[] = []
+  const assignmentCounts: number[] = []
+  const reopenCounts: number[] = []
+  const csatScores: number[] = []
+  let total = 0
+  let startingAfter: string | undefined
+
+  do {
+    const body: Record<string, unknown> = {
+      query: {
+        operator: "AND",
+        value: [
+          { field: "admin_assignee_id", operator: "=", value: adminIdNum },
+          { field: "created_at", operator: ">", value: since },
+        ],
+      },
+      pagination: { per_page: 150, ...(startingAfter ? { starting_after: startingAfter } : {}) },
+    }
+
+    const response = await fetchIntercom("https://api.intercom.io/conversations/search", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${intercomToken}`,
+        "Content-Type": "application/json",
+        "Intercom-Version": "2.11",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    })
+
+    if (!response.ok) throw new Error(`Intercom search ${response.status}`)
+
+    const payload = (await response.json()) as {
+      data?: IntercomSearchConversation[]
+      pages?: { next?: { starting_after: string } | null }
+    }
+
+    const convs = payload.data ?? []
+    total += convs.length
+
+    for (const c of convs) {
+      const stats = c.statistics
+      if (stats) {
+        if (typeof stats.time_to_admin_reply === "number") frtValues.push(stats.time_to_admin_reply)
+        if (typeof stats.time_to_first_close === "number") resolveValues.push(stats.time_to_first_close)
+        if (typeof stats.count_assignments === "number") assignmentCounts.push(stats.count_assignments)
+        if (typeof stats.count_reopens === "number") reopenCounts.push(stats.count_reopens)
+      }
+      const rating = c.conversation_rating
+      if (rating && typeof rating.score === "number") csatScores.push(rating.score)
+    }
+
+    startingAfter = payload.pages?.next?.starting_after
+  } while (startingAfter)
+
+  function median(values: number[]): number | null {
+    if (values.length === 0) return null
+    const sorted = [...values].sort((a, b) => a - b)
+    const mid = Math.floor(sorted.length / 2)
+    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+  }
+
+  function avg(values: number[]): number | null {
+    if (values.length === 0) return null
+    return values.reduce((a, b) => a + b, 0) / values.length
+  }
+
+  return {
+    totalConversations: total,
+    avgFrtSec: avg(frtValues),
+    medianFrtSec: median(frtValues),
+    avgTimeToResolveSec: avg(resolveValues),
+    avgAssignments: avg(assignmentCounts),
+    avgReopens: avg(reopenCounts),
+    avgCsat: avg(csatScores),
+    csatCount: csatScores.length,
+    periodDays: days,
   }
 }

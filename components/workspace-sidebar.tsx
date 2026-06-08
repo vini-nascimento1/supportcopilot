@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -10,6 +11,8 @@ import {
   LogOutIcon,
   MailIcon,
   MessageSquareIcon,
+  BarChart3Icon,
+  MegaphoneIcon,
   SettingsIcon,
   ZapIcon,
 } from "lucide-react"
@@ -26,6 +29,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { ChangelogDialog } from "@/components/changelog-dialog"
 
 const navItems = [
   { label: "Dashboard", icon: LifeBuoyIcon, href: "/" },
@@ -33,6 +37,7 @@ const navItems = [
   { label: "Gmail", icon: MailIcon, href: "/gmail" },
   { label: "Slack", icon: MessageSquareIcon, href: "/slack" },
   { label: "Playbooks", icon: BookOpenIcon, href: "/playbooks" },
+  { label: "Metrics", icon: BarChart3Icon, href: "/metrics" },
   { label: "Automation", icon: ZapIcon, href: "/automation" },
   { label: "Settings", icon: SettingsIcon, href: "/settings" },
 ]
@@ -44,6 +49,7 @@ interface Props {
 export function WorkspaceSidebar({ userEmail }: Props) {
   const pathname = usePathname()
   const initial = userEmail ? userEmail[0]?.toUpperCase() : "?"
+  const [changelogOpen, setChangelogOpen] = useState(false)
 
   return (
     <Sidebar collapsible="icon">
@@ -86,10 +92,26 @@ export function WorkspaceSidebar({ userEmail }: Props) {
                   </SidebarMenuItem>
                 )
               })}
+
+              {/* Novidades — opens changelog dialog instead of navigating */}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={false}
+                  onClick={() => setChangelogOpen(true)}
+                >
+                  <button className="w-full">
+                    <MegaphoneIcon />
+                    <span>Novidades</span>
+                  </button>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
+      <ChangelogDialog open={changelogOpen} onClose={() => setChangelogOpen(false)} />
 
       <SidebarFooter>
         <div className="flex items-center gap-3 px-2 py-2">
