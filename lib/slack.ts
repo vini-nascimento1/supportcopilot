@@ -528,7 +528,7 @@ export async function getUserConversations(
   }
 }
 
-/** Fetch latest message timestamps for each conversation and sort by most recent. */
+/** Fetch latest message timestamps + unread counts for each conversation and sort by most recent. */
 async function attachLatestTimestamps(
   token: string,
   conversations: SlackConversation[],
@@ -542,12 +542,18 @@ async function attachLatestTimestamps(
           const res = await fetch(`https://slack.com/api/conversations.info?channel=${c.id}`, {
             headers: { Authorization: `Bearer ${token}` },
           })
+          // conversations.info returns unread_count_display (mentions in channels,
+          // every message in DMs) on the Channel object when called with a user token.
+          // Without it the UI would show "all read" even when Slack itself has unreads.
           const data = (await res.json()) as {
             ok: boolean
-            channel?: { latest?: { ts?: string } }
+            channel?: { latest?: { ts?: string }; unread_count_display?: number }
           }
           if (data.ok && data.channel?.latest?.ts) {
             c.latestTs = parseFloat(data.channel.latest.ts)
+          }
+          if (data.ok && typeof data.channel?.unread_count_display === "number") {
+            c.unreadCount = data.channel.unread_count_display
           }
         } catch { /* skip */ }
       })
@@ -616,6 +622,29 @@ export async function getConversationMessages(
   }
 }
 
+/** List the user's DM + group-DM channel IDs (always relevant for unread count). */
+async function getUserDmChannelIds(token: string): Promise<string[]> {
+  try {
+    const url = new URL("https://slack.com/api/users.conversations")
+    url.searchParams.set("types", "im,mpim")
+    url.searchParams.set("limit", "200")
+    url.searchParams.set("exclude_archived", "true")
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+      next: { revalidate: 0 },
+    })
+    if (!res.ok) return []
+    const data = (await res.json()) as {
+      ok: boolean
+      channels?: Array<{ id: string }>
+    }
+    if (!data.ok) return []
+    return (data.channels ?? []).map((c) => c.id)
+  } catch {
+    return []
+  }
+}
+
 /** Get recent activity summary for the dashboard card. */
 export async function getSlackUnreadSummary(
   agentSlackToken?: string | null
@@ -631,8 +660,15 @@ export async function getSlackUnreadSummary(
     const auth = (await authRes.json()) as { ok: boolean; url?: string }
     if (!auth.ok) return { connected: false, unreadCount: 0, workspaceUrl: "" }
 
-    const channelIds = await getSupportChannelIds()
-    const messageCount = await countRecentMessages(token, channelIds)
+    // Configured channels + the user's own DMs and mpims. Without the DM half
+    // the badge silently shows 0 whenever the unread activity is in 1:1 chats
+    // — Slack's native sidebar always counts those, and so should we.
+    const [configured, dmIds] = await Promise.all([
+      getSupportChannelIds(),
+      getUserDmChannelIds(token),
+    ])
+    const allIds = Array.from(new Set([...configured, ...dmIds]))
+    const messageCount = await countRecentMessages(token, allIds)
 
     return { connected: true, unreadCount: messageCount, workspaceUrl: auth.url ?? "https://slack.com" }
   } catch {
