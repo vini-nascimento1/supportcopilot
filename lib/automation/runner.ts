@@ -208,6 +208,7 @@ export async function processAgent(
         matched: true,
         actions_taken: taken,
         context: ctx.fields,
+        source: "sweep",
       })
       if (runErr) out.errors.push(`run insert: ${runErr.message}`)
     }
@@ -230,6 +231,7 @@ async function filterEligibleRules(
   const { data: runs } = await db
     .from("automation_runs")
     .select("rule_id, ran_at")
+    .eq("source", "sweep")
     .in("rule_id", ruleIds)
     .order("ran_at", { ascending: false })
     .limit(10000)

@@ -150,6 +150,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
           matched: true,
           actions_taken: taken,
           context: ctx.fields,
+          source: "manual",
         })
         if (runErr) errors.push(`run insert: ${runErr.message}`)
       }
