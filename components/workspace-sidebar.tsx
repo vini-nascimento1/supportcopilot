@@ -15,6 +15,9 @@ import {
   MegaphoneIcon,
   SettingsIcon,
   ZapIcon,
+  SendIcon,
+  FileTextIcon,
+  HistoryIcon,
 } from "lucide-react"
 
 import {
@@ -44,9 +47,10 @@ const workspaceItems = [
 interface Props {
   userEmail: string | null
   avatarUrl: string | null
+  isGmailTemplateUser?: boolean
 }
 
-export function WorkspaceSidebar({ userEmail, avatarUrl }: Props) {
+export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser }: Props) {
   const pathname = usePathname()
   const initial = userEmail ? userEmail[0]?.toUpperCase() : "?"
   const [changelogOpen, setChangelogOpen] = useState(false)
@@ -90,6 +94,27 @@ export function WorkspaceSidebar({ userEmail, avatarUrl }: Props) {
                         <span>{item.label}</span>
                       </Link>
                     </SidebarMenuButton>
+                    {item.label === "Gmail" && isGmailTemplateUser && (
+                      <SidebarMenu className="mt-0.5 gap-0 pl-4">
+                        {[
+                          { label: "Quick Send", icon: SendIcon, href: "/gmail/quick-send" },
+                          { label: "Templates", icon: FileTextIcon, href: "/gmail/templates" },
+                          { label: "Sent", icon: HistoryIcon, href: "/gmail/sent" },
+                        ].map((sub) => {
+                          const subActive = pathname.startsWith(sub.href)
+                          return (
+                            <SidebarMenuItem key={sub.label}>
+                              <SidebarMenuButton asChild isActive={subActive} size="sm">
+                                <Link href={sub.href}>
+                                  <sub.icon />
+                                  <span>{sub.label}</span>
+                                </Link>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          )
+                        })}
+                      </SidebarMenu>
+                    )}
                   </SidebarMenuItem>
                 )
               })}

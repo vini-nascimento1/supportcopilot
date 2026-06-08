@@ -309,7 +309,7 @@ export async function sendGmailMessage(
   token: string,
   email: string | null,
   params: SendParams
-): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; messageId: string; threadId: string } | { ok: false; error: string }> {
   try {
     const body: Record<string, string> = { raw: buildRawMessage(params) }
     if (params.threadId) body.threadId = params.threadId
@@ -331,8 +331,8 @@ export async function sendGmailMessage(
       return { ok: false, error: err.error?.message ?? `HTTP ${res.status}` }
     }
 
-    const data = (await res.json()) as { id: string }
-    return { ok: true, messageId: data.id }
+    const data = (await res.json()) as { id: string; threadId: string }
+    return { ok: true, messageId: data.id, threadId: data.threadId }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Unknown error" }
   }
