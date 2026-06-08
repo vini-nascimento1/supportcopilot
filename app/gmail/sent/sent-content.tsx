@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { HistoryIcon, ExternalLinkIcon, Trash2Icon, RefreshCwIcon } from "lucide-react"
+import { HistoryIcon, ExternalLinkIcon, Trash2Icon, RefreshCwIcon, GlobeIcon, LockIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -11,9 +11,12 @@ type SentEmail = {
   id: string
   template_name: string
   recipient: string
+  cc: string | null
   user_email: string | null
   subject: string
   gmail_thread_id: string | null
+  visibility: string
+  sent_by: string
   created_at: string
 }
 
@@ -38,7 +41,8 @@ export default function SentPage() {
 
   useEffect(() => { fetchSent() }, [fetchSent])
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string, sentBy: string) {
+    const isOwner = sentBy === "you" // we don't know current email, API handles it
     if (!confirm("Remove this entry from the tracker? (The email in Gmail will NOT be deleted)")) return
     try {
       const res = await fetch(`/api/gmail/sent/${id}`, { method: "DELETE" })
@@ -81,50 +85,65 @@ export default function SentPage() {
         </div>
       ) : (
         <div className="grid gap-2">
-          {sent.map((s) => (
-            <div key={s.id} className="flex items-start gap-3 rounded-lg border p-3">
-              {/* Content */}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-muted-foreground uppercase">
-                    {s.template_name}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {new Date(s.created_at).toLocaleString()}
-                  </span>
+          {sent.map((s) => {
+            const isShared = s.visibility === "shared"
+            return (
+              <div key={s.id} className="flex items-start gap-3 rounded-lg border p-3">
+                {/* Content */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-muted-foreground uppercase">
+                      {s.template_name}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {new Date(s.created_at).toLocaleString()}
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                        isShared
+                          ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {isShared ? <GlobeIcon className="size-2.5" /> : <LockIcon className="size-2.5" />}
+                      {isShared ? "Shared" : "Private"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm font-medium truncate">{s.subject}</p>
+                  <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                    <span>To: {s.recipient}</span>
+                    {s.cc && <span>CC: {s.cc}</span>}
+                    {s.user_email && <span>User: {s.user_email}</span>}
+                    <span>By: {s.sent_by}</span>
+                  </div>
                 </div>
-                <p className="mt-1 text-sm font-medium truncate">{s.subject}</p>
-                <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                  <span>To: {s.recipient}</span>
-                  {s.user_email && <span>User: {s.user_email}</span>}
-                </div>
-              </div>
 
-              {/* Actions */}
-              <div className="flex shrink-0 gap-1">
-                {s.gmail_thread_id && (
-                  <a
-                    href={gmailThreadUrl(s.gmail_thread_id)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                    title="Open in Gmail"
+                {/* Actions */}
+                <div className="flex shrink-0 gap-1">
+                  {s.gmail_thread_id && (
+                    <a
+                      href={gmailThreadUrl(s.gmail_thread_id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                      title="Open in Gmail"
+                    >
+                      <ExternalLinkIcon className="size-3.5" />
+                    </a>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 text-destructive"
+                    onClick={() => handleDelete(s.id, s.sent_by)}
+                    title="Remove from tracker"
                   >
-                    <ExternalLinkIcon className="size-3.5" />
-                  </a>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 text-destructive"
-                  onClick={() => handleDelete(s.id)}
-                  title="Remove from tracker"
-                >
-                  <Trash2Icon className="size-3.5" />
-                </Button>
+                    <Trash2Icon className="size-3.5" />
+                  </Button>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

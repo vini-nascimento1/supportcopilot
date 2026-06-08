@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { FileTextIcon, PlusIcon, PencilIcon, Trash2Icon, XIcon, CheckIcon } from "lucide-react"
+import { FileTextIcon, PlusIcon, PencilIcon, Trash2Icon, XIcon, CheckIcon, UsersIcon, AtSignIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -20,13 +20,15 @@ type Template = {
   id: string
   name: string
   recipient: string
+  cc: string | null
+  access_emails: string | null
   subject: string
   body: string
   created_at: string
   updated_at: string
 }
 
-const emptyForm = { name: "", recipient: "", subject: "", body: "" }
+const emptyForm = { name: "", recipient: "", cc: "", access_emails: "", subject: "", body: "" }
 
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([])
@@ -59,13 +61,20 @@ export default function TemplatesPage() {
 
   function openEdit(t: Template) {
     setEditingId(t.id)
-    setForm({ name: t.name, recipient: t.recipient, subject: t.subject, body: t.body })
+    setForm({
+      name: t.name,
+      recipient: t.recipient,
+      cc: t.cc ?? "",
+      access_emails: t.access_emails ?? "",
+      subject: t.subject,
+      body: t.body,
+    })
     setDialogOpen(true)
   }
 
   async function handleSave() {
     if (!form.name || !form.recipient || !form.subject || !form.body) {
-      toast.error("All fields are required")
+      toast.error("Name, recipient, subject and body are required")
       return
     }
     setSaving(true)
@@ -148,6 +157,10 @@ export default function TemplatesPage() {
                   </Button>
                 </div>
               </div>
+              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                {t.cc && <span className="flex items-center gap-1"><AtSignIcon className="size-3" />CC: {t.cc}</span>}
+                {t.access_emails && <span className="flex items-center gap-1"><UsersIcon className="size-3" />Access: {t.access_emails}</span>}
+              </div>
               <div className="rounded-md bg-muted p-2 text-xs">
                 <p className="font-mono text-muted-foreground">Subject: {t.subject}</p>
                 <p className="mt-1 font-mono text-muted-foreground line-clamp-2">{t.body}</p>
@@ -166,7 +179,7 @@ export default function TemplatesPage() {
               Use {"{{useremail}}"} as a placeholder for the customer email.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 max-h-[70vh] overflow-y-auto pr-1">
             <div>
               <Label>Template Name</Label>
               <Input
@@ -176,12 +189,34 @@ export default function TemplatesPage() {
               />
             </div>
             <div>
-              <Label>Default Recipient</Label>
+              <Label>Default Recipient (To)</Label>
               <Input
                 value={form.recipient}
                 onChange={(e) => setForm({ ...form, recipient: e.target.value })}
                 placeholder="e.g. vipsupport@masspay.io"
               />
+            </div>
+            <div>
+              <Label>CC (optional)</Label>
+              <Input
+                value={form.cc}
+                onChange={(e) => setForm({ ...form, cc: e.target.value })}
+                placeholder="Comma-separated emails, e.g. manager@fanvue.com"
+              />
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Always CC these recipients when sending
+              </p>
+            </div>
+            <div>
+              <Label>Who can view (optional)</Label>
+              <Input
+                value={form.access_emails}
+                onChange={(e) => setForm({ ...form, access_emails: e.target.value })}
+                placeholder="Comma-separated agent emails"
+              />
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Agents who can see threads from this template. Leave empty = only you.
+              </p>
             </div>
             <div>
               <Label>Subject</Label>
@@ -200,7 +235,7 @@ export default function TemplatesPage() {
                 placeholder="Hello, I'm reaching out about user {{useremail}}..."
               />
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>
                 <XIcon className="mr-1 size-4" />
                 Cancel

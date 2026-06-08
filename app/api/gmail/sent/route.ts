@@ -19,7 +19,7 @@ export async function GET() {
   const { data, error } = await admin
     .from("gmail_sent_emails")
     .select("*")
-    .eq("sent_by", tokens.email)
+    .or(`sent_by.eq.${tokens.email},visibility.eq.shared`)
     .order("created_at", { ascending: false })
 
   if (error) {

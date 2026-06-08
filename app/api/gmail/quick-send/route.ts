@@ -19,9 +19,11 @@ export async function POST(request: Request) {
     templateId: string
     templateName: string
     recipient: string
+    cc?: string
     userEmail: string
     subject: string
     body: string
+    visibility: string
   }
 
   if (!body.recipient || !body.subject || !body.body) {
@@ -31,6 +33,7 @@ export async function POST(request: Request) {
   // Send via Gmail API
   const result = await sendGmailMessage(tokens.googleToken, tokens.email, {
     to: body.recipient,
+    cc: body.cc || undefined,
     subject: body.subject,
     body: body.body,
   })
@@ -47,12 +50,14 @@ export async function POST(request: Request) {
         template_id: body.templateId || null,
         template_name: body.templateName,
         recipient: body.recipient,
+        cc: body.cc || null,
         user_email: body.userEmail || null,
         subject: body.subject,
         body: body.body,
         gmail_message_id: result.messageId,
         gmail_thread_id: result.threadId,
         sent_by: tokens.email,
+        visibility: body.visibility || "private",
       })
     } catch {
       console.error("Failed to save sent tracking record")

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { SendIcon, ArrowLeftIcon, EyeIcon, EyeOffIcon } from "lucide-react"
+import { SendIcon, ArrowLeftIcon, EyeIcon, EyeOffIcon, GlobeIcon, LockIcon, AtSignIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -21,6 +21,8 @@ type Template = {
   id: string
   name: string
   recipient: string
+  cc: string | null
+  access_emails: string | null
   subject: string
   body: string
 }
@@ -37,8 +39,10 @@ export default function QuickSendPage() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
   const [userEmail, setUserEmail] = useState("")
   const [recipient, setRecipient] = useState("")
+  const [cc, setCc] = useState("")
   const [subject, setSubject] = useState("")
   const [body, setBody] = useState("")
+  const [visibility, setVisibility] = useState("private")
   const [showPreview, setShowPreview] = useState(false)
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
@@ -63,7 +67,7 @@ export default function QuickSendPage() {
     const t = templates.find((t) => t.id === id)
     if (!t) return
     setRecipient(t.recipient)
-    // Reset user email, keep subject/body as template (unfilled)
+    setCc(t.cc ?? "")
     setSubject(t.subject)
     setBody(t.body)
   }
@@ -92,9 +96,11 @@ export default function QuickSendPage() {
           templateId: selectedTemplateId,
           templateName: template?.name ?? "Manual",
           recipient,
+          cc: cc || undefined,
           userEmail,
           subject: fillPlaceholders(subject, userEmail),
           body: fillPlaceholders(body, userEmail),
+          visibility,
         }),
       })
       if (!res.ok) {
@@ -122,7 +128,7 @@ export default function QuickSendPage() {
           <Button variant="outline" size="sm" onClick={() => router.push("/gmail/sent")}>
             View sent tracker
           </Button>
-          <Button size="sm" onClick={() => { setSent(false); setSelectedTemplateId(""); setUserEmail(""); setRecipient(""); setSubject(""); setBody("") }}>
+          <Button size="sm" onClick={() => { setSent(false); setSelectedTemplateId(""); setUserEmail(""); setRecipient(""); setCc(""); setSubject(""); setBody(""); setVisibility("private") }}>
             Send another
           </Button>
         </div>
@@ -192,6 +198,16 @@ export default function QuickSendPage() {
                 />
               </div>
 
+              {/* CC */}
+              <div>
+                <Label>CC</Label>
+                <Input
+                  value={cc}
+                  onChange={(e) => setCc(e.target.value)}
+                  placeholder="Comma-separated emails"
+                />
+              </div>
+
               {/* Subject */}
               <div>
                 <Label>Subject</Label>
@@ -211,6 +227,38 @@ export default function QuickSendPage() {
                 />
               </div>
 
+              {/* Visibility */}
+              <div>
+                <Label>Thread Visibility</Label>
+                <div className="flex gap-2 mt-1">
+                  <Button
+                    type="button"
+                    variant={visibility === "private" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setVisibility("private")}
+                    className="flex items-center gap-1.5"
+                  >
+                    <LockIcon className="size-3.5" />
+                    Private
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={visibility === "shared" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setVisibility("shared")}
+                    className="flex items-center gap-1.5"
+                  >
+                    <GlobeIcon className="size-3.5" />
+                    Shared
+                  </Button>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {visibility === "private"
+                    ? "Only you can see this thread in the sent tracker"
+                    : "Everyone with access to this template can see this thread"}
+                </p>
+              </div>
+
               {/* Preview */}
               <div>
                 <Button
@@ -224,6 +272,7 @@ export default function QuickSendPage() {
                 {showPreview && (
                   <div className="mt-2 rounded-md border bg-muted p-3 text-sm">
                     <p><strong>To:</strong> {recipient}</p>
+                    {cc && <p><strong>CC:</strong> {cc}</p>}
                     <p><strong>Subject:</strong> {getPreviewText(subject)}</p>
                     <pre className="mt-2 whitespace-pre-wrap font-sans text-muted-foreground">
                       {getPreviewText(body)}

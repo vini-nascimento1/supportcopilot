@@ -285,6 +285,7 @@ export async function getGmailThread(
 
 type SendParams = {
   to: string
+  cc?: string
   subject: string
   body: string
   threadId?: string
@@ -299,6 +300,7 @@ function buildRawMessage(params: SendParams): string {
     "MIME-Version: 1.0",
     "Content-Type: text/plain; charset=UTF-8",
   ]
+  if (params.cc) lines.push(`Cc: ${params.cc}`)
   if (params.inReplyTo) lines.push(`In-Reply-To: ${params.inReplyTo}`)
   if (params.references) lines.push(`References: ${params.references}`)
   lines.push("", params.body)

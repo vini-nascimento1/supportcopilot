@@ -44,6 +44,8 @@ export async function POST(request: Request) {
     recipient: string
     subject: string
     body: string
+    cc?: string
+    access_emails?: string
   }
 
   if (!body.name || !body.recipient || !body.subject || !body.body) {
@@ -57,6 +59,8 @@ export async function POST(request: Request) {
       recipient: body.recipient,
       subject: body.subject,
       body: body.body,
+      cc: body.cc || null,
+      access_emails: body.access_emails || null,
     })
     .select()
     .single()

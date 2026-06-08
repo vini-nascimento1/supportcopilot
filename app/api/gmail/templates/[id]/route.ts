@@ -22,16 +22,21 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     recipient?: string
     subject?: string
     body?: string
+    cc?: string
+    access_emails?: string
   }
+
+  const updates: Record<string, string | null> = {}
+  if (body.name !== undefined) updates.name = body.name
+  if (body.recipient !== undefined) updates.recipient = body.recipient
+  if (body.subject !== undefined) updates.subject = body.subject
+  if (body.body !== undefined) updates.body = body.body
+  if (body.cc !== undefined) updates.cc = body.cc
+  if (body.access_emails !== undefined) updates.access_emails = body.access_emails
 
   const { data, error } = await admin
     .from("gmail_templates")
-    .update({
-      ...(body.name !== undefined && { name: body.name }),
-      ...(body.recipient !== undefined && { recipient: body.recipient }),
-      ...(body.subject !== undefined && { subject: body.subject }),
-      ...(body.body !== undefined && { body: body.body }),
-    })
+    .update(updates)
     .eq("id", id)
     .select()
     .maybeSingle()

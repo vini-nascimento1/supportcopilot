@@ -7,6 +7,8 @@ import { usePathname } from "next/navigation"
 import {
   BookOpenIcon,
   ClipboardListIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   LifeBuoyIcon,
   LogOutIcon,
   MailIcon,
@@ -54,6 +56,7 @@ export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser }: 
   const pathname = usePathname()
   const initial = userEmail ? userEmail[0]?.toUpperCase() : "?"
   const [changelogOpen, setChangelogOpen] = useState(false)
+  const [gmailExpanded, setGmailExpanded] = useState(false)
 
   return (
     <Sidebar collapsible="icon">
@@ -86,15 +89,31 @@ export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser }: 
                   item.href === "/"
                     ? pathname === "/"
                     : pathname === item.href || pathname.startsWith(item.href + "/")
+                const isGmail = item.label === "Gmail"
                 return (
                   <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton asChild isActive={isActive}>
-                      <Link href={item.href}>
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                    {item.label === "Gmail" && isGmailTemplateUser && (
+                    <div className="flex items-center">
+                      <SidebarMenuButton asChild isActive={isActive} className="flex-1">
+                        <Link href={item.href}>
+                          <item.icon />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                      {isGmail && isGmailTemplateUser && (
+                        <button
+                          onClick={() => setGmailExpanded(!gmailExpanded)}
+                          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mr-1"
+                          title={gmailExpanded ? "Collapse" : "Expand"}
+                        >
+                          {gmailExpanded ? (
+                            <ChevronDownIcon className="size-3.5" />
+                          ) : (
+                            <ChevronRightIcon className="size-3.5" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    {isGmail && isGmailTemplateUser && gmailExpanded && (
                       <SidebarMenu className="mt-0.5 gap-0 pl-4">
                         {[
                           { label: "Quick Send", icon: SendIcon, href: "/gmail/quick-send" },
