@@ -49,10 +49,11 @@ const intercomToken = process.env.INTERCOM_ACCESS_TOKEN
 const intercomAdminId = process.env.INTERCOM_ADMIN_ID
 const intercomAppId = process.env.INTERCOM_APP_ID
 
-/** Fetch wrapper with a 15-second timeout to prevent stalled handlers. */
-function fetchIntercom(url: string, init?: RequestInit): Promise<Response> {
+/** Fetch wrapper with configurable timeout (default 15s) to prevent stalled handlers. */
+function fetchIntercom(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> {
+  const timeout = init?.timeoutMs ?? 15_000
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 15_000)
+  const timer = setTimeout(() => controller.abort(), timeout)
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer))
 }
 
@@ -532,9 +533,11 @@ export type AgentMetrics = {
 
 /**
  * Fetch the agent's conversation metrics from Intercom.
- * Searches for conversations assigned to this admin in the last N days
+ * Searches for conversations assigned to this admin in the time range
  * and computes aggregate KPIs from the statistics.* and conversation_rating
  * fields that come back from the search API.
+ *
+ * Capped at 50 pages (7,500 conversations) to prevent timeout on wide ranges.
  */
 export async function searchMetricsForAdmin(
   adminId: string,
@@ -553,8 +556,11 @@ export async function searchMetricsForAdmin(
   const csatScores: number[] = []
   let total = 0
   let startingAfter: string | undefined
+  let pageCount = 0
+  const MAX_PAGES = 50
 
   do {
+    pageCount++
     const body: Record<string, unknown> = {
       query: {
         operator: "AND",
@@ -576,6 +582,7 @@ export async function searchMetricsForAdmin(
       },
       body: JSON.stringify(body),
       cache: "no-store",
+      timeoutMs: 30_000,
     })
 
     if (!response.ok) throw new Error(`Intercom search ${response.status}`)
@@ -601,7 +608,7 @@ export async function searchMetricsForAdmin(
     }
 
     startingAfter = payload.pages?.next?.starting_after
-  } while (startingAfter)
+  } while (startingAfter && pageCount < MAX_PAGES)
 
   function median(values: number[]): number | null {
     if (values.length === 0) return null

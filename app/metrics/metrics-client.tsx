@@ -59,8 +59,8 @@ export default function MetricsClient() {
           setMetrics(data)
         }
       })
-      .catch(() => {
-        setError("Network error")
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : "Network error")
         setMetrics(null)
       })
       .finally(() => setLoading(false))
