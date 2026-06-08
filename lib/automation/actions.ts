@@ -7,9 +7,9 @@ import "server-only"
 // is `alert.slack` — a system-generated message to the rule OWNER'S OWN DM, never a
 // customer reply. Everything else writes to our own Supabase rows.
 //
-// Status: in_app / case.flag / case.suggest_playbook implemented (M3).
-// alert.slack + draft.prestage are scaffolded no-ops (M6). flow.stop is resolved by
-// the planner (planCaseActions) and never reaches here.
+// Status: alert.in_app, alert.slack, case.flag, case.suggest_playbook, draft.prestage
+// all dispatch real work. flow.stop is resolved by the planner (planCaseActions)
+// and never reaches the handler map.
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { sendSlackMessage } from "@/lib/slack"

@@ -25,6 +25,10 @@ export type RuleInput = {
 
 const EMPTY_TREE: ConditionTree = { match: "any", groups: [] }
 
+// Default Intercom topics when a trigger rule is saved without onEvents. Must
+// match real topic names Intercom delivers — see lib/automation/fields.ts.
+const DEFAULT_TRIGGER_TOPICS = ["conversation.user.created", "conversation.admin.assigned"]
+
 /** Resolve the signed-in agent → { db, agentId }. null agentId = not an agent. */
 export async function getAgentContext() {
   const email = await getSignedInEmail()
@@ -70,7 +74,7 @@ function toRow(input: RuleInput, agentId: string) {
       ? null
       : input.onEvents && input.onEvents.length
         ? input.onEvents
-        : ["conversation.created", "conversation.updated"],
+        : DEFAULT_TRIGGER_TOPICS,
   }
 }
 
@@ -137,7 +141,7 @@ export async function updateRule(
       ? null
       : patch.onEvents && patch.onEvents.length
         ? patch.onEvents
-        : ["conversation.created", "conversation.updated"]
+        : DEFAULT_TRIGGER_TOPICS
   }
 
   const { data, error } = await db

@@ -112,9 +112,12 @@ type Alert = {
   automation_rules?: { name?: string }
 }
 
+type PlaybookOption = { id: string; case_type: string; title: string }
+
 export function AutomationClient() {
   const [rules, setRules] = useState<AutomationRule[]>([])
   const [alerts, setAlerts] = useState<Alert[]>([])
+  const [playbooks, setPlaybooks] = useState<PlaybookOption[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Partial<AutomationRule> | null>(null)
   const [runningRules, setRunningRules] = useState<Set<string>>(new Set())
@@ -133,16 +136,28 @@ export function AutomationClient() {
     else toast.error(data.error ?? "Failed to load alerts")
   }, [])
 
+  const loadPlaybooks = useCallback(async () => {
+    const res = await fetch("/api/playbooks")
+    if (!res.ok) return
+    const data = await res.json()
+    const rows = (data.allRows ?? data.rows ?? []) as Array<{ id?: string; case_type?: string; title?: string }>
+    setPlaybooks(
+      rows
+        .filter((r): r is PlaybookOption => Boolean(r.id && r.case_type && r.title))
+        .map((r) => ({ id: r.id, case_type: r.case_type, title: r.title }))
+    )
+  }, [])
+
   useEffect(() => {
     let active = true
     void (async () => {
-      await Promise.all([loadRules(), loadAlerts()])
+      await Promise.all([loadRules(), loadAlerts(), loadPlaybooks()])
       if (active) setLoading(false)
     })()
     return () => {
       active = false
     }
-  }, [loadRules, loadAlerts])
+  }, [loadRules, loadAlerts, loadPlaybooks])
 
   async function toggleEnabled(rule: AutomationRule) {
     const res = await fetch(`/api/automation/rules/${rule.id}`, {
@@ -372,6 +387,7 @@ export function AutomationClient() {
       {editing && (
         <RuleEditor
           rule={editing}
+          playbooks={playbooks}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)
@@ -416,10 +432,12 @@ function EmptyState({
 // ── Rule editor modal ─────────────────────────────────────────────────────────
 function RuleEditor({
   rule,
+  playbooks,
   onClose,
   onSaved,
 }: {
   rule: Partial<AutomationRule>
+  playbooks: PlaybookOption[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -551,6 +569,7 @@ function RuleEditor({
           {step === "actions" && (
             <ActionsStep
               actions={draft.actions ?? []}
+              playbooks={playbooks}
               onChange={(actions) => setDraft({ ...draft, actions })}
               testResult={testResult}
               onTest={runTest}
@@ -600,9 +619,29 @@ function RuleEditor({
 }
 
 function blankWithKind(draft: Partial<AutomationRule>, kind: RuleKind): Partial<AutomationRule> {
+  // Strip conditions referencing fields that don't apply to the new kind, so a
+  // trigger→monitor toggle doesn't leave a dead "event is X" condition (the
+  // engine would silently evaluate it to false in the sweep, where event=null).
+  const allowedFields = new Set(fieldsForKind(kind).map((f) => f.key))
+  const tree = draft.conditions ?? { match: "any" as const, groups: [] }
+  let droppedConditionCount = 0
+  const prunedTree: ConditionTree = {
+    ...tree,
+    groups: tree.groups.map((g) => {
+      const kept = g.conditions.filter((c) => allowedFields.has(c.field))
+      droppedConditionCount += g.conditions.length - kept.length
+      return { ...g, conditions: kept }
+    }),
+  }
+  if (droppedConditionCount > 0) {
+    toast.warning(
+      `Dropped ${droppedConditionCount} condition(s) that only apply to ${kind === "monitor" ? "triggers" : "monitors"}.`
+    )
+  }
   return {
     ...draft,
     kind,
+    conditions: prunedTree,
     sweepEveryMins: kind === "monitor" ? draft.sweepEveryMins ?? 5 : null,
     onEvents: kind === "trigger" ? draft.onEvents ?? [...DEFAULT_TRIGGER_EVENTS] : null,
   }
@@ -1058,12 +1097,14 @@ function ConditionRow({
 // ── Step: Actions ──────────────────────────────────────────────────────────────
 function ActionsStep({
   actions,
+  playbooks,
   onChange,
   testResult,
   onTest,
   busy,
 }: {
   actions: Action[]
+  playbooks: PlaybookOption[]
   onChange: (a: Action[]) => void
   testResult: { scanned: number; matches: unknown[] } | null
   onTest: () => void
@@ -1126,6 +1167,20 @@ function ActionsStep({
                   onChange(next)
                 }}
               />
+            ) : action.kind === "case.suggest_playbook" ? (
+              <PlaybookPicker
+                value={String(action.params?.playbook_id ?? "")}
+                playbooks={playbooks}
+                onChange={(playbook_id) => {
+                  const next = [...actions]
+                  next[i] = { ...action, params: { ...action.params, playbook_id } }
+                  onChange(next)
+                }}
+              />
+            ) : action.kind === "draft.prestage" ? (
+              <p className="flex-1 text-xs text-muted-foreground">
+                Pre-stages a reply draft for the conversation — no params needed.
+              </p>
             ) : null}
 
             <Button
@@ -1325,5 +1380,38 @@ function TagPicker({
         </>
       )}
     </div>
+  )
+}
+
+function PlaybookPicker({
+  value,
+  playbooks,
+  onChange,
+}: {
+  value: string
+  playbooks: PlaybookOption[]
+  onChange: (id: string) => void
+}) {
+  if (playbooks.length === 0) {
+    return (
+      <p className="flex-1 text-xs text-destructive">
+        No playbooks found. Create one before using this action.
+      </p>
+    )
+  }
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-9 flex-1 text-sm">
+        <SelectValue placeholder="Pick a playbook…" />
+      </SelectTrigger>
+      <SelectContent>
+        {playbooks.map((p) => (
+          <SelectItem key={p.id} value={p.id}>
+            <span className="font-medium">{p.title}</span>
+            <span className="ml-1.5 text-xs text-muted-foreground">— {p.case_type}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
