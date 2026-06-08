@@ -28,10 +28,30 @@ async function createClient() {
   )
 }
 
-export async function getSignedInEmail(): Promise<string | null> {
+export async function getSignedInUser(): Promise<{ email: string | null; avatarUrl: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  return user?.email ?? null
+  if (!user?.email) return { email: null, avatarUrl: null }
+
+  // Fetch avatar from agents table (written by OAuth callback).
+  const adminClient = getSupabaseAdminClient()
+  let avatarUrl: string | null = null
+  if (adminClient) {
+    const { data } = await adminClient
+      .from("agents")
+      .select("avatar_url")
+      .eq("email", user.email)
+      .maybeSingle()
+    avatarUrl = data?.avatar_url ?? null
+  }
+
+  return { email: user.email, avatarUrl }
+}
+
+/** @deprecated Use getSignedInUser() instead. */
+export async function getSignedInEmail(): Promise<string | null> {
+  const { email } = await getSignedInUser()
+  return email
 }
 
 export type AgentTokens = {

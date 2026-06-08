@@ -1,13 +1,13 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { WorkspaceSidebar } from "@/components/workspace-sidebar"
-import { getSignedInEmail } from "@/lib/auth"
+import { getSignedInUser } from "@/lib/auth"
 
 export async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
-  const email = await getSignedInEmail()
+  const { email, avatarUrl } = await getSignedInUser()
 
   return (
     <SidebarProvider>
-      <WorkspaceSidebar userEmail={email} />
+      <WorkspaceSidebar userEmail={email} avatarUrl={avatarUrl} />
       <SidebarInset>{children}</SidebarInset>
     </SidebarProvider>
   )

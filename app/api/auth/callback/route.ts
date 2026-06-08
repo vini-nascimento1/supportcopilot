@@ -42,11 +42,14 @@ export async function GET(request: Request) {
   if (adminClient && data.session.user.email) {
     const email = data.session.user.email
     const name = data.session.user.user_metadata?.full_name ?? null
+    const avatarUrl = data.session.user.user_metadata?.avatar_url ??
+                      data.session.user.user_metadata?.picture ??
+                      null
 
     // Upsert agent without touching google_refresh_token — only update it below
     // when Google actually sends one (first login or explicit re-consent).
     const { error: upsertError } = await adminClient.from("agents").upsert(
-      { email, name, google_token: data.session.provider_token ?? null },
+      { email, name, avatar_url: avatarUrl, google_token: data.session.provider_token ?? null },
       { onConflict: "email" }
     )
     if (upsertError) console.error("Failed to upsert agent record", upsertError)

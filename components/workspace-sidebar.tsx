@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/sidebar"
 import { ChangelogDialog } from "@/components/changelog-dialog"
 
-const navItems = [
+const workspaceItems = [
   { label: "Dashboard", icon: LifeBuoyIcon, href: "/" },
   { label: "Cases", icon: ClipboardListIcon, href: "/cases" },
   { label: "Gmail", icon: MailIcon, href: "/gmail" },
@@ -39,14 +39,14 @@ const navItems = [
   { label: "Playbooks", icon: BookOpenIcon, href: "/playbooks" },
   { label: "Metrics", icon: BarChart3Icon, href: "/metrics" },
   { label: "Automation", icon: ZapIcon, href: "/automation" },
-  { label: "Settings", icon: SettingsIcon, href: "/settings" },
 ]
 
 interface Props {
   userEmail: string | null
+  avatarUrl: string | null
 }
 
-export function WorkspaceSidebar({ userEmail }: Props) {
+export function WorkspaceSidebar({ userEmail, avatarUrl }: Props) {
   const pathname = usePathname()
   const initial = userEmail ? userEmail[0]?.toUpperCase() : "?"
   const [changelogOpen, setChangelogOpen] = useState(false)
@@ -72,11 +72,12 @@ export function WorkspaceSidebar({ userEmail }: Props) {
       </SidebarHeader>
 
       <SidebarContent>
+        {/* ── Workspace ──────────────────────────────────────────────────── */}
         <SidebarGroup>
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
+              {workspaceItems.map((item) => {
                 const isActive =
                   item.href === "/"
                     ? pathname === "/"
@@ -92,8 +93,23 @@ export function WorkspaceSidebar({ userEmail }: Props) {
                   </SidebarMenuItem>
                 )
               })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
-              {/* Novidades — opens changelog dialog instead of navigating */}
+        {/* ── Support ────────────────────────────────────────────────────── */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Support</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={pathname === "/settings"}>
+                  <Link href="/settings">
+                    <SettingsIcon />
+                    <span>Settings</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
@@ -102,7 +118,7 @@ export function WorkspaceSidebar({ userEmail }: Props) {
                 >
                   <button className="w-full">
                     <MegaphoneIcon />
-                    <span>Novidades</span>
+                    <span>New Features</span>
                   </button>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -113,14 +129,24 @@ export function WorkspaceSidebar({ userEmail }: Props) {
 
       <ChangelogDialog open={changelogOpen} onClose={() => setChangelogOpen(false)} />
 
+      {/* ── User profile ────────────────────────────────────────────────── */}
       <SidebarFooter>
         <div className="flex items-center gap-3 px-2 py-2">
           <Link
             href="/settings"
             className="flex min-w-0 flex-1 items-center gap-3 rounded-md p-1 -m-1 transition-colors hover:bg-muted"
           >
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
-              {initial}
+            <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-semibold">
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt=""
+                  className="size-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                initial
+              )}
             </div>
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-xs font-medium">
