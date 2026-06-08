@@ -538,14 +538,13 @@ export type AgentMetrics = {
  */
 export async function searchMetricsForAdmin(
   adminId: string,
-  days: number
+  startTsSec: number,
+  endTsSec: number
 ): Promise<AgentMetrics> {
   if (!intercomToken) throw new Error("INTERCOM_ACCESS_TOKEN is not set")
 
   const adminIdNum = Number(adminId)
   if (!Number.isFinite(adminIdNum)) throw new Error(`Invalid intercom_admin_id: ${adminId}`)
-
-  const since = Math.floor((Date.now() - days * 86_400_000) / 1000)
 
   const frtValues: number[] = []
   const resolveValues: number[] = []
@@ -561,7 +560,8 @@ export async function searchMetricsForAdmin(
         operator: "AND",
         value: [
           { field: "admin_assignee_id", operator: "=", value: adminIdNum },
-          { field: "created_at", operator: ">", value: since },
+          { field: "created_at", operator: ">", value: startTsSec },
+          { field: "created_at", operator: "<", value: endTsSec },
         ],
       },
       pagination: { per_page: 150, ...(startingAfter ? { starting_after: startingAfter } : {}) },
@@ -624,6 +624,6 @@ export async function searchMetricsForAdmin(
     avgReopens: avg(reopenCounts),
     avgCsat: avg(csatScores),
     csatCount: csatScores.length,
-    periodDays: days,
+    periodDays: Math.round((endTsSec - startTsSec) / 86_400),
   }
 }
