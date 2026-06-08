@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { applyOperator, evaluateCondition, evaluateGroup, evaluateTree, planCaseActions } from "./engine"
+import { applyOperator, evaluateGroup, evaluateTree, planCaseActions } from "./engine"
 import type { AutomationRule, ConditionTree, EvalContext } from "./types"
 
 const ctx = (fields: EvalContext["fields"]): EvalContext => ({ fields })
@@ -154,30 +154,31 @@ describe("evaluateTree (DNF: OR across groups)", () => {
     expect(evaluateTree(tree, ctx({ status: "open", time_since_update: 100 }))).toBe(false)
   })
 
-  it("first_response_minutes SLA countdown: alerts when remaining ≤ threshold", () => {
-    // 30-min SLA, alert when ≤ 5 minutes remaining. Value is in SECONDS (UI convention).
-    const cond = { field: "first_response_minutes", op: "lte" as const, value: 300, sla: 30 }
+  it("sla_status + time_waiting_seconds: alerts only while clock is active", () => {
+    // Rule: alert when SLA is active AND we've been waiting ≥ 15 min.
+    const tree: ConditionTree = {
+      match: "all",
+      groups: [
+        {
+          match: "all",
+          conditions: [
+            { field: "sla_status", op: "is", value: "active" },
+            { field: "time_waiting_seconds", op: "gte", value: 900 },
+          ],
+        },
+      ],
+    }
 
-    // 26 minutes elapsed → 4 min remaining = 240s → matches (240 ≤ 300)
-    expect(evaluateCondition(cond, ctx({ first_response_minutes: 26 }))).toBe(true)
-    // 20 minutes elapsed → 10 min remaining = 600s → no match (600 > 300)
-    expect(evaluateCondition(cond, ctx({ first_response_minutes: 20 }))).toBe(false)
-    // 30 minutes elapsed → 0 remaining → matches (0 ≤ 300) — SLA breached
-    expect(evaluateCondition(cond, ctx({ first_response_minutes: 30 }))).toBe(true)
-    // 35 minutes elapsed → -5 min = -300s → matches (negative = breached)
-    expect(evaluateCondition(cond, ctx({ first_response_minutes: 35 }))).toBe(true)
-    // No first_response_minutes field → false
-    expect(evaluateCondition(cond, ctx({}))).toBe(false)
-  })
-
-  it("first_response_minutes SLA: gt operator for 'more than X minutes remaining'", () => {
-    // Alert when MORE than 10 minutes remaining on a 30-min SLA. Value in seconds.
-    const cond = { field: "first_response_minutes", op: "gt" as const, value: 600, sla: 30 }
-
-    // 15 min elapsed → 15 min remaining = 900s → matches (900 > 600)
-    expect(evaluateCondition(cond, ctx({ first_response_minutes: 15 }))).toBe(true)
-    // 25 min elapsed → 5 min remaining = 300s → no match (300 ≤ 600)
-    expect(evaluateCondition(cond, ctx({ first_response_minutes: 25 }))).toBe(false)
+    // 16 min waiting, clock active → fires
+    expect(evaluateTree(tree, ctx({ sla_status: "active", time_waiting_seconds: 960 }))).toBe(true)
+    // 10 min waiting, clock active → too early
+    expect(evaluateTree(tree, ctx({ sla_status: "active", time_waiting_seconds: 600 }))).toBe(false)
+    // Admin already replied → clock hit → no alert even if old waiting time would have matched
+    expect(evaluateTree(tree, ctx({ sla_status: "hit", time_waiting_seconds: null }))).toBe(false)
+    // Already breached → caller might want a separate "missed" rule; this one ignores it
+    expect(evaluateTree(tree, ctx({ sla_status: "missed", time_waiting_seconds: null }))).toBe(false)
+    // No SLA configured → no alert
+    expect(evaluateTree(tree, ctx({ sla_status: "none", time_waiting_seconds: null }))).toBe(false)
   })
 })
 

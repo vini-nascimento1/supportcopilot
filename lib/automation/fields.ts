@@ -135,13 +135,32 @@ export const FIELDS: FieldDef[] = [
     unit: "minutes",
   },
 
-  // ── SLA countdown ──
+  // ── SLA (sourced from Intercom's native sla_applied + waiting_since fields) ──
+  // The OLD `first_response_minutes` field with a per-condition `sla` threshold
+  // was replaced because it just exposed the conversation's age — it kept firing
+  // alerts after the admin had already replied. Intercom's sla_status flips to
+  // "hit" / "missed" / "cancelled" once the clock resolves, so a rule that
+  // matches on `sla_status is active` naturally stops firing.
   {
-    key: "first_response_minutes",
-    label: "First response SLA",
+    key: "sla_status",
+    label: "SLA status",
+    type: "enum",
+    category: "SLA",
+    appliesTo: ["trigger", "monitor"],
+    options: [
+      { value: "active", label: "Active (clock running)" },
+      { value: "hit", label: "Hit (replied in time)" },
+      { value: "missed", label: "Missed (breached)" },
+      { value: "cancelled", label: "Cancelled" },
+      { value: "none", label: "No SLA applies" },
+    ],
+  },
+  {
+    key: "time_waiting_seconds",
+    label: "Time waiting on SLA",
     type: "duration",
     category: "SLA",
-    appliesTo: ["monitor"],
+    appliesTo: ["trigger", "monitor"],
     unit: "minutes",
   },
 

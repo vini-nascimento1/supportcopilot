@@ -6,6 +6,7 @@ import "server-only"
 // (the unit operators compare in); the UI collects minutes and multiplies by
 // 60 before storing the condition value.
 
+import type { SlaStatus } from "@/lib/intercom"
 import type { EvalContext, FieldValue } from "./types"
 
 /** Intercom-derived fields (live during sweep, event payload during triggers). */
@@ -21,6 +22,10 @@ export type ConversationLive = {
   updatedAt: string | null
   /** Intercom admin_assignee_id — the teammate assigned to this conversation. */
   adminAssigneeId: string | null
+  /** Intercom's native SLA state for this conversation. */
+  slaStatus: SlaStatus
+  /** Unix seconds since the SLA clock started waiting; null when no one is waiting. */
+  waitingSinceSec: number | null
 }
 
 /** Our DB metadata about a case (rule-set state + playbook link). */
@@ -57,6 +62,18 @@ export function buildContext(
   const openedAt = conv?.createdAt ?? null
   const openedAgeSec = ageSeconds(openedAt, nowMs)
 
+  // SLA waiting time: only meaningful while the clock is actively running.
+  // When sla_status is "hit" / "missed" / "cancelled" / "none", the clock
+  // either resolved or never started — exposing the field as null lets the
+  // condition engine cleanly evaluate "gte / lte" to false instead of firing
+  // off stale data (the bug that caused alerts after a reply had landed).
+  const waitingSinceSec = conv?.waitingSinceSec ?? null
+  const slaStatus: SlaStatus = conv?.slaStatus ?? "none"
+  const timeWaitingSeconds =
+    slaStatus === "active" && waitingSinceSec != null
+      ? Math.max(0, Math.floor(nowMs / 1000) - waitingSinceSec)
+      : null
+
   const fields: Record<string, FieldValue> = {
     status: conv?.intercomState ?? null,
     subject: conv?.subject ?? null,
@@ -79,11 +96,12 @@ export function buildContext(
     // Rules without a teammate condition are "global" — they evaluate against
     // all agents' queues. Rules with `teammate is <id>` are scoped to that agent.
     teammate: conv?.adminAssigneeId ?? null,
-    // First-response countdown: minutes elapsed since conversation opened.
-    // The evaluator subtracts this from the SLA threshold (stored per-condition
-    // in `cond.sla`) to compute time remaining. This way the agent gets alerted
-    // BEFORE the breach, not after.
-    first_response_minutes: openedAgeSec != null ? Math.floor(openedAgeSec / 60) : null,
+    // SLA fields sourced from Intercom's sla_applied + waiting_since. Use these
+    // for "alert before breach" / "alert on breach" rules instead of trying to
+    // compute a countdown from createdAt — Intercom already knows whether an
+    // admin reply has landed and stops the clock accordingly.
+    sla_status: slaStatus,
+    time_waiting_seconds: timeWaitingSeconds,
     event,
   }
   return { fields }

@@ -201,7 +201,8 @@ Example: { kind: "alert.slack", params: { text: "🚨 {{customer}} needs help wi
 - matched_playbook (text) — playbook case_type matched to this case
 - time_since_update (number, seconds) — seconds since last Intercom update
 - time_since_created (number, seconds) — seconds since conversation opened
-- first_response_minutes (number, minutes) — minutes elapsed since conversation opened; use with sla parameter
+- sla_status (enum: active, hit, missed, cancelled, none) — Intercom's native SLA state for this conversation
+- time_waiting_seconds (number, seconds) — seconds since the SLA clock started waiting; null when sla_status != "active"
 
 ## Operators by field type
 
@@ -222,12 +223,18 @@ Example: { kind: "alert.slack", params: { text: "🚨 {{customer}} needs help wi
 
 ## SLA rules
 
-Use first_response_minutes with a "sla" parameter.
-Example: { field: "first_response_minutes", op: "lte", value: 300, sla: 30 }
-This means "alert when ≤ 5 minutes remaining on a 30-minute SLA".
+Use Intercom's native SLA state. The clock is "active" while someone is waiting,
+flips to "hit" the moment the admin replies, and to "missed" on breach.
 
-**Important:** value is in SECONDS (5 min = 300). sla is in MINUTES (30).
-Do NOT confuse these — if you put 30 in value and 300 in sla, alerts will trigger 10× too early.
+Example — alert when SLA is active AND we've been waiting ≥ 15 minutes:
+  conditions: [
+    { field: "sla_status", op: "is", value: "active" },
+    { field: "time_waiting_seconds", op: "gte", value: 900 },
+  ]
+
+**Important:** time_waiting_seconds is in SECONDS (15 min = 900). Don't pair
+this with a "sla" parameter — that legacy approach was removed because it
+fired alerts after the admin had already replied.
 
 ## Global rules
 

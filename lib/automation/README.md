@@ -175,6 +175,26 @@ This made the next scheduled sweep think the rule had just been run and
 skip it for `sweep_every_mins`. **Fix:** manual runs no longer touch the
 cadence timer; they're for testing.
 
+### 6g. SLA countdown was actually conversation age
+
+The old `first_response_minutes` field with a per-condition `sla` threshold
+just exposed the age of the conversation. It had no idea whether the admin
+had already replied — so a rule like "alert when ≤ 15 min remaining on a
+30-min SLA" kept firing well after the admin had landed a reply (age keeps
+climbing, "remaining" just goes more and more negative). **Fix:** removed
+the field and the special `cond.sla` branch in the engine. The context
+exposes Intercom's native `sla_status` (active / hit / missed / cancelled /
+none) and `time_waiting_seconds` (seconds since the SLA clock started,
+null when not active). A pre-breach rule now looks like:
+
+```jsonc
+{ "field": "sla_status",           "op": "is",  "value": "active" },
+{ "field": "time_waiting_seconds", "op": "gte", "value": 900 }
+```
+
+When the admin replies, Intercom flips `sla_status` to `"hit"` and the
+condition naturally stops matching — no more stale alerts.
+
 ## 7. Where each piece of the pipeline lives
 
 ```

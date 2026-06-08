@@ -78,6 +78,8 @@ export function sweepConversationToLive(c: SweepConversation): ConversationLive 
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     adminAssigneeId: c.adminAssigneeId,
+    slaStatus: c.slaStatus,
+    waitingSinceSec: c.waitingSinceSec,
   }
 }
 

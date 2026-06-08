@@ -364,6 +364,12 @@ type ConversationRating = {
   teammate?: { id?: string | null } | null
 }
 
+type IntercomSlaApplied = {
+  sla_name?: string | null
+  /** active = clock running; hit = resolved in time; missed = breached; cancelled = SLA no longer applies. */
+  sla_status?: "active" | "hit" | "missed" | "cancelled" | null
+}
+
 type IntercomSearchConversation = {
   id?: string | number
   state?: string | null
@@ -373,6 +379,9 @@ type IntercomSearchConversation = {
   title?: string | null
   priority?: string | null
   admin_assignee_id?: number | string | null
+  /** Unix seconds: when the current SLA clock started waiting for a reply. Null when no one is waiting. */
+  waiting_since?: number | null
+  sla_applied?: IntercomSlaApplied | null
   statistics?: ConversationStatistics | null
   conversation_rating?: ConversationRating | null
   source?: {
@@ -391,6 +400,8 @@ type IntercomSearchConversation = {
   tags?: { tags?: Array<{ name?: string | null }> } | null
 }
 
+export type SlaStatus = "active" | "hit" | "missed" | "cancelled" | "none"
+
 export type SweepConversation = {
   id: string
   intercomState: string
@@ -402,6 +413,11 @@ export type SweepConversation = {
   createdAt: string | null
   updatedAt: string | null
   adminAssigneeId: string | null
+  /** Intercom's native SLA status. "none" when no SLA applies. */
+  slaStatus: SlaStatus
+  slaName: string | null
+  /** Unix seconds since the SLA clock started waiting; null when not waiting. */
+  waitingSinceSec: number | null
 }
 
 function toSweepConversation(c: IntercomSearchConversation): {
@@ -425,6 +441,9 @@ function toSweepConversation(c: IntercomSearchConversation): {
       createdAt: toDate(c.created_at),
       updatedAt: toDate(c.updated_at),
       adminAssigneeId: c.admin_assignee_id != null ? String(c.admin_assignee_id) : null,
+      slaStatus: (c.sla_applied?.sla_status ?? "none") as SlaStatus,
+      slaName: c.sla_applied?.sla_name ?? null,
+      waitingSinceSec: typeof c.waiting_since === "number" ? c.waiting_since : null,
     },
   }
 }

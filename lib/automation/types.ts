@@ -34,10 +34,6 @@ export type Condition = {
   field: string
   op: Operator
   value?: ConditionValue
-  /** SLA threshold in minutes — used by countdown fields (e.g. first_response_minutes).
-   *  The evaluator computes remaining = (sla - elapsed) so the agent gets alerts
-   *  BEFORE the breach, not after. */
-  sla?: number
 }
 
 /** A group of conditions combined by `match` (all = AND, any = OR). */

@@ -1044,26 +1044,13 @@ function ConditionRow({
           />
         ) : isDuration ? (
           <div className="flex items-center gap-1.5">
-            {cond.field === "first_response_minutes" && (
-              <>
-                <span className="text-xs text-muted-foreground">SLA</span>
-                <Input
-                  type="number"
-                  className="h-8 w-16 text-xs"
-                  placeholder="min"
-                  value={cond.sla ?? ""}
-                  onChange={(e) => onChange({ ...cond, sla: Number(e.target.value) || undefined })}
-                />
-                <span className="text-xs text-muted-foreground">min → alert when ≤</span>
-              </>
-            )}
             <Input
               type="number"
               className="h-8 w-20 text-xs"
               value={typeof cond.value === "number" ? Math.round(cond.value / 60) : ""}
               onChange={(e) => onChange({ ...cond, value: Number(e.target.value) * 60 })}
             />
-            <span className="text-xs text-muted-foreground">min left</span>
+            <span className="text-xs text-muted-foreground">min</span>
           </div>
         ) : cond.op === "in" ? (
           <Input

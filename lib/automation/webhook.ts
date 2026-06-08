@@ -39,6 +39,11 @@ type IntercomConversationItem = {
   created_at?: number | null
   title?: string | null
   priority?: string | null
+  waiting_since?: number | null
+  sla_applied?: {
+    sla_name?: string | null
+    sla_status?: "active" | "hit" | "missed" | "cancelled" | null
+  } | null
   source?: {
     subject?: string | null
     body?: string | null
@@ -78,6 +83,8 @@ function itemToConversationLive(item: IntercomConversationItem): ConversationLiv
     createdAt: unixToIso(item.created_at),
     updatedAt: unixToIso(item.updated_at),
     adminAssigneeId: item.admin_assignee_id != null ? String(item.admin_assignee_id) : null,
+    slaStatus: item.sla_applied?.sla_status ?? "none",
+    waitingSinceSec: typeof item.waiting_since === "number" ? item.waiting_since : null,
   }
 }
 

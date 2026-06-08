@@ -30,20 +30,12 @@ export function evaluateGroup(group: ConditionGroup, ctx: EvalContext): boolean 
 }
 
 export function evaluateCondition(cond: Condition, ctx: EvalContext): boolean {
-  // SLA countdown: for fields like first_response_minutes, the condition carries
-  // an `sla` threshold (in minutes). We compute remaining = sla - elapsed and
-  // compare against the condition value. This lets agents set rules like
-  // "alert me when 5 minutes remain on a 30-min first response SLA".
-  if (cond.sla != null && cond.field === "first_response_minutes") {
-    const elapsed = typeof ctx.fields[cond.field] === "number" ? (ctx.fields[cond.field] as number) : null
-    if (elapsed == null) return false
-    // Both `remaining` and `cond.value` are in SECONDS so the comparison is
-    // unit-consistent.  `cond.sla` is minutes, `elapsed` is minutes → convert
-    // the difference to seconds before comparing against the UI-stored value.
-    const remainingSec = (cond.sla - elapsed) * 60
-    return applyOperator(cond.op, remainingSec, cond.value)
-  }
-
+  // SLA conditions used to live in a special branch keyed off `cond.sla` plus the
+  // `first_response_minutes` field, which was just the conversation's age — it
+  // never knew about replies and kept matching after the SLA was already met.
+  // The replacement uses Intercom's native sla_status + time_waiting_seconds
+  // (see lib/automation/context.ts) and falls through this plain branch like
+  // every other field.
   const actual = ctx.fields[cond.field]
   return applyOperator(cond.op, actual, cond.value)
 }
