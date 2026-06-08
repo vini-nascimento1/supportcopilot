@@ -32,10 +32,6 @@ import {
 
 export const dynamic = "force-dynamic"
 
-function stripFrPrefix(text: string) {
-  return text.replace(/^FR:\s*/i, "").trim()
-}
-
 function buildFallbackDraft(playbook: PlaybookListItem, agentName: string): ResponseItem {
   const lines = [`Hey! 👋 Thanks for reaching out to Fanvue Support, I'm ${agentName} and I'll do my best to help! 😊`]
 

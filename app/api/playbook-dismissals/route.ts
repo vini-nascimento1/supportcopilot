@@ -26,15 +26,50 @@ export async function POST(req: NextRequest) {
     return new Response("Server configuration error", { status: 500 })
   }
 
-  // Resolve case_id from conversation_id
-  const { data: caseRow } = await supabase
+  // Resolve case_id from conversation_id — upsert if missing
+  let caseId: string
+  const { data: existingCase } = await supabase
     .from("cases")
     .select("id")
     .eq("intercom_conversation_id", conversationId)
     .maybeSingle()
 
-  if (!caseRow) {
-    return new Response("Case not found for this conversation", { status: 404 })
+  if (existingCase) {
+    caseId = existingCase.id
+  } else {
+    // Case doesn't exist yet (drafts are no longer auto-saved), fetch from Intercom
+    const conversation = await getConversationDetail(conversationId)
+    if (!conversation) {
+      return new Response("Conversation not found in Intercom", { status: 404 })
+    }
+
+    // Resolve agent id from email for owner
+    let ownerId: string | undefined
+    const { data: agent } = await supabase
+      .from("agents")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle()
+    if (agent) ownerId = agent.id
+
+    const { data: created } = await supabase
+      .from("cases")
+      .upsert(
+        {
+          intercom_conversation_id: conversationId,
+          customer_name: conversation.customer,
+          playbook_id: playbookId,
+          owner_id: ownerId,
+        },
+        { onConflict: "intercom_conversation_id" },
+      )
+      .select("id")
+      .single()
+
+    if (!created) {
+      return new Response("Failed to create case", { status: 500 })
+    }
+    caseId = created.id
   }
 
   // Upsert: one dismissal per (case, playbook) — re-dismissing updates reason
@@ -42,7 +77,7 @@ export async function POST(req: NextRequest) {
     .from("playbook_dismissals")
     .upsert(
       {
-        case_id: caseRow.id,
+        case_id: caseId,
         playbook_id: playbookId,
         reason: reason?.trim() ?? "",
       },
