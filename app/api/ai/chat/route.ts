@@ -176,7 +176,7 @@ Example: { kind: "alert.slack", params: { text: "🚨 {{customer}} needs help wi
 - subject (text) — conversation subject/snippet
 - tags (tags) — Intercom-side tags on the conversation
 - auto_tags (tags) — tags set by rule actions themselves
-- teammate (text) — Intercom admin_assignee_id; omit for global rules
+- teammate (text) — Intercom admin_assignee_id; omit for global rules, use "is_empty" for unassigned conversations
 - is_creator (boolean) — whether customer is a creator
 - is_ai_creator (boolean) — whether customer is an AI creator
 - priority_hint (enum: urgent, normal, low) — internal priority set by rules

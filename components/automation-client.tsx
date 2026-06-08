@@ -835,6 +835,17 @@ function ConditionRow({
   const ops = operatorsForField(cond.field)
   const needsValue = !NO_VALUE_OPS.includes(cond.op)
   const isDuration = field?.type === "duration"
+  const agentsFetched = useRef(false)
+  const [agents, setAgents] = useState<Array<{ id: string; name: string | null; intercom_admin_id: string | null }>>([])
+  useEffect(() => {
+    if (cond.field === "teammate" && !agentsFetched.current) {
+      agentsFetched.current = true
+      fetch("/api/agents")
+        .then((r) => r.json())
+        .then((d) => setAgents(d.agents ?? []))
+        .catch(() => {})
+    }
+  }, [cond.field])
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/40 px-3 py-2">
@@ -886,6 +897,22 @@ function ConditionRow({
               {field.options.map((o) => (
                 <SelectItem key={o.value} value={o.value}>
                   {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : cond.field === "teammate" ? (
+          <Select
+            value={String(cond.value ?? "")}
+            onValueChange={(v) => onChange({ ...cond, value: v })}
+          >
+            <SelectTrigger className="h-8 w-[180px] text-xs">
+              <SelectValue placeholder="Select teammate…" />
+            </SelectTrigger>
+            <SelectContent>
+              {agents.map((a) => (
+                <SelectItem key={a.id} value={a.intercom_admin_id ?? ""}>
+                  {a.name ?? a.intercom_admin_id ?? "Unknown"}
                 </SelectItem>
               ))}
             </SelectContent>

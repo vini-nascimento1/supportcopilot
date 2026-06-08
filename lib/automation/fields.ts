@@ -24,7 +24,7 @@ export type FieldDef = {
 
 /** Operators offered per field type — drives the operator dropdown in the builder. */
 export const OPERATORS_BY_TYPE: Record<FieldType, Operator[]> = {
-  text: ["is", "is_not", "contains", "not_contains", "matches_regex"],
+  text: ["is", "is_not", "contains", "not_contains", "matches_regex", "is_empty", "not_empty"],
   enum: ["is", "is_not", "in"],
   number: ["eq", "neq", "gt", "gte", "lt", "lte"],
   duration: ["gt", "gte", "lt", "lte"],
@@ -114,7 +114,7 @@ export const FIELDS: FieldDef[] = [
   },
   {
     key: "teammate",
-    label: "Teammate (assignee ID)",
+    label: "Teammate (assigned to)",
     type: "text",
     category: "Conversation",
     appliesTo: ["trigger", "monitor"],
