@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   PlusIcon,
   Trash2Icon,
@@ -968,21 +968,14 @@ function ActionsStep({
             </Select>
 
             {action.kind === "alert.in_app" || action.kind === "alert.slack" ? (
-              <div className="flex flex-1 flex-col gap-1">
-                <Input
-                  className="h-9 text-sm"
-                  placeholder="Alert text (optional)"
-                  value={String(action.params?.text ?? "")}
-                  onChange={(e) => {
-                    const next = [...actions]
-                    next[i] = { ...action, params: { ...action.params, text: e.target.value } }
-                    onChange(next)
-                  }}
-                />
-                <span className="text-[10px] text-muted-foreground">
-                  {"Placeholders: {{intercom_url}} {{customer}} {{subject}} {{status}} {{teammate}} {{rule_name}}"}
-                </span>
-              </div>
+              <TextWithPlaceholders
+                value={String(action.params?.text ?? "")}
+                onChange={(text) => {
+                  const next = [...actions]
+                  next[i] = { ...action, params: { ...action.params, text } }
+                  onChange(next)
+                }}
+              />
             ) : action.kind === "case.flag" ? (
               <Input
                 className="h-9 flex-1 text-sm"
@@ -1046,6 +1039,60 @@ function ActionsStep({
             </span>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+const PLACEHOLDER_CHIPS = [
+  { label: "Intercom link", value: "{{intercom_url}}" },
+  { label: "Customer", value: "{{customer}}" },
+  { label: "Subject", value: "{{subject}}" },
+  { label: "Status", value: "{{status}}" },
+  { label: "Teammate", value: "{{teammate}}" },
+  { label: "Rule name", value: "{{rule_name}}" },
+]
+
+function TextWithPlaceholders({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null)
+
+  function insert(placeholder: string) {
+    const input = ref.current
+    if (!input) {
+      onChange(value + placeholder)
+      return
+    }
+    const start = input.selectionStart ?? value.length
+    const end = input.selectionEnd ?? value.length
+    const next = value.slice(0, start) + placeholder + value.slice(end)
+    onChange(next)
+    // Restore cursor after the inserted text on next tick.
+    requestAnimationFrame(() => {
+      input.selectionStart = input.selectionEnd = start + placeholder.length
+      input.focus()
+    })
+  }
+
+  return (
+    <div className="flex flex-1 flex-col gap-1.5">
+      <input
+        ref={ref}
+        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        placeholder="Alert text (optional)"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <div className="flex flex-wrap gap-1">
+        {PLACEHOLDER_CHIPS.map((chip) => (
+          <button
+            key={chip.value}
+            type="button"
+            className="rounded-md border bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            onClick={() => insert(chip.value)}
+          >
+            {chip.label}
+          </button>
+        ))}
       </div>
     </div>
   )
