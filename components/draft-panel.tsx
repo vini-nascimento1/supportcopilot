@@ -18,7 +18,6 @@ interface Props {
   conversationId: string
   playbookId: string | undefined
   playbookName: string | undefined
-  existingDraft: { version: number; replyBody: string } | null
 }
 
 const LOADING_STEPS = [

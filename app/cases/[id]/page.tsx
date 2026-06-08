@@ -17,11 +17,9 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import { PlaybookChecklist } from "@/components/playbook-checklist"
 import { parseSteps } from "@/lib/parse-steps"
-import { CopyButton } from "@/components/copy-button"
-import { MarkdownPreview } from "@/components/markdown-preview"
 import { DraftPanel } from "@/components/draft-panel"
+import { PlaybookCard } from "@/components/playbook-card"
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
 import { getAgentProfile } from "@/lib/agent"
@@ -33,14 +31,6 @@ import {
 } from "@/lib/playbooks"
 
 export const dynamic = "force-dynamic"
-
-function confidenceColor(c: "high" | "medium" | "low") {
-  return c === "high"
-    ? "default"
-    : c === "medium"
-      ? "secondary"
-      : ("outline" as const)
-}
 
 function stripFrPrefix(text: string) {
   return text.replace(/^FR:\s*/i, "").trim()
@@ -68,41 +58,6 @@ function buildFallbackDraft(playbook: PlaybookListItem, agentName: string): Resp
     title: `Draft for: ${playbook.caseType}`,
     body: lines.join("\n"),
   }
-}
-
-function Section({
-  emoji,
-  title,
-  children,
-}: {
-  emoji: string
-  title: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-        <span>{emoji}</span>
-        {title}
-      </h3>
-      {children}
-    </div>
-  )
-}
-
-function ResponseCard({ response }: { response: ResponseItem }) {
-  const body = stripFrPrefix(response.body)
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3">
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground">
-          {response.title}
-        </p>
-        <CopyButton text={body} />
-      </div>
-      <MarkdownPreview content={body} />
-    </div>
-  )
 }
 
 export default async function CasePage({
@@ -242,84 +197,16 @@ export default async function CasePage({
               </h2>
               {matches.map(({ playbook, confidence, trigger }) => {
                 const responses = responseMap.get(playbook.id) ?? []
-                const displayResponses =
-                  responses.length > 0 ? responses : [buildFallbackDraft(playbook, agentProfile.firstName)]
 
                 return (
-                  <Card key={playbook.id}>
-                    <CardHeader className="pb-2">
-                      <div className="flex flex-wrap items-start gap-2">
-                        <Badge variant={confidenceColor(confidence)}>
-                          {confidence}
-                        </Badge>
-                        <Badge variant="outline" className="font-normal">
-                          via &ldquo;{trigger}&rdquo;
-                        </Badge>
-                      </div>
-                      <CardTitle className="text-base">{playbook.caseType}</CardTitle>
-                      {playbook.recognize && (
-                        <CardDescription className="line-clamp-2">
-                          {playbook.recognize}
-                        </CardDescription>
-                      )}
-                    </CardHeader>
-
-                    <CardContent className="flex flex-col gap-5">
-                      {/* checklist */}
-                      <Section emoji="⚠️" title="Before replying — checks">
-                        <PlaybookChecklist checks={playbook.checks} />
-                      </Section>
-
-                      {/* response templates */}
-                      <Section emoji="💬" title="Response templates">
-                        <div className="flex flex-col gap-3">
-                          {displayResponses.map((r) => (
-                            <ResponseCard key={r.id} response={r} />
-                          ))}
-                        </div>
-                      </Section>
-
-                      {/* resolution */}
-                      {playbook.resolution && (
-                        <details>
-                          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                            ✅ Resolution steps
-                          </summary>
-                          <div className="mt-2">
-                            {(() => {
-                              const steps = parseSteps(playbook.resolution)
-                              return steps.length > 1 ? (
-                                <ol className="flex list-none flex-col gap-1">
-                                  {steps.map((step, i) => (
-                                    <li key={i} className="flex gap-2 text-sm">
-                                      <span className="mt-0.5 shrink-0 font-mono text-xs text-muted-foreground">
-                                        {i + 1}.
-                                      </span>
-                                      <span>{step}</span>
-                                    </li>
-                                  ))}
-                                </ol>
-                              ) : (
-                                <p className="text-sm">{playbook.resolution}</p>
-                              )
-                            })()}
-                          </div>
-                        </details>
-                      )}
-
-                      {/* dos/don'ts */}
-                      {playbook.dosDonts && (
-                        <details>
-                          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                            🚫 Known mistakes / don&apos;ts
-                          </summary>
-                          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                            {playbook.dosDonts}
-                          </p>
-                        </details>
-                      )}
-                    </CardContent>
-                  </Card>
+                  <PlaybookCard
+                    key={playbook.id}
+                    playbook={playbook}
+                    confidence={confidence}
+                    trigger={trigger}
+                    responses={responses.length > 0 ? responses : [buildFallbackDraft(playbook, agentProfile.firstName)]}
+                    conversationId={id}
+                  />
                 )
               })}
             </div>
