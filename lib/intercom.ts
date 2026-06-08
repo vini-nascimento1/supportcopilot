@@ -356,7 +356,7 @@ type ConversationStatistics = {
 }
 
 type ConversationRating = {
-  score?: number | null
+  rating?: number | null
   remark?: string | null
   created_at?: number | null
   replied_at?: number | null
@@ -523,12 +523,16 @@ export type AgentMetrics = {
   avgAssignments: number | null
   /** Average number of reopens per conversation. */
   avgReopens: number | null
-  /** Average CSAT score (1-5, null if no ratings). */
+  /** Average CSAT rating (1-5, null if no ratings). */
   avgCsat: number | null
   /** Number of conversations with a CSAT rating. */
   csatCount: number | null
   /** Period in days. */
   periodDays: number
+  /** Average number of conversations per day. */
+  perDayConversations: number | null
+  /** Average number of CSAT ratings per day. */
+  perDayCsat: number | null
 }
 
 /**
@@ -605,7 +609,7 @@ export async function searchMetricsForAdmin(
         if (typeof stats.count_reopens === "number") reopenCounts.push(stats.count_reopens)
       }
       const rating = c.conversation_rating
-      if (rating && typeof rating.score === "number") csatScores.push(rating.score)
+      if (rating && typeof rating.rating === "number") csatScores.push(rating.rating)
     }
 
     startingAfter = payload.pages?.next?.starting_after
@@ -623,6 +627,8 @@ export async function searchMetricsForAdmin(
     return values.reduce((a, b) => a + b, 0) / values.length
   }
 
+  const days = Math.round((endTsSec - startTsSec) / 86_400) || 1
+
   return {
     totalConversations: total,
     avgFrtSec: avg(frtValues),
@@ -632,6 +638,8 @@ export async function searchMetricsForAdmin(
     avgReopens: avg(reopenCounts),
     avgCsat: avg(csatScores),
     csatCount: csatScores.length,
-    periodDays: Math.round((endTsSec - startTsSec) / 86_400),
+    periodDays: days,
+    perDayConversations: total > 0 ? Math.round(total / days) : null,
+    perDayCsat: csatScores.length > 0 ? Math.round((csatScores.length / days) * 10) / 10 : null,
   }
 }

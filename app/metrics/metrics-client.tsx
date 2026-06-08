@@ -158,7 +158,7 @@ export default function MetricsClient() {
                   </CardHeader>
                   <CardContent>
                     <p className="text-3xl font-bold">{fmtPct(metrics.totalConversations)}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">conversations in period</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{fmtPct(metrics.perDayConversations ?? 0)} / day · {metrics.periodDays} days</p>
                   </CardContent>
                 </Card>
 
@@ -169,7 +169,7 @@ export default function MetricsClient() {
                   <CardContent>
                     <p className="text-3xl font-bold">{fmtRating(metrics.avgCsat)}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {metrics.csatCount != null ? `${metrics.csatCount} rating(s)` : "no ratings"}
+                      {metrics.csatCount != null ? `${metrics.perDayCsat ?? metrics.csatCount} / day · ${metrics.csatCount} total` : "no ratings"}
                     </p>
                   </CardContent>
                 </Card>
