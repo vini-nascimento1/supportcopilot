@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card"
 import { CopyButton } from "@/components/copy-button"
 import { MarkdownPreview } from "@/components/markdown-preview"
+import { SendConfirmDialog } from "@/components/send-confirm-dialog"
 import { mdToHtml } from "@/lib/md-to-html"
 
 interface Props {
@@ -36,6 +37,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName }: Props) 
   })
   const [loadingStep, setLoadingStep] = useState(0)
   const [sending, setSending] = useState(false)
+  const [sendDialogOpen, setSendDialogOpen] = useState(false)
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const previousBodyRef = useRef<string>("")
 
@@ -94,10 +96,13 @@ export function DraftPanel({ conversationId, playbookId, playbookName }: Props) 
     }
   }
 
-  async function handleSend() {
+  function handleSendClick() {
     if (!draft.body) return
-    if (!confirm("Send this AI draft as a reply in Intercom?")) return
+    setSendDialogOpen(true)
+  }
 
+  async function handleSendConfirm() {
+    setSendDialogOpen(false)
     setSending(true)
     try {
       const res = await fetch("/api/draft/send", {
@@ -166,7 +171,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName }: Props) 
                 </button>
                 <CopyButton text={draft.body} htmlText={mdToHtml(draft.body)} />
                 <button
-                  onClick={handleSend}
+                  onClick={handleSendClick}
                   disabled={sending}
                   className="flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
@@ -199,6 +204,11 @@ export function DraftPanel({ conversationId, playbookId, playbookName }: Props) 
           </div>
         )}
       </CardContent>
+      <SendConfirmDialog
+        open={sendDialogOpen}
+        onOpenChange={setSendDialogOpen}
+        onConfirm={handleSendConfirm}
+      />
     </Card>
   )
 }
