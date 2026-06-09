@@ -15,36 +15,38 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Gmail not connected" }, { status: 401 })
   }
 
-  const body = (await request.json()) as {
-    templateId: string
-    templateName: string
-    recipient: string
-    cc?: string
-    userEmail: string
-    subject: string
-    body: string
-    visibility: string
-  }
+  const body = (await request.json()) as Record<string, string | undefined>
+
+  // When messageId is provided, this is a tracking-only call (files already sent)
+  const isTrackOnly = !!body.messageId
 
   if (!body.recipient || !body.subject || !body.body) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
   }
 
-  // Send via Gmail API
-  const result = await sendGmailMessage(tokens.googleToken, tokens.email, {
-    to: body.recipient,
-    cc: body.cc || undefined,
-    subject: body.subject,
-    body: body.body,
-  })
+  let messageId: string | undefined = body.messageId
+  let threadId: string | undefined = body.threadId
 
-  if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 502 })
+  if (!isTrackOnly) {
+    // Send via Gmail API
+    const result = await sendGmailMessage(tokens.googleToken, tokens.email, {
+      to: body.recipient,
+      cc: body.cc || undefined,
+      subject: body.subject,
+      body: body.body,
+    })
+
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 502 })
+    }
+
+    messageId = result.messageId
+    threadId = result.threadId
   }
 
   // Save tracking record (best-effort — email already sent successfully)
   const admin = getSupabaseAdminClient()
-  if (admin) {
+  if (admin && messageId) {
     try {
       await admin.from("gmail_sent_emails").insert({
         template_id: body.templateId || null,
@@ -54,8 +56,8 @@ export async function POST(request: Request) {
         user_email: body.userEmail || null,
         subject: body.subject,
         body: body.body,
-        gmail_message_id: result.messageId,
-        gmail_thread_id: result.threadId,
+        gmail_message_id: messageId,
+        gmail_thread_id: threadId || null,
         sent_by: tokens.email,
         visibility: body.visibility || "private",
       })
@@ -65,7 +67,7 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({
-    messageId: result.messageId,
-    threadId: result.threadId,
+    messageId: messageId,
+    threadId: threadId,
   })
 }

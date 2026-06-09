@@ -51,7 +51,7 @@ async function handleJson(
     return NextResponse.json({ error: result.error }, { status: 502 })
   }
 
-  return NextResponse.json({ messageId: result.messageId })
+  return NextResponse.json({ messageId: result.messageId, threadId: result.threadId })
 }
 
 async function handleFormData(
@@ -98,7 +98,7 @@ async function handleFormData(
       return NextResponse.json({ error: result.error }, { status: 502 })
     }
 
-    return NextResponse.json({ messageId: result.messageId })
+    return NextResponse.json({ messageId: result.messageId, threadId: result.threadId })
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to process form data" },
