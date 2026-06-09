@@ -56,8 +56,6 @@ export function CaseSidebar({
         conversationId={conversationId}
         customerEmail={customerEmail}
         onGenerateDraft={handleSlackDraft}
-        playbookId={playbookId}
-        playbookName={playbookName}
       />
 
       <DraftPanel

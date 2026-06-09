@@ -147,7 +147,37 @@ export function buildUserMessage(conversation: {
   return parts.join("\n")
 }
 
-// ── OpenAI-compatible streaming via Verboo router ─────────────────────────
+// ── Focused Slack thread translation prompt ───────────────────────────────
+// Used by /api/draft/from-slack — purely translates internal Slack discussion
+// into customer-facing wording. No playbooks, no KB articles, no extra context.
+
+export function buildSlackTranslationPrompt(
+  channelName: string,
+  replies: SlackThreadReply[]
+): string {
+  const threadLines = replies.map((r) => `${r.userName}: ${r.text}`)
+
+  return `You are a support agent at Fanvue — a creator subscription platform.
+
+Your task: rewrite the internal Slack thread below into a clear, professional customer-facing reply.
+
+## Rules
+- Convert internal language into clear, professional customer-facing wording.
+- Do NOT expose: internal system names, Slack messages as quoted text, staff names, IDs, moderation labels, or backend details.
+- Do NOT use phrases like: "admin notes," "internal review notes," "workflow," "we flagged you internally," "ticket," "case," or "escalated to the team."
+- Instead use: "following a review," "during our review," "after checking," "we have reviewed your account."
+- Do NOT mention that a Slack thread or workflow exists. The customer should never know about internal tools.
+- If the thread contains conflicting opinions, use the most recent decision.
+- If the thread contains instructions from senior staff, follow them but rephrase them.
+- Maintain a warm, professional first-person tone.
+- Output ONLY the customer-facing message — ready to copy-paste. No intro, no markdown headers, no internal commentary.
+- Never promise timelines, refunds, or exceptions not stated in the thread.
+
+## Internal Slack thread (from #${channelName})
+${threadLines.join("\n")}
+
+Write the customer-facing reply now:`
+}
 
 export async function* streamChatCompletion(
   messages: OpenAIMessage[]

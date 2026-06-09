@@ -6,6 +6,7 @@ import {
   Loader2Icon,
   AlertCircleIcon,
   ExternalLinkIcon,
+  InfoIcon,
 } from "lucide-react"
 
 import {
@@ -17,6 +18,12 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 const POLL_INTERVAL_MS = 60_000
 
@@ -44,19 +51,15 @@ interface Props {
   conversationId: string
   customerEmail: string | null
   onGenerateDraft: (body: string) => void
-  playbookId?: string
-  playbookName?: string
 }
 
 export function SlackThreadFinder({
   conversationId,
   customerEmail,
   onGenerateDraft,
-  playbookId,
-  playbookName,
 }: Props) {
   const [fetchState, setFetchState] = useState<FetchState>({ status: "loading" })
-  const [generatingFor, setGeneratingFor] = useState<string | null>(null)
+  const [generating, setGenerating] = useState(false)
 
   const fetchThreads = useCallback(async () => {
     if (!customerEmail) {
@@ -105,7 +108,7 @@ export function SlackThreadFinder({
   }, [fetchThreads])
 
   async function handleGenerate(channelId: string, threadTs: string, chName: string) {
-    setGeneratingFor(threadTs)
+    setGenerating(true)
 
     try {
       const res = await fetch("/api/draft/from-slack", {
@@ -116,8 +119,6 @@ export function SlackThreadFinder({
           channelId,
           threadTs,
           channelName: chName,
-          playbookId,
-          playbookName,
         }),
       })
 
@@ -145,7 +146,7 @@ export function SlackThreadFinder({
     } catch (e) {
       onGenerateDraft(`[Error: ${e instanceof Error ? e.message : "Network error"}]`)
     } finally {
-      setGeneratingFor(null)
+      setGenerating(false)
     }
   }
 
@@ -162,12 +163,26 @@ export function SlackThreadFinder({
     })
   }
 
+  const latestThread = fetchState.status === "loaded" ? fetchState.threads[0] : null
+
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
           <MessageSquareIcon className="size-4 text-muted-foreground" />
           Slack Threads
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
+                  <InfoIcon className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-64 text-xs leading-relaxed">
+                Searches internal Slack channels for workflow/fraud/moderation threads mentioning this customer's email. The most recent thread is shown. Use "Intercom AI answer" to translate internal discussion into a customer-facing draft.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {fetchState.status === "loaded" && (
             <span className="ml-auto text-xs font-normal text-muted-foreground">
               Auto-refreshing
@@ -178,7 +193,6 @@ export function SlackThreadFinder({
       <CardContent>
         {fetchState.status === "loading" && (
           <div className="flex flex-col gap-2">
-            <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
         )}
@@ -193,7 +207,7 @@ export function SlackThreadFinder({
           <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <AlertCircleIcon className="mt-0.5 size-3 shrink-0" />
             <span>
-              Slack search scope is not available. The <code>search:read</code> scope needs to be added to your Slack app. Drafts from threads won't work until then.
+              Slack search scope is not available. The <code>search:read</code> scope needs to be added to your Slack app.
             </span>
           </div>
         )}
@@ -214,69 +228,57 @@ export function SlackThreadFinder({
 
         {fetchState.status === "empty" && (
           <p className="text-xs text-muted-foreground">
-            No Slack threads found for this customer's email. Try searching manually in the{" "}
-            <a href="/slack" className="text-primary hover:underline">
-              Slack tab
-            </a>
-            .
+            No Slack threads found for this customer's email.
           </p>
         )}
 
-        {fetchState.status === "loaded" && (
-          <div className="flex flex-col gap-3">
-            {fetchState.threads.map((thread) => (
-              <div
-                key={thread.ts}
-                className="flex flex-col gap-1.5 rounded-md border p-2.5"
-              >
-                <div className="flex items-center gap-1.5">
-                  <Badge variant="secondary" className="text-xs font-normal">
-                    #{thread.channelName}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {thread.participantCount} participant{thread.participantCount !== 1 ? "s" : ""}
-                  </span>
-                </div>
-                <p className="line-clamp-2 text-xs text-muted-foreground">
-                  {thread.snippet}
-                </p>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">
-                    {formatTimestamp(thread.ts)}
-                    {thread.messageCount > 1 && ` · ${thread.messageCount} messages`}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    {thread.permalink && (
-                      <a
-                        href={thread.permalink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
-                      >
-                        <ExternalLinkIcon className="size-3" />
-                        Open
-                      </a>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      disabled={generatingFor === thread.ts}
-                      onClick={() => handleGenerate(thread.channelId, thread.ts, thread.channelName)}
-                    >
-                      {generatingFor === thread.ts ? (
-                        <>
-                          <Loader2Icon className="size-3 animate-spin" />
-                          Generating…
-                        </>
-                      ) : (
-                        "Generate draft"
-                      )}
-                    </Button>
-                  </div>
-                </div>
+        {fetchState.status === "loaded" && latestThread && (
+          <div className="flex flex-col gap-1.5 rounded-md border p-2.5">
+            <div className="flex items-center gap-1.5">
+              <Badge variant="secondary" className="text-xs font-normal">
+                #{latestThread.channelName}
+              </Badge>
+              <span className="text-xs text-muted-foreground">
+                {latestThread.participantCount} participant{latestThread.participantCount !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <p className="line-clamp-2 text-xs text-muted-foreground">
+              {latestThread.snippet}
+            </p>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {formatTimestamp(latestThread.ts)}
+              </span>
+              <div className="flex items-center gap-1">
+                {latestThread.permalink && (
+                  <a
+                    href={latestThread.permalink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
+                  >
+                    <ExternalLinkIcon className="size-3" />
+                    Open
+                  </a>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={generating}
+                  onClick={() => handleGenerate(latestThread.channelId, latestThread.ts, latestThread.channelName)}
+                >
+                  {generating ? (
+                    <>
+                      <Loader2Icon className="size-3 animate-spin" />
+                      Generating…
+                    </>
+                  ) : (
+                    "Intercom AI answer"
+                  )}
+                </Button>
               </div>
-            ))}
+            </div>
           </div>
         )}
       </CardContent>

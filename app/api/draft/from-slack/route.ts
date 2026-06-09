@@ -1,27 +1,13 @@
 import { type NextRequest } from "next/server"
 import { getSignedInEmail } from "@/lib/auth"
-import { getConversationDetail, searchArticles } from "@/lib/intercom"
-import { getPlaybooksDashboardData, getResponsesForPlaybookIds } from "@/lib/playbooks"
+import { getConversationDetail } from "@/lib/intercom"
 import { getThreadReplies } from "@/lib/slack"
 import { getAgentTokens } from "@/lib/auth"
 import {
-  buildSlackAwareSystemPrompt,
-  buildUserMessage,
+  buildSlackTranslationPrompt,
   streamChatCompletion,
 } from "@/lib/draft-ai"
 import type { OpenAIMessage, SlackThreadReply } from "@/lib/draft-ai"
-import { getSupabaseAdminClient } from "@/lib/supabase-admin"
-
-async function getAgentName(email: string): Promise<string> {
-  const supabase = getSupabaseAdminClient()
-  if (!supabase) return "the support team"
-  const { data } = await supabase
-    .from("agents")
-    .select("name")
-    .eq("email", email)
-    .maybeSingle()
-  return data?.name?.split(" ")[0] ?? "the support team"
-}
 
 export async function POST(req: NextRequest) {
   if (!process.env.VERBOO_API_KEY) {
@@ -33,7 +19,6 @@ export async function POST(req: NextRequest) {
     channelId?: string
     threadTs?: string
     channelName?: string
-    playbookId?: string
   }
   try {
     body = (await req.json()) as {
@@ -41,13 +26,12 @@ export async function POST(req: NextRequest) {
       channelId?: string
       threadTs?: string
       channelName?: string
-      playbookId?: string
     }
   } catch {
     return new Response("Invalid JSON body", { status: 400 })
   }
 
-  const { conversationId, channelId, threadTs, channelName, playbookId } = body
+  const { conversationId, channelId, threadTs, channelName } = body
   if (!conversationId || !channelId || !threadTs) {
     return new Response("Missing required fields: conversationId, channelId, threadTs", { status: 400 })
   }
@@ -57,10 +41,9 @@ export async function POST(req: NextRequest) {
     return new Response("Authentication required", { status: 401 })
   }
 
-  // Fetch conversation + playbook data
-  const [conversation, playbooksData, tokens] = await Promise.all([
+  // Fetch conversation for context and Slack thread
+  const [conversation, tokens] = await Promise.all([
     getConversationDetail(conversationId),
-    getPlaybooksDashboardData(),
     getAgentTokens(),
   ])
 
@@ -68,15 +51,7 @@ export async function POST(req: NextRequest) {
     return new Response("Conversation not found in Intercom", { status: 404 })
   }
 
-  const playbook = playbookId
-    ? playbooksData.allRows.find((p) => p.id === playbookId)
-    : undefined
-
-  const responseTemplates = playbookId
-    ? ((await getResponsesForPlaybookIds([playbookId])).get(playbookId) ?? [])
-    : []
-
-  // Fetch Slack thread
+  // Fetch Slack thread replies
   const threadResult = await getThreadReplies(tokens.slackToken, channelId, threadTs)
   const slackReplies: SlackThreadReply[] = threadResult.ok
     ? threadResult.replies.map((r) => ({
@@ -86,21 +61,21 @@ export async function POST(req: NextRequest) {
       }))
     : []
 
-  // Fetch KB articles
-  const searchQuery = [conversation.subject, conversation.firstMessage]
-    .filter(Boolean)
-    .join(" ")
-  const articles = await searchArticles(searchQuery)
+  if (slackReplies.length === 0) {
+    return new Response("No replies found in Slack thread", { status: 404 })
+  }
 
-  const agentName = await getAgentName(email)
-  const systemPrompt = buildSlackAwareSystemPrompt(
-    playbook,
-    responseTemplates,
-    agentName,
-    articles,
-    { channelName: channelName ?? "unknown", replies: slackReplies }
+  // Use focused translation prompt — no playbooks, no KB articles, no examples
+  const systemPrompt = buildSlackTranslationPrompt(
+    channelName ?? "unknown",
+    slackReplies
   )
-  const userMessage = buildUserMessage(conversation)
+
+  const userMessage = `The customer's name is ${conversation.customer}.
+
+Draft a warm, professional reply to the customer based on the internal thread above.
+Use first-person ("I've reviewed your account", "I can confirm", etc.).
+Open warmly without using the customer's real name. End with a clear call-to-action.`
 
   const encoder = new TextEncoder()
 
