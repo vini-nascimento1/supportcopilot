@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import { FileTextIcon, PlusIcon, PencilIcon, Trash2Icon, XIcon, CheckIcon, UsersIcon, AtSignIcon } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { FileTextIcon, PlusIcon, PencilIcon, Trash2Icon, XIcon, CheckIcon, UsersIcon, AtSignIcon, BracketsIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
+
+const PLACEHOLDERS = ["{{useremail}}"] as const
 
 type Template = {
   id: string
@@ -37,6 +39,27 @@ export default function TemplatesPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const subjectRef = useRef<HTMLInputElement>(null)
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+
+  function insertAtCursor(
+    ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>,
+    field: "subject" | "body",
+    text: string
+  ) {
+    const el = ref.current
+    if (!el) return
+    const start = el.selectionStart ?? form[field].length
+    const end = el.selectionEnd ?? form[field].length
+    const newVal = form[field].slice(0, start) + text + form[field].slice(end)
+    setForm({ ...form, [field]: newVal })
+    // Restore cursor position after the inserted text on next tick
+    requestAnimationFrame(() => {
+      const pos = start + text.length
+      el.setSelectionRange(pos, pos)
+      el.focus()
+    })
+  }
 
   const fetchTemplates = useCallback(async () => {
     try {
@@ -221,14 +244,39 @@ export default function TemplatesPage() {
             <div>
               <Label>Subject</Label>
               <Input
+                ref={subjectRef}
                 value={form.subject}
                 onChange={(e) => setForm({ ...form, subject: e.target.value })}
                 placeholder="Re: Bank statement for {{useremail}}"
               />
             </div>
             <div>
-              <Label>Body</Label>
+              <div className="flex items-center gap-1 mb-1.5">
+                <Label className="mb-0">Body</Label>
+                <span className="text-xs text-muted-foreground">· Click a placeholder to insert at cursor</span>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-2">
+                {PLACEHOLDERS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => {
+                      // Insert into whichever field was last focused
+                      if (document.activeElement === bodyRef.current) {
+                        insertAtCursor(bodyRef, "body", p)
+                      } else {
+                        insertAtCursor(subjectRef, "subject", p)
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-xs font-mono text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  >
+                    <BracketsIcon className="size-3" />
+                    {p}
+                  </button>
+                ))}
+              </div>
               <Textarea
+                ref={bodyRef}
                 value={form.body}
                 onChange={(e) => setForm({ ...form, body: e.target.value })}
                 rows={8}
