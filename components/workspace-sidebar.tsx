@@ -50,13 +50,18 @@ interface Props {
   userEmail: string | null
   avatarUrl: string | null
   isGmailTemplateUser?: boolean
+  isManager?: boolean
 }
 
-export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser }: Props) {
+export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser, isManager }: Props) {
   const pathname = usePathname()
   const initial = userEmail ? userEmail[0]?.toUpperCase() : "?"
   const [changelogOpen, setChangelogOpen] = useState(false)
   const [gmailExpanded, setGmailExpanded] = useState(false)
+
+  const visibleItems = workspaceItems.filter(
+    (item) => item.label !== "Metrics" || isManager
+  )
 
   return (
     <Sidebar collapsible="icon">
@@ -84,7 +89,7 @@ export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser }: 
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {workspaceItems.map((item) => {
+              {visibleItems.map((item) => {
                 const isActive =
                   item.href === "/"
                     ? pathname === "/"

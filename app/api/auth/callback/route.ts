@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { listIntercomAdmins } from "@/lib/intercom"
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
@@ -70,6 +71,20 @@ export async function GET(request: Request) {
 
     if (userIdError && userIdError.code !== "PGRST204") {
       console.error("Failed to link Supabase auth user to agent", userIdError)
+    }
+
+    // Auto-detect the agent's Intercom admin ID by matching email with
+    // Intercom's admin list. This ensures each agent sees their own case
+    // queue rather than sharing the workspace default admin ID.
+    const intercomAdmins = await listIntercomAdmins()
+    const matchedAdmin = intercomAdmins.find(
+      (a) => a.email?.toLowerCase() === email.toLowerCase()
+    )
+    if (matchedAdmin) {
+      await adminClient
+        .from("agents")
+        .update({ intercom_admin_id: matchedAdmin.id })
+        .eq("email", email)
     }
   }
 

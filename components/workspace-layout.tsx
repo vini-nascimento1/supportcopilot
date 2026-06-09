@@ -3,12 +3,15 @@ import { WorkspaceSidebar } from "@/components/workspace-sidebar"
 import { getSignedInUser } from "@/lib/auth"
 import { isGmailTemplateUser } from "@/lib/gmail-templates-auth"
 
+const managerEmails = (process.env.MANAGER_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)
+
 export async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const { email, avatarUrl } = await getSignedInUser()
+  const isManager = !!email && managerEmails.includes(email.toLowerCase())
 
   return (
     <SidebarProvider>
-      <WorkspaceSidebar userEmail={email} avatarUrl={avatarUrl} isGmailTemplateUser={isGmailTemplateUser(email)} />
+      <WorkspaceSidebar userEmail={email} avatarUrl={avatarUrl} isGmailTemplateUser={isGmailTemplateUser(email)} isManager={isManager} />
       <SidebarInset>{children}</SidebarInset>
     </SidebarProvider>
   )
