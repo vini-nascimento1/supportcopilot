@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { SparklesIcon, Loader2Icon, AlertCircleIcon, SendIcon, CheckIcon } from "lucide-react"
+import { SparklesIcon, Loader2Icon, AlertCircleIcon, SendIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -12,8 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { CopyButton } from "@/components/copy-button"
-import { MarkdownPreview } from "@/components/markdown-preview"
 import { SendConfirmDialog } from "@/components/send-confirm-dialog"
+import { Textarea } from "@/components/ui/textarea"
 import { mdToHtml } from "@/lib/md-to-html"
 
 interface Props {
@@ -184,9 +184,13 @@ export function DraftPanel({ conversationId, playbookId, playbookName }: Props) 
                 </button>
               </div>
             </div>
-            <MarkdownPreview content={draft.body} />
+            <Textarea
+              value={draft.body}
+              onChange={(e) => setDraft((prev) => ({ ...prev, body: e.target.value }))}
+              className="min-h-[200px] resize-y text-sm"
+            />
             <p className="text-xs text-muted-foreground">
-              Review the draft, then copy or send directly to Intercom.
+              Edit the draft directly, then copy or send to Intercom.
             </p>
           </div>
         ) : (
