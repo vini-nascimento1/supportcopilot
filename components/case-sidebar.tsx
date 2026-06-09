@@ -144,15 +144,6 @@ export function CaseSidebar({
           </a>
         </Button>
       )}
-
-      <Card className="border-dashed">
-        <CardContent className="pt-4">
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Drafts shown are for reference only — never sent automatically.
-            Copy-paste into Intercom, review, then send.
-          </p>
-        </CardContent>
-      </Card>
     </div>
   )
 }

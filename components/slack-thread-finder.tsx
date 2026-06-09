@@ -7,6 +7,8 @@ import {
   AlertCircleIcon,
   ExternalLinkIcon,
   InfoIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
 } from "lucide-react"
 
 import {
@@ -38,6 +40,12 @@ type ThreadInfo = {
   permalink: string | null
 }
 
+type ThreadReply = {
+  userName: string
+  text: string
+  ts: string
+}
+
 type FetchState =
   | { status: "loading" }
   | { status: "no_email" }
@@ -60,6 +68,9 @@ export function SlackThreadFinder({
 }: Props) {
   const [fetchState, setFetchState] = useState<FetchState>({ status: "loading" })
   const [generating, setGenerating] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [threadReplies, setThreadReplies] = useState<ThreadReply[] | null>(null)
+  const [loadingThread, setLoadingThread] = useState(false)
 
   const fetchThreads = useCallback(async () => {
     if (!customerEmail) {
@@ -94,6 +105,9 @@ export function SlackThreadFinder({
         return
       }
 
+      // Reset expanded state when threads refresh
+      setExpanded(false)
+      setThreadReplies(null)
       setFetchState({ status: "loaded", threads: data.threads })
     } catch {
       setFetchState({ status: "error", message: "Network error" })
@@ -106,6 +120,34 @@ export function SlackThreadFinder({
     const id = setInterval(fetchThreads, POLL_INTERVAL_MS)
     return () => clearInterval(id)
   }, [fetchThreads])
+
+  async function handleExpand(channelId: string, threadTs: string) {
+    if (expanded && threadReplies) {
+      setExpanded(false)
+      return
+    }
+
+    setExpanded(true)
+    if (threadReplies) return // already loaded
+
+    setLoadingThread(true)
+    try {
+      const res = await fetch(`/api/slack/thread?channel=${encodeURIComponent(channelId)}&ts=${encodeURIComponent(threadTs)}`)
+      const data = await res.json() as {
+        ok: boolean
+        replies?: ThreadReply[]
+      }
+      if (data.ok && data.replies) {
+        setThreadReplies(data.replies)
+      } else {
+        setThreadReplies([])
+      }
+    } catch {
+      setThreadReplies([])
+    } finally {
+      setLoadingThread(false)
+    }
+  }
 
   async function handleGenerate(channelId: string, threadTs: string, chName: string) {
     setGenerating(true)
@@ -179,7 +221,7 @@ export function SlackThreadFinder({
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-64 text-xs leading-relaxed">
-                Searches internal Slack channels for workflow/fraud/moderation threads mentioning this customer's email. The most recent thread is shown. Use "Intercom AI answer" to translate internal discussion into a customer-facing draft.
+                Searches internal Slack channels for the most recent workflow/fraud/moderation thread mentioning this customer's email. Expand to read the full thread and use "Generate response" to translate it into a customer-facing draft.
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -233,50 +275,86 @@ export function SlackThreadFinder({
         )}
 
         {fetchState.status === "loaded" && latestThread && (
-          <div className="flex flex-col gap-1.5 rounded-md border p-2.5">
-            <div className="flex items-center gap-1.5">
-              <Badge variant="secondary" className="text-xs font-normal">
-                #{latestThread.channelName}
-              </Badge>
-              <span className="text-xs text-muted-foreground">
-                {latestThread.participantCount} participant{latestThread.participantCount !== 1 ? "s" : ""}
-              </span>
-            </div>
-            <p className="line-clamp-2 text-xs text-muted-foreground">
-              {latestThread.snippet}
-            </p>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">
-                {formatTimestamp(latestThread.ts)}
-              </span>
-              <div className="flex items-center gap-1">
-                {latestThread.permalink && (
-                  <a
-                    href={latestThread.permalink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
-                  >
-                    <ExternalLinkIcon className="size-3" />
-                    Open
-                  </a>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  disabled={generating}
-                  onClick={() => handleGenerate(latestThread.channelId, latestThread.ts, latestThread.channelName)}
-                >
-                  {generating ? (
-                    <>
-                      <Loader2Icon className="size-3 animate-spin" />
-                      Generating…
-                    </>
+          <div className="flex flex-col gap-2">
+            {/* Preview card */}
+            <div className="flex flex-col gap-1.5 rounded-md border p-2.5">
+              <div className="flex items-center gap-1.5">
+                <Badge variant="secondary" className="text-xs font-normal">
+                  #{latestThread.channelName}
+                </Badge>
+                <span className="text-xs text-muted-foreground">
+                  {latestThread.participantCount} participant{latestThread.participantCount !== 1 ? "s" : ""}
+                </span>
+              </div>
+
+              {/* Expandable thread content */}
+              <button
+                type="button"
+                onClick={() => handleExpand(latestThread.channelId, latestThread.ts)}
+                className="flex w-full items-start gap-1.5 text-left"
+              >
+                <div className="mt-0.5 shrink-0">
+                  {loadingThread ? (
+                    <Loader2Icon className="size-3 animate-spin text-muted-foreground" />
+                  ) : expanded ? (
+                    <ChevronDownIcon className="size-3 text-muted-foreground" />
                   ) : (
-                    "Intercom AI answer"
+                    <ChevronRightIcon className="size-3 text-muted-foreground" />
                   )}
-                </Button>
+                </div>
+                <div className="min-w-0 flex-1">
+                  {expanded && threadReplies ? (
+                    <div className="flex flex-col gap-1.5">
+                      {threadReplies.map((reply, i) => (
+                        <div key={reply.ts ?? i} className="rounded bg-muted/30 px-2 py-1">
+                          <span className="text-xs font-medium text-foreground">{reply.userName}</span>
+                          <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                            {reply.text}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="line-clamp-2 text-xs text-muted-foreground">
+                      {latestThread.snippet}
+                    </p>
+                  )}
+                </div>
+              </button>
+
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {formatTimestamp(latestThread.ts)}
+                </span>
+                <div className="flex items-center gap-1">
+                  {latestThread.permalink && (
+                    <a
+                      href={latestThread.permalink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
+                    >
+                      <ExternalLinkIcon className="size-3" />
+                      Open
+                    </a>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    disabled={generating}
+                    onClick={() => handleGenerate(latestThread.channelId, latestThread.ts, latestThread.channelName)}
+                  >
+                    {generating ? (
+                      <>
+                        <Loader2Icon className="size-3 animate-spin" />
+                        Generating…
+                      </>
+                    ) : (
+                      "Generate response"
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

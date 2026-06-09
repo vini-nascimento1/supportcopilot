@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { SparklesIcon, Loader2Icon, AlertCircleIcon, SendIcon } from "lucide-react"
+import { SparklesIcon, Loader2Icon, AlertCircleIcon, SendIcon, InfoIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -15,6 +15,12 @@ import { CopyButton } from "@/components/copy-button"
 import { SendConfirmDialog } from "@/components/send-confirm-dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { mdToHtml } from "@/lib/md-to-html"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 interface Props {
   conversationId: string
@@ -140,7 +146,19 @@ export function DraftPanel({ conversationId, playbookId, playbookName, externalD
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
           <SparklesIcon className="size-4 text-primary" />
-          AI Draft Answer
+          Intercom AI Answer
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
+                  <InfoIcon className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-64 text-xs leading-relaxed">
+                Generates a customer-facing draft reply using your matched playbook, the conversation thread, and internal knowledge base articles as context.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </CardTitle>
         {playbookName && (
           <CardDescription className="line-clamp-2 text-xs">
