@@ -27,6 +27,7 @@ async function handleJson(
 ): Promise<Response> {
   const body = (await request.json()) as {
     to: string
+    cc?: string
     subject: string
     body: string
     threadId?: string
@@ -40,6 +41,7 @@ async function handleJson(
 
   const result = await sendGmailMessage(token, email, {
     to: body.to,
+    cc: body.cc,
     subject: body.subject,
     body: body.body,
     threadId: body.threadId,
@@ -63,6 +65,7 @@ async function handleFormData(
     const formData = await request.formData()
 
     const to = formData.get("to") as string | null
+    const cc = formData.get("cc") as string | null
     const subject = formData.get("subject") as string | null
     const body = formData.get("body") as string | null
     const threadId = formData.get("threadId") as string | null
@@ -90,7 +93,7 @@ async function handleFormData(
     const result = await sendGmailMessage(
       token,
       email,
-      { to, subject, body, threadId: threadId ?? undefined, inReplyTo: inReplyTo ?? undefined, references: references ?? undefined },
+      { to, cc: cc ?? undefined, subject, body, threadId: threadId ?? undefined, inReplyTo: inReplyTo ?? undefined, references: references ?? undefined },
       attachments.length > 0 ? attachments : undefined
     )
 
