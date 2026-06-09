@@ -16,7 +16,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 
-const PLACEHOLDERS = ["{{useremail}}"] as const
+const PLACEHOLDERS = ["{{useremail}}", "{{agentname}}"] as const
 
 type Template = {
   id: string
@@ -41,6 +41,7 @@ export default function TemplatesPage() {
   const [saving, setSaving] = useState(false)
   const subjectRef = useRef<HTMLInputElement>(null)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const [focusedField, setFocusedField] = useState<"subject" | "body">("subject")
 
   function insertAtCursor(
     ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>,
@@ -199,7 +200,7 @@ export default function TemplatesPage() {
           <DialogHeader>
             <DialogTitle>{editingId ? "Edit Template" : "New Template"}</DialogTitle>
             <DialogDescription>
-              Use {"{{useremail}}"} as a placeholder for the customer email.
+              Use {"{{useremail}}"} for the customer email and {"{{agentname}}"} for your name.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 max-h-[70vh] overflow-y-auto pr-1">
@@ -247,6 +248,7 @@ export default function TemplatesPage() {
                 ref={subjectRef}
                 value={form.subject}
                 onChange={(e) => setForm({ ...form, subject: e.target.value })}
+                onFocus={() => setFocusedField("subject")}
                 placeholder="Re: Bank statement for {{useremail}}"
               />
             </div>
@@ -261,12 +263,11 @@ export default function TemplatesPage() {
                     key={p}
                     type="button"
                     onClick={() => {
-                      // Insert into whichever field was last focused
-                      if (document.activeElement === bodyRef.current) {
-                        insertAtCursor(bodyRef, "body", p)
-                      } else {
-                        insertAtCursor(subjectRef, "subject", p)
-                      }
+                      insertAtCursor(
+                        focusedField === "body" ? bodyRef : subjectRef,
+                        focusedField,
+                        p
+                      )
                     }}
                     className="inline-flex items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-xs font-mono text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                   >
@@ -279,6 +280,7 @@ export default function TemplatesPage() {
                 ref={bodyRef}
                 value={form.body}
                 onChange={(e) => setForm({ ...form, body: e.target.value })}
+                onFocus={() => setFocusedField("body")}
                 rows={8}
                 placeholder="Hello, I'm reaching out about user {{useremail}}..."
               />
