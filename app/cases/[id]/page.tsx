@@ -4,7 +4,6 @@ import {
   ArrowLeftIcon,
   ExternalLinkIcon,
   MessageSquareIcon,
-  UserIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -18,7 +17,7 @@ import {
 } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { parseSteps } from "@/lib/parse-steps"
-import { DraftPanel } from "@/components/draft-panel"
+import { CaseSidebar } from "@/components/case-sidebar"
 import { PlaybookCard } from "@/components/playbook-card"
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
@@ -210,102 +209,18 @@ export default async function CasePage({
         </div>
 
         {/* right: sidebar */}
-        <div className="flex flex-col gap-4">
-          {/* draft panel — always first */}
-          <DraftPanel
-            conversationId={id}
-            playbookId={matches[0]?.playbook.id}
-            playbookName={matches[0]?.playbook.caseType}
-          />
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <UserIcon className="size-4 text-muted-foreground" />
-                Case details
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3 text-sm">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-xs text-muted-foreground">Customer</span>
-                <span className="font-medium">{conversation.customer}</span>
-                {conversation.email && (
-                  <span className="text-xs text-muted-foreground">
-                    {conversation.email}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <span className="text-xs text-muted-foreground">State</span>
-                <Badge
-                  variant={conversation.state === "open" ? "default" : "outline"}
-                  className="w-fit"
-                >
-                  {conversation.state}
-                </Badge>
-              </div>
-
-              {conversation.topic && (
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-xs text-muted-foreground">Topic</span>
-                  <span>{conversation.topic}</span>
-                </div>
-              )}
-
-              {conversation.tags.length > 0 && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-muted-foreground">Tags</span>
-                  <div className="flex flex-wrap gap-1">
-                    {conversation.tags.map((tag) => (
-                      <Badge key={tag} variant="secondary" className="font-normal">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {conversation.updatedAt && (
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-xs text-muted-foreground">Last updated</span>
-                  <span className="text-xs">
-                    {new Date(conversation.updatedAt).toLocaleString("en-GB", { timeZone: "Europe/London" })}
-                  </span>
-                </div>
-              )}
-
-              <div className="flex flex-col gap-0.5">
-                <span className="text-xs text-muted-foreground">
-                  Conversation ID
-                </span>
-                <span className="font-mono text-xs">{id}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {conversation.intercomUrl && (
-            <Button asChild className="w-full">
-              <a
-                href={conversation.intercomUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <ExternalLinkIcon className="size-4" />
-                Open in Intercom
-              </a>
-            </Button>
-          )}
-
-          <Card className="border-dashed">
-            <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Drafts shown are for reference only — never sent automatically.
-                Copy-paste into Intercom, review, then send.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+        <CaseSidebar
+          conversationId={id}
+          playbookId={matches[0]?.playbook.id}
+          playbookName={matches[0]?.playbook.caseType}
+          customerEmail={conversation.email}
+          customerName={conversation.customer}
+          conversationState={conversation.state}
+          conversationTopic={conversation.topic}
+          conversationTags={conversation.tags}
+          conversationUpdatedAt={conversation.updatedAt}
+          intercomUrl={conversation.intercomUrl}
+        />
       </main>
     </div>
   )

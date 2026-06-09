@@ -16,6 +16,20 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-06-09-a",
+    date: "2026-06-09",
+    title: "Slack Thread Finder — auto-discover internal workflow threads",
+    description:
+      "When opening a case, the system automatically searches Slack for threads containing the customer's email. Fraud/moderation workflow results appear in a sidebar card with 60s polling. 'Generate draft' reads the full Slack thread and translates internal language into customer-facing wording — without exposing staff names, internal systems, or workflow references.",
+  },
+  {
+    id: "seed-2026-06-09-b",
+    date: "2026-06-09",
+    title: "AI draft prompt overhaul — context hierarchy & conversation close",
+    description:
+      "Complete system prompt revision: clear context hierarchy (thread > articles > playbook), rules for closing conversations when the customer keeps insisting after being answered, and a firmer tone for policy and moderation decisions.",
+  },
+  {
     id: "seed-2026-06-08-b",
     date: "2026-06-08",
     title: "AI error handling overhaul",

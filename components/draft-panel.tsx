@@ -20,6 +20,8 @@ interface Props {
   conversationId: string
   playbookId: string | undefined
   playbookName: string | undefined
+  externalDraft?: string | null
+  onDraftConsumed?: () => void
 }
 
 const LOADING_STEPS = [
@@ -29,7 +31,7 @@ const LOADING_STEPS = [
   "Drafting your reply…",
 ]
 
-export function DraftPanel({ conversationId, playbookId, playbookName }: Props) {
+export function DraftPanel({ conversationId, playbookId, playbookName, externalDraft, onDraftConsumed }: Props) {
   const [draft, setDraft] = useState<{ body: string; loading: boolean; error: string | null }>({
     body: "",
     loading: false,
@@ -40,6 +42,14 @@ export function DraftPanel({ conversationId, playbookId, playbookName }: Props) 
   const [sendDialogOpen, setSendDialogOpen] = useState(false)
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const previousBodyRef = useRef<string>("")
+
+  // Consume external draft when provided (e.g. from Slack thread finder)
+  useEffect(() => {
+    if (externalDraft !== null && externalDraft !== undefined) {
+      setDraft({ body: externalDraft, loading: false, error: null })
+      onDraftConsumed?.()
+    }
+  }, [externalDraft, onDraftConsumed])
 
   // Cycle through loading steps while generating
   useEffect(() => {

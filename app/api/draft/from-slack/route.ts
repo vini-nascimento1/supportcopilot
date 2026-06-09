@@ -1,10 +1,16 @@
 import { type NextRequest } from "next/server"
-import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getSignedInEmail } from "@/lib/auth"
 import { getConversationDetail, searchArticles } from "@/lib/intercom"
 import { getPlaybooksDashboardData, getResponsesForPlaybookIds } from "@/lib/playbooks"
-import { buildSystemPrompt, buildUserMessage, streamChatCompletion } from "@/lib/draft-ai"
-import type { OpenAIMessage } from "@/lib/draft-ai"
+import { getThreadReplies } from "@/lib/slack"
+import { getAgentTokens } from "@/lib/auth"
+import {
+  buildSlackAwareSystemPrompt,
+  buildUserMessage,
+  streamChatCompletion,
+} from "@/lib/draft-ai"
+import type { OpenAIMessage, SlackThreadReply } from "@/lib/draft-ai"
+import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 
 async function getAgentName(email: string): Promise<string> {
   const supabase = getSupabaseAdminClient()
@@ -17,34 +23,45 @@ async function getAgentName(email: string): Promise<string> {
   return data?.name?.split(" ")[0] ?? "the support team"
 }
 
-// ── Route handler ──────────────────────────────────────────────────────────
-
 export async function POST(req: NextRequest) {
   if (!process.env.VERBOO_API_KEY) {
     return new Response("VERBOO_API_KEY is not configured", { status: 503 })
   }
 
-  let body: { conversationId?: string; playbookId?: string }
+  let body: {
+    conversationId?: string
+    channelId?: string
+    threadTs?: string
+    channelName?: string
+    playbookId?: string
+  }
   try {
-    body = (await req.json()) as { conversationId?: string; playbookId?: string }
+    body = (await req.json()) as {
+      conversationId?: string
+      channelId?: string
+      threadTs?: string
+      channelName?: string
+      playbookId?: string
+    }
   } catch {
     return new Response("Invalid JSON body", { status: 400 })
   }
 
-  const { conversationId, playbookId } = body
-  if (!conversationId) {
-    return new Response("conversationId is required", { status: 400 })
+  const { conversationId, channelId, threadTs, channelName, playbookId } = body
+  if (!conversationId || !channelId || !threadTs) {
+    return new Response("Missing required fields: conversationId, channelId, threadTs", { status: 400 })
   }
 
-  // Require authenticated session
   const email = await getSignedInEmail()
   if (!email) {
     return new Response("Authentication required", { status: 401 })
   }
 
-  const [conversation, playbooksData] = await Promise.all([
+  // Fetch conversation + playbook data
+  const [conversation, playbooksData, tokens] = await Promise.all([
     getConversationDetail(conversationId),
     getPlaybooksDashboardData(),
+    getAgentTokens(),
   ])
 
   if (!conversation) {
@@ -59,18 +76,33 @@ export async function POST(req: NextRequest) {
     ? ((await getResponsesForPlaybookIds([playbookId])).get(playbookId) ?? [])
     : []
 
-  // Fetch relevant Intercom Help Center articles for extra context
+  // Fetch Slack thread
+  const threadResult = await getThreadReplies(tokens.slackToken, channelId, threadTs)
+  const slackReplies: SlackThreadReply[] = threadResult.ok
+    ? threadResult.replies.map((r) => ({
+        userName: r.userName,
+        text: r.text,
+        ts: r.ts,
+      }))
+    : []
+
+  // Fetch KB articles
   const searchQuery = [conversation.subject, conversation.firstMessage]
     .filter(Boolean)
     .join(" ")
   const articles = await searchArticles(searchQuery)
 
   const agentName = await getAgentName(email)
-  const systemPrompt = buildSystemPrompt(playbook, responseTemplates, agentName, articles)
+  const systemPrompt = buildSlackAwareSystemPrompt(
+    playbook,
+    responseTemplates,
+    agentName,
+    articles,
+    { channelName: channelName ?? "unknown", replies: slackReplies }
+  )
   const userMessage = buildUserMessage(conversation)
 
   const encoder = new TextEncoder()
-  let fullText = ""
 
   const readable = new ReadableStream({
     async start(controller) {
@@ -81,7 +113,6 @@ export async function POST(req: NextRequest) {
         ]
 
         for await (const chunk of streamChatCompletion(messages)) {
-          fullText += chunk
           controller.enqueue(encoder.encode(chunk))
         }
       } catch (err) {
