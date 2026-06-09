@@ -6,6 +6,14 @@ import { HistoryIcon, ExternalLinkIcon, Trash2Icon, RefreshCwIcon, GlobeIcon, Lo
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 type SentEmail = {
   id: string
@@ -23,6 +31,8 @@ type SentEmail = {
 export default function SentPage() {
   const [sent, setSent] = useState<SentEmail[]>([])
   const [loading, setLoading] = useState(true)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const router = useRouter()
 
   const fetchSent = useCallback(async () => {
@@ -41,16 +51,19 @@ export default function SentPage() {
 
   useEffect(() => { fetchSent() }, [fetchSent])
 
-  async function handleDelete(id: string, sentBy: string) {
-    const isOwner = sentBy === "you" // we don't know current email, API handles it
-    if (!confirm("Remove this entry from the tracker? (The email in Gmail will NOT be deleted)")) return
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      const res = await fetch(`/api/gmail/sent/${id}`, { method: "DELETE" })
+      const res = await fetch(`/api/gmail/sent/${deleteTarget.id}`, { method: "DELETE" })
       if (!res.ok) throw new Error("Delete failed")
       toast.success("Entry removed")
+      setDeleteTarget(null)
       await fetchSent()
     } catch {
       toast.error("Failed to delete")
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -135,7 +148,7 @@ export default function SentPage() {
                     variant="ghost"
                     size="icon"
                     className="size-8 text-destructive"
-                    onClick={() => handleDelete(s.id, s.sent_by)}
+                    onClick={() => setDeleteTarget({ id: s.id })}
                     title="Remove from tracker"
                   >
                     <Trash2Icon className="size-3.5" />
@@ -146,6 +159,26 @@ export default function SentPage() {
           })}
         </div>
       )}
+
+      {/* Confirm delete dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove entry?</DialogTitle>
+            <DialogDescription>
+              Remove this entry from the tracker? (The email in Gmail will NOT be deleted)
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmDelete} disabled={deleting}>
+              {deleting ? "Removing..." : "Remove"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

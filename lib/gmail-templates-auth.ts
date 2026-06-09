@@ -1,6 +1,6 @@
 import "server-only"
 
-const ALLOWED_USERS = ["vinicius.nascimento@fanvue.com"]
+const ALLOWED_USERS = ["vinicius.nascimento@fanvue.com", "oliverj@fanvue.com", "berta.fandino@fanvue.com"]
 
 export function isGmailTemplateUser(email: string | null): boolean {
   if (!email) return false
