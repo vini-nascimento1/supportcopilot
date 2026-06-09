@@ -1,3 +1,4 @@
+import { getAgentTokens } from "@/lib/auth"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { WorkspaceLayout } from "@/components/workspace-layout"
@@ -6,7 +7,9 @@ import QuickSendForm from "./quick-send-form"
 
 export const dynamic = "force-dynamic"
 
-export default function QuickSendPage() {
+export default async function QuickSendPage() {
+  const tokens = await getAgentTokens()
+
   return (
     <WorkspaceLayout>
       <header className="flex min-h-14 items-center gap-3 border-b px-4 lg:px-6">
@@ -15,7 +18,7 @@ export default function QuickSendPage() {
         <SendIcon className="size-4 text-muted-foreground" />
         <h1 className="text-sm font-semibold">Quick Send</h1>
       </header>
-      <QuickSendForm />
+      <QuickSendForm agentName={tokens.name} />
     </WorkspaceLayout>
   )
 }

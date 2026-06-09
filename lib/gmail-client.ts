@@ -17,6 +17,15 @@ export type GmailThreadSummary = {
   messageCount: number
 }
 
+export type GmailAttachment = {
+  filename: string
+  mimeType: string
+  attachmentId: string
+  size: number
+  /** Populated when the attachment data has been fetched (download). */
+  data?: string
+}
+
 export type GmailMessage = {
   id: string
   threadId: string
@@ -31,6 +40,7 @@ export type GmailMessage = {
   bodyPlain: string
   bodyHtml: string
   isUnread: boolean
+  attachments: GmailAttachment[]
 }
 
 export type GmailThreadDetail = {
@@ -47,8 +57,9 @@ type GmailHeader = { name: string; value: string }
 
 type GmailPayload = {
   mimeType?: string
+  filename?: string
   headers?: GmailHeader[]
-  body?: { data?: string; size?: number }
+  body?: { data?: string; size?: number; attachmentId?: string }
   parts?: GmailPayload[]
 }
 
@@ -94,6 +105,34 @@ function extractBody(payload: GmailPayload): { plain: string; html: string } {
   return { plain, html }
 }
 
+function extractAttachments(payload: GmailPayload): GmailAttachment[] {
+  const attachments: GmailAttachment[] = []
+
+  function walk(part: GmailPayload) {
+    // Parts with a filename and attachmentId are attachments
+    if (
+      part.filename &&
+      part.body?.attachmentId &&
+      part.mimeType &&
+      part.mimeType !== "text/plain" &&
+      part.mimeType !== "text/html"
+    ) {
+      attachments.push({
+        filename: part.filename,
+        mimeType: part.mimeType,
+        attachmentId: part.body.attachmentId,
+        size: part.body.size ?? 0,
+      })
+    }
+    for (const sub of part.parts ?? []) {
+      walk(sub)
+    }
+  }
+
+  walk(payload)
+  return attachments
+}
+
 function parseFrom(from: string): { name: string; address: string } {
   const match = from.match(/^(.*?)\s*<([^>]+)>$/)
   if (match) return { name: match[1]?.trim() ?? "", address: match[2]?.trim() ?? from }
@@ -123,6 +162,7 @@ function apiMessageToGmailMessage(msg: GmailApiMessage): GmailMessage {
     bodyPlain: body.plain,
     bodyHtml: body.html,
     isUnread: (msg.labelIds ?? []).includes("UNREAD"),
+    attachments: extractAttachments(msg.payload ?? {}),
   }
 }
 
@@ -293,27 +333,81 @@ type SendParams = {
   references?: string
 }
 
-function buildRawMessage(params: SendParams): string {
-  const lines = [
+export type SendAttachment = {
+  filename: string
+  mimeType: string
+  content: Buffer
+}
+
+function buildRawMessage(params: SendParams, attachments?: SendAttachment[]): string {
+  const hasAttachments = attachments && attachments.length > 0
+
+  if (!hasAttachments) {
+    const lines = [
+      `To: ${params.to}`,
+      `Subject: ${params.subject}`,
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=UTF-8",
+    ]
+    if (params.cc) lines.push(`Cc: ${params.cc}`)
+    if (params.inReplyTo) lines.push(`In-Reply-To: ${params.inReplyTo}`)
+    if (params.references) lines.push(`References: ${params.references}`)
+    lines.push("", params.body)
+    return Buffer.from(lines.join("\r\n")).toString("base64url")
+  }
+
+  // Build multipart/mixed MIME message with attachments
+  const boundary = `boundary_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  const parts: string[] = []
+
+  // Text part
+  parts.push(
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: 7bit",
+    "",
+    params.body
+  )
+
+  // Attachment parts
+  for (const att of attachments) {
+    const base64 = att.content.toString("base64")
+    // Strip any quotes from filename to prevent MIME header injection
+    const safeFilename = att.filename.replace(/"/g, "")
+    parts.push(
+      `--${boundary}`,
+      `Content-Type: ${att.mimeType}; name="${safeFilename}"`,
+      `Content-Disposition: attachment; filename="${safeFilename}"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      base64
+    )
+  }
+
+  parts.push(`--${boundary}--`, "")
+
+  const headers = [
     `To: ${params.to}`,
     `Subject: ${params.subject}`,
     "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=UTF-8",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
   ]
-  if (params.cc) lines.push(`Cc: ${params.cc}`)
-  if (params.inReplyTo) lines.push(`In-Reply-To: ${params.inReplyTo}`)
-  if (params.references) lines.push(`References: ${params.references}`)
-  lines.push("", params.body)
-  return Buffer.from(lines.join("\r\n")).toString("base64url")
+  if (params.cc) headers.push(`Cc: ${params.cc}`)
+  if (params.inReplyTo) headers.push(`In-Reply-To: ${params.inReplyTo}`)
+  if (params.references) headers.push(`References: ${params.references}`)
+
+  const raw = [...headers, "", ...parts].join("\r\n")
+  return Buffer.from(raw).toString("base64url")
 }
 
 export async function sendGmailMessage(
   token: string,
   email: string | null,
-  params: SendParams
+  params: SendParams,
+  attachments?: SendAttachment[]
 ): Promise<{ ok: true; messageId: string; threadId: string } | { ok: false; error: string }> {
   try {
-    const body: Record<string, string> = { raw: buildRawMessage(params) }
+    const body: Record<string, string> = { raw: buildRawMessage(params, attachments) }
     if (params.threadId) body.threadId = params.threadId
 
     const res = await googleFetch(
@@ -357,6 +451,27 @@ export async function markThreadRead(
       body: JSON.stringify({ removeLabelIds: ["UNREAD"] }),
     }
   )
+}
+
+// ── Attachment download ─────────────────────────────────────────────────────
+
+export async function getAttachmentData(
+  token: string,
+  email: string | null,
+  messageId: string,
+  attachmentId: string
+): Promise<{ data: string; size: number } | null> {
+  try {
+    const res = await googleFetch(
+      email,
+      token,
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${attachmentId}`
+    )
+    if (!res || !res.ok) return null
+    return (await res.json()) as { data: string; size: number }
+  } catch {
+    return null
+  }
 }
 
 // ── Bulk operations ──────────────────────────────────────────────────────────

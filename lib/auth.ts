@@ -56,6 +56,7 @@ export async function getSignedInEmail(): Promise<string | null> {
 
 export type AgentTokens = {
   email: string | null
+  name: string | null
   googleToken: string | null
   slackToken: string | null
   notionToken: string | null
@@ -64,7 +65,7 @@ export type AgentTokens = {
 // Per-agent integration tokens from the agents table, one query.
 // Google is written at sign-in callback; Slack/Notion at their OAuth callbacks.
 export async function getAgentTokens(): Promise<AgentTokens> {
-  const empty: AgentTokens = { email: null, googleToken: null, slackToken: null, notionToken: null }
+  const empty: AgentTokens = { email: null, name: null, googleToken: null, slackToken: null, notionToken: null }
 
   const cookieStore = await cookies()
   const supabase = createServerClient(
@@ -100,7 +101,7 @@ export async function getAgentTokens(): Promise<AgentTokens> {
 
   const { data } = await adminClient
     .from("agents")
-    .select("google_token, slack_token, notion_token")
+    .select("name, google_token, slack_token, notion_token")
     .eq("email", email)
     .maybeSingle()
 
@@ -118,6 +119,7 @@ export async function getAgentTokens(): Promise<AgentTokens> {
 
   return {
     email,
+    name: data?.name ?? null,
     googleToken,
     slackToken: data?.slack_token ?? null,
     notionToken: data?.notion_token ?? null,

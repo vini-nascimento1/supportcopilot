@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ArrowLeftIcon, ExternalLinkIcon } from "lucide-react"
+import { ArrowLeftIcon, DownloadIcon, ExternalLinkIcon, PaperclipIcon } from "lucide-react"
 import { notFound } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
@@ -9,7 +9,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { WorkspaceLayout } from "@/components/workspace-layout"
 import { GmailReply } from "@/components/gmail-reply"
 import { getAgentTokens } from "@/lib/auth"
-import { getGmailThread, markThreadRead } from "@/lib/gmail-client"
+import { getGmailThread, markThreadRead, type GmailAttachment } from "@/lib/gmail-client"
 
 export const dynamic = "force-dynamic"
 
@@ -22,6 +22,48 @@ function formatDate(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function AttachmentList({
+  messageId,
+  attachments,
+}: {
+  messageId: string
+  attachments: GmailAttachment[]
+}) {
+  if (attachments.length === 0) return null
+
+  return (
+    <div className="mt-3 flex flex-col gap-1.5">
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <PaperclipIcon className="size-3" />
+        <span>{attachments.length} attachment{attachments.length > 1 ? "s" : ""}</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {attachments.map((att) => {
+          const downloadUrl = `/api/gmail/attachments/${messageId}/${att.attachmentId}?filename=${encodeURIComponent(att.filename)}`
+          return (
+            <a
+              key={att.attachmentId}
+              href={downloadUrl}
+              download={att.filename}
+              className="flex items-center gap-1.5 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs transition-colors hover:bg-muted"
+            >
+              <DownloadIcon className="size-3 shrink-0" />
+              <span className="max-w-40 truncate">{att.filename}</span>
+              <span className="shrink-0 text-muted-foreground">({formatSize(att.size)})</span>
+            </a>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 function EmailBody({ plain, html }: { plain: string; html: string }) {
@@ -66,6 +108,7 @@ function MessageCard({
     bodyPlain: string
     bodyHtml: string
     isUnread: boolean
+    attachments: GmailAttachment[]
   }
   isFirst: boolean
 }) {
@@ -90,6 +133,7 @@ function MessageCard({
       </div>
       <Separator />
       <EmailBody plain={message.bodyPlain} html={message.bodyHtml} />
+      <AttachmentList messageId={message.id} attachments={message.attachments} />
     </div>
   )
 }

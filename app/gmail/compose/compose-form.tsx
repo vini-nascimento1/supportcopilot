@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { SendIcon } from "lucide-react"
+import { PaperclipIcon, SendIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,13 +10,44 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 
+type SelectedFile = {
+  file: File
+  id: string
+}
+
 export default function ComposeForm() {
   const router = useRouter()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [to, setTo] = useState("")
   const [subject, setSubject] = useState("")
   const [body, setBody] = useState("")
+  const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([])
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle")
   const [error, setError] = useState("")
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
+
+    const newFiles = files.map((file) => ({
+      file,
+      id: `${file.name}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    }))
+    setSelectedFiles((prev) => [...prev, ...newFiles])
+
+    // Reset the input so the same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  function removeFile(id: string) {
+    setSelectedFiles((prev) => prev.filter((f) => f.id !== id))
+  }
+
+  function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
 
   async function handleSend() {
     if (!to.trim() || !subject.trim() || !body.trim()) return
@@ -24,11 +55,27 @@ export default function ComposeForm() {
     setError("")
 
     try {
-      const res = await fetch("/api/gmail/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: to.trim(), subject: subject.trim(), body: body.trim() }),
-      })
+      const hasFiles = selectedFiles.length > 0
+
+      let res: Response
+      if (hasFiles) {
+        // Send as FormData when there are attachments
+        const formData = new FormData()
+        formData.append("to", to.trim())
+        formData.append("subject", subject.trim())
+        formData.append("body", body.trim())
+        for (const sf of selectedFiles) {
+          formData.append("attachments", sf.file)
+        }
+        res = await fetch("/api/gmail/send", { method: "POST", body: formData })
+      } else {
+        res = await fetch("/api/gmail/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to: to.trim(), subject: subject.trim(), body: body.trim() }),
+        })
+      }
+
       const data = (await res.json()) as { error?: string }
       if (!res.ok) {
         setStatus("error")
@@ -92,6 +139,57 @@ export default function ComposeForm() {
           onChange={(e) => setBody(e.target.value)}
           disabled={status === "sending"}
         />
+      </div>
+
+      {/* Attachments */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            onChange={handleFileSelect}
+            className="hidden"
+            disabled={status === "sending"}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={status === "sending"}
+          >
+            <PaperclipIcon className="size-4" />
+            Attach files
+          </Button>
+          {selectedFiles.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {selectedFiles.length} file{selectedFiles.length > 1 ? "s" : ""} selected
+            </span>
+          )}
+        </div>
+
+        {selectedFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {selectedFiles.map((sf) => (
+              <div
+                key={sf.id}
+                className="flex items-center gap-1.5 rounded-md border bg-muted/30 px-2.5 py-1 text-xs"
+              >
+                <span className="max-w-48 truncate">{sf.file.name}</span>
+                <span className="text-muted-foreground">({formatSize(sf.file.size)})</span>
+                <button
+                  type="button"
+                  onClick={() => removeFile(sf.id)}
+                  className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  disabled={status === "sending"}
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {status === "error" && (

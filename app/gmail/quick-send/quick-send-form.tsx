@@ -27,11 +27,13 @@ type Template = {
   body: string
 }
 
-function fillPlaceholders(text: string, userEmail: string): string {
-  return text.replace(/\{\{useremail\}\}/gi, userEmail)
+function fillPlaceholders(text: string, userEmail: string, agentName: string): string {
+  return text
+    .replace(/\{\{useremail\}\}/gi, userEmail)
+    .replace(/\{\{agentname\}\}/gi, agentName)
 }
 
-export default function QuickSendPage() {
+export default function QuickSendPage({ agentName }: { agentName: string | null }) {
   const router = useRouter()
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,7 +75,7 @@ export default function QuickSendPage() {
   }
 
   function getPreviewText(text: string): string {
-    return fillPlaceholders(text, userEmail || "{{useremail}}")
+    return fillPlaceholders(text, userEmail || "{{useremail}}", agentName || "{{agentname}}")
   }
 
   async function handleSend() {
@@ -98,8 +100,8 @@ export default function QuickSendPage() {
           recipient,
           cc: cc || undefined,
           userEmail,
-          subject: fillPlaceholders(subject, userEmail),
-          body: fillPlaceholders(body, userEmail),
+          subject: fillPlaceholders(subject, userEmail, agentName ?? ""),
+          body: fillPlaceholders(body, userEmail, agentName ?? ""),
           visibility,
         }),
       })
@@ -185,7 +187,7 @@ export default function QuickSendPage() {
                   placeholder="user@example.com"
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  This replaces {"{{useremail}}"} in the template
+                  {"{{useremail}}"} is replaced with the email above; {"{{agentname}}"} with your name
                 </p>
               </div>
 
