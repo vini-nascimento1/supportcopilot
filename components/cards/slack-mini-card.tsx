@@ -77,7 +77,7 @@ export function SlackMiniCard({
         className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 pt-0 text-center"
       >
         {slack.unreadCount === 0 ? (
-          <div className="flex flex-col items-center gap-3 rounded-lg bg-muted/40 py-8 text-center">
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
             <span className="text-xl">✅</span>
             <p className="text-sm text-muted-foreground">All caught up</p>
             <Link

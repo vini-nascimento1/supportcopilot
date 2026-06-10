@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { validTimezone } from "@/lib/timezones"
 
 const SESSION_KEY = "fv-dashboard-greeting-seen"
@@ -131,6 +131,17 @@ export function DashboardGreeting({
 }: DashboardGreetingProps) {
   const [isFirstVisit] = useState(getStoredVisitState)
   const [browserTz] = useState(getBrowserTz)
+  const [displayMinutes, setDisplayMinutes] = useState(nextMeetingMinutes)
+
+  // Tick down the meeting countdown every 30 seconds
+  useEffect(() => {
+    if (nextMeetingMinutes === undefined) return
+    setDisplayMinutes(nextMeetingMinutes)
+    const id = setInterval(() => {
+      setDisplayMinutes((prev) => (prev !== undefined && prev > 0 ? prev - 1 : 0))
+    }, 30000)
+    return () => clearInterval(id)
+  }, [nextMeetingMinutes])
 
   // User's saved timezone from settings takes priority; fall back to browser auto-detect
   const tz = validTimezone(savedTimezone ?? browserTz)
@@ -161,8 +172,8 @@ export function DashboardGreeting({
   const heading = isFirstVisit
     ? phraseRef.current ?? `${shortGreeting}, ${firstName}!`
     : `${shortGreeting}, ${firstName}! · ${caseCount} case${caseCount === 1 ? "" : "s"} open${
-        nextMeetingMinutes !== undefined
-          ? ` · next meeting in ${formatMeeting(nextMeetingMinutes)}`
+        displayMinutes !== undefined
+          ? ` · next meeting in ${formatMeeting(displayMinutes)}`
           : ""
       }`
 
