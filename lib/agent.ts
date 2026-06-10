@@ -47,9 +47,3 @@ export async function getAgentProfile(): Promise<AgentProfile> {
   }
 }
 
-export function getGreeting(isoNow: string): string {
-  const hour = new Date(isoNow).getHours()
-  if (hour < 12) return "Good morning"
-  if (hour < 18) return "Good afternoon"
-  return "Good evening"
-}

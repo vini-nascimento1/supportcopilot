@@ -1,13 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 
 const SESSION_KEY = "fv-dashboard-greeting-seen"
 
 interface DashboardGreetingProps {
-  greeting: string
   firstName: string
-  todayLabel: string
   caseCount: number
   nextMeetingMinutes?: number
 }
@@ -21,8 +19,6 @@ function formatMeeting(minutes: number): string {
 }
 
 function getStoredVisitState(): boolean {
-  // SessionStorage read in lazy initializer: no effect needed.
-  // SSR falls through to true (full greeting).
   if (typeof window === "undefined") return true
   try {
     const hasSeen = sessionStorage.getItem(SESSION_KEY)
@@ -33,14 +29,51 @@ function getStoredVisitState(): boolean {
   }
 }
 
+function getBrowserTz(): string | undefined {
+  if (typeof window === "undefined") return undefined
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return undefined
+  }
+}
+
+function getGreeting(hour: number): string {
+  if (hour < 12) return "Good morning"
+  if (hour < 18) return "Good afternoon"
+  return "Good evening"
+}
+
+function formatToday(date: Date, tz: string | undefined): string {
+  return date.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: tz,
+  })
+}
+
 export function DashboardGreeting({
-  greeting,
   firstName,
-  todayLabel,
   caseCount,
   nextMeetingMinutes,
 }: DashboardGreetingProps) {
   const [isFirstVisit] = useState(getStoredVisitState)
+  const [browserTz] = useState(getBrowserTz)
+
+  const { greeting, todayLabel } = useMemo(() => {
+    const now = new Date()
+    const hour = browserTz
+      ? parseInt(
+          now.toLocaleString("en-GB", { hour: "numeric", hour12: false, timeZone: browserTz }),
+          10,
+        )
+      : now.getHours()
+    return {
+      greeting: getGreeting(hour),
+      todayLabel: formatToday(now, browserTz),
+    }
+  }, [browserTz])
 
   const heading = isFirstVisit
     ? `${greeting}, ${firstName}! 👋`

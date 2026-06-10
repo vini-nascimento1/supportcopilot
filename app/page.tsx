@@ -12,7 +12,7 @@ import { NotionCard } from "@/components/cards/notion-card"
 import { SlackMiniCard } from "@/components/cards/slack-mini-card"
 import { getOpenCasesQueue, type CasesQueueData } from "@/lib/intercom"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
-import { getAgentProfile, getGreeting } from "@/lib/agent"
+import { getAgentProfile } from "@/lib/agent"
 import { getAgentTokens } from "@/lib/auth"
 import { getCalendarEvents, type CalRange, type GCalResult } from "@/lib/gcal"
 import { getGmailUnreadCount, type GmailResult } from "@/lib/gmail-client"
@@ -98,13 +98,6 @@ export default async function DashboardPage({
     { mode: "error", error: "Couldn't load Intercom queue. Retry shortly.", rows: [] },
   )
 
-  const greeting = getGreeting(nowIso)
-  const todayLabel = new Date(nowIso).toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  })
-
   return (
     <WorkspaceLayout>
       <header className="flex min-h-14 items-center gap-3 border-b px-4 lg:px-6">
@@ -138,11 +131,9 @@ export default async function DashboardPage({
       </header>
 
       <main className="flex flex-col">
-        {/* greeting — full on first visit, compressed thereafter */}
+        {/* greeting — full on first visit, compressed thereafter; timezone from browser */}
         <DashboardGreeting
-          greeting={greeting}
           firstName={agent.firstName}
-          todayLabel={todayLabel}
           caseCount={(cases.rows ?? []).length}
           nextMeetingMinutes={getNextMeetingMinutes(gcal, nowIso)}
         />
