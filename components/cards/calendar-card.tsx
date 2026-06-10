@@ -1,9 +1,14 @@
-import Link from "next/link"
-import { CalendarIcon, ExternalLinkIcon, GripVertical } from "lucide-react"
+import { CalendarIcon, ExternalLinkIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { CalendarRangeTabs } from "@/components/calendar-range-tabs"
+import {
+  ConnectedStatus,
+  LoadErrorBody,
+  LoadErrorStatus,
+  NotConnectedStatus,
+} from "@/components/cards/connection-status"
 import type { GCalResult, CalendarEvent, CalRange } from "@/lib/gcal"
 
 function formatEventTime(iso: string | null, isAllDay: boolean): string {
@@ -50,22 +55,6 @@ function groupByDate(events: CalendarEvent[]): [string, CalendarEvent[]][] {
   return Array.from(map.entries())
 }
 
-function ConnectBadge() {
-  return (
-    <Badge variant="outline" className="shrink-0 text-xs font-normal text-muted-foreground">
-      Not connected
-    </Badge>
-  )
-}
-
-function ConnectedBadge() {
-  return (
-    <Badge variant="secondary" className="shrink-0 bg-green-100 text-xs font-normal text-green-700 dark:bg-green-950 dark:text-green-400">
-      Connected
-    </Badge>
-  )
-}
-
 export function CalendarCard({
   gcal,
   nowIso,
@@ -76,29 +65,37 @@ export function CalendarCard({
   range: CalRange
 }) {
   if (!gcal.connected) {
+    const hasError = "error" in gcal && gcal.error
     return (
       <Card className="flex h-full flex-col overflow-hidden border-dashed">
         <CardHeader className="drag-handle cursor-grab pb-3 active:cursor-grabbing">
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2 text-sm font-medium">
-              <GripVertical className="size-3.5 text-muted-foreground/40" />
               <CalendarIcon className="size-4 text-muted-foreground" />
               Google Calendar
             </CardTitle>
-            <ConnectBadge />
+            {hasError ? <LoadErrorStatus /> : <NotConnectedStatus />}
           </div>
-          <CardDescription className="text-xs">
-            Sign in with your <span className="font-medium">@fanvue.com</span> Google account to connect.
-          </CardDescription>
+          {!hasError && (
+            <CardDescription className="text-xs">
+              Sign in with your <span className="font-medium">@fanvue.com</span> Google account to connect.
+            </CardDescription>
+          )}
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col gap-3 pt-0">
-          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center">
-            <CalendarIcon className="size-7 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">Connect to see your calendar</p>
-          </div>
-          <Button size="sm" variant="outline" className="w-full" asChild>
-            <a href="/api/auth/login">Sign in with Google</a>
-          </Button>
+          {hasError ? (
+            <LoadErrorBody message={gcal.error!} />
+          ) : (
+            <>
+              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center">
+                <CalendarIcon className="size-7 text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">Connect to see your calendar</p>
+              </div>
+              <Button size="sm" variant="outline" className="w-full" asChild>
+                <a href="/api/auth/login">Sign in with Google</a>
+              </Button>
+            </>
+          )}
         </CardContent>
       </Card>
     )
@@ -113,14 +110,13 @@ export function CalendarCard({
       <CardHeader className="drag-handle shrink-0 cursor-grab pb-2 active:cursor-grabbing">
         <div className="flex items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-sm font-medium">
-            <GripVertical className="size-3.5 text-muted-foreground/40" />
             <CalendarIcon className="size-4 text-muted-foreground" />
             Google Calendar
           </CardTitle>
           <div className="flex items-center gap-2">
-            <ConnectedBadge />
+            <ConnectedStatus />
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" asChild>
-              <a href={calendarLink} target="_blank" rel="noopener noreferrer">
+              <a href={calendarLink} target="_blank" rel="noopener noreferrer" aria-label="Open Google Calendar">
                 Open <ExternalLinkIcon className="size-3" />
               </a>
             </Button>
@@ -134,7 +130,11 @@ export function CalendarCard({
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="min-h-0 flex-1 overflow-y-auto pt-0">
+      <CardContent
+        aria-live="polite"
+        aria-relevant="additions text"
+        className="min-h-0 flex-1 overflow-y-auto pt-0"
+      >
         {events.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-lg bg-muted/40 py-8 text-center">
             <span className="text-2xl">🎉</span>
@@ -158,9 +158,7 @@ export function CalendarCard({
                     {e.isAllDay ? "All day" : formatEventTime(e.start, false)}
                   </span>
                   <span className="flex-1 truncate font-medium">{e.title}</span>
-                  {now ? (
-                    <Badge className="text-xs font-normal">Now</Badge>
-                  ) : e.isAllDay ? (
+                  {e.isAllDay ? (
                     <Badge variant="secondary" className="text-xs font-normal">all day</Badge>
                   ) : (
                     <span className="shrink-0 text-xs text-muted-foreground">{eventDuration(e.start, e.end)}</span>

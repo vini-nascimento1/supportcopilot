@@ -15,6 +15,7 @@ export function IntercomCardLive({
 }) {
   const [cases, setCases] = useState<CasesQueueData>(initial)
   const [error, setError] = useState<string | null>(null)
+  const [lastUpdatedIso, setLastUpdatedIso] = useState<string>(() => new Date().toISOString())
   const mountedRef = useRef(true)
 
   const fetchCases = useCallback(async () => {
@@ -32,6 +33,7 @@ export function IntercomCardLive({
       if (mountedRef.current) {
         setCases(data)
         setError(null)
+        setLastUpdatedIso(new Date().toISOString())
       }
     } catch {
       // Network error — stale data stays visible until connection returns.
@@ -41,9 +43,15 @@ export function IntercomCardLive({
   useEffect(() => {
     mountedRef.current = true
     const id = setInterval(fetchCases, POLL_INTERVAL_MS)
+
+    // Manual refresh via custom event from the refresh button in the card header.
+    function handleRefresh() { fetchCases() }
+    window.addEventListener("refresh-intercom", handleRefresh)
+
     return () => {
       mountedRef.current = false
       clearInterval(id)
+      window.removeEventListener("refresh-intercom", handleRefresh)
     }
   }, [fetchCases])
 
@@ -52,5 +60,5 @@ export function IntercomCardLive({
     ? { ...cases, mode: "error", error }
     : cases
 
-  return <IntercomCard cases={displayData} appId={appId} />
+  return <IntercomCard cases={displayData} appId={appId} lastUpdatedIso={lastUpdatedIso} />
 }

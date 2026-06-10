@@ -3,11 +3,21 @@
 import { useRef, useState } from "react"
 import { BotIcon, SendIcon, XIcon } from "lucide-react"
 import ReactMarkdown from "react-markdown"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 
 type Message = {
+  id: string
   role: "user" | "assistant"
   content: string
 }
+
+let msgCounter = 0
+function nextId(): string {
+  return `msg-${++msgCounter}-${Date.now()}`
+}
+
+const MAX_MESSAGES = 50
 
 export function AIChat() {
   const [open, setOpen] = useState(false)
@@ -17,6 +27,8 @@ export function AIChat() {
   const [error, setError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const abortRef = useRef<AbortController | null>(null)
 
   function scrollToBottom() {
     requestAnimationFrame(() => {
@@ -30,7 +42,11 @@ export function AIChat() {
     setInput("")
     setError(null)
 
-    const userMsg: Message = { role: "user", content: text }
+    abortRef.current?.abort()
+    const abort = new AbortController()
+    abortRef.current = abort
+
+    const userMsg: Message = { id: nextId(), role: "user", content: text }
     const updated = [...messages, userMsg]
     setMessages(updated)
     setLoading(true)
@@ -40,17 +56,20 @@ export function AIChat() {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: updated }),
+        body: JSON.stringify({ messages: updated.map(({ role, content }) => ({ role, content })) }),
+        signal: abort.signal,
       })
       const data = await res.json()
       if (!res.ok) {
         setError(data.error ?? "Something went wrong")
         setLoading(false)
+        scrollToBottom()
         return
       }
-      const assistantMsg: Message = { role: "assistant", content: data.message }
-      setMessages((prev) => [...prev, assistantMsg])
-    } catch {
+      const assistantMsg: Message = { id: nextId(), role: "assistant", content: data.message }
+      setMessages((prev) => [...prev, assistantMsg].slice(-MAX_MESSAGES))
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") return
       setError("Network error. Check your connection.")
     }
 
@@ -102,9 +121,9 @@ export function AIChat() {
               </div>
             )}
 
-            {messages.map((m, i) => (
+            {messages.map((m) => (
               <div
-                key={i}
+                key={m.id}
                 className={`max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
                   m.role === "user"
                     ? "ml-auto bg-primary text-primary-foreground"
@@ -141,23 +160,23 @@ export function AIChat() {
 
           {/* Input */}
           <div className="flex items-center gap-2 border-t px-4 py-3">
-            <input
+            <Input
               ref={inputRef}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm outline-none ring-offset-background transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-9"
               placeholder="Ask anything..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={loading}
-              autoFocus
             />
-            <button
+            <Button
               onClick={send}
               disabled={loading || !input.trim()}
-              className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+              size="icon"
+              className="size-9"
             >
               <SendIcon className="size-4" />
-            </button>
+            </Button>
           </div>
         </div>
       )}

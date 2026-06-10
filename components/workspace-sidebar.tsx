@@ -187,9 +187,11 @@ export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser, is
           >
             <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-semibold">
               {avatarUrl ? (
-                <img
+                <Image
                   src={avatarUrl}
                   alt=""
+                  width={32}
+                  height={32}
                   className="size-full object-cover"
                   referrerPolicy="no-referrer"
                 />
@@ -201,7 +203,7 @@ export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser, is
               <span className="truncate text-xs font-medium">
                 {userEmail ?? "Not signed in"}
               </span>
-              <span className="text-[10px] text-muted-foreground">Fanvue Support</span>
+              <span className="text-xs text-muted-foreground">Fanvue Support</span>
             </div>
           </Link>
           <form action="/api/auth/logout" method="post">

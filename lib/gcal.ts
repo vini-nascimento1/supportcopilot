@@ -17,7 +17,7 @@ export type CalendarEvent = {
 
 export type GCalResult =
   | { connected: true; events: CalendarEvent[]; calendarLink: string; range: CalRange }
-  | { connected: false }
+  | { connected: false; error?: string }
 
 // Accepts email for token auto-refresh. Pass null if unknown (refresh disabled).
 

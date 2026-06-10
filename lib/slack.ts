@@ -16,7 +16,11 @@ import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 
 export type SlackResult =
   | { connected: true; messageCount: number; channels: string[]; slackLink: string }
-  | { connected: false }
+  | { connected: false; error?: string }
+
+export type SlackUnreadResult =
+  | { connected: true; unreadCount: number; workspaceUrl: string }
+  | { connected: false; unreadCount: 0; workspaceUrl: ""; error?: string }
 
 async function getSupportChannelIds(): Promise<string[]> {
   const envChannels = process.env.SLACK_SUPPORT_CHANNEL_IDS
@@ -648,7 +652,7 @@ async function getUserDmChannelIds(token: string): Promise<string[]> {
 /** Get recent activity summary for the dashboard card. */
 export async function getSlackUnreadSummary(
   agentSlackToken?: string | null
-): Promise<{ connected: boolean; unreadCount: number; workspaceUrl: string }> {
+): Promise<SlackUnreadResult> {
   const token = agentSlackToken ?? process.env.SLACK_BOT_TOKEN
   if (!token) return { connected: false, unreadCount: 0, workspaceUrl: "" }
 

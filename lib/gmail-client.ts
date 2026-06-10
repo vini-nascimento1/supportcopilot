@@ -4,7 +4,7 @@ import { googleFetch } from "@/lib/auth"
 
 export type GmailResult =
   | { connected: true; unreadCount: number; inboxLink: string }
-  | { connected: false }
+  | { connected: false; error?: string }
 
 export type GmailThreadSummary = {
   id: string

@@ -4,6 +4,7 @@ import "@fontsource-variable/instrument-sans"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AIChat } from "@/components/ai-chat"
+import { CommandPalette } from "@/components/command-palette"
 import { UpdateBanner } from "@/components/update-banner"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -34,6 +35,7 @@ export default function RootLayout({
             <SpeedInsights />
             <UpdateBanner />
             <AIChat />
+            <CommandPalette />
           </TooltipProvider>
         </ThemeProvider>
       </body>
