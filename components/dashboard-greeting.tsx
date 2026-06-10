@@ -38,10 +38,16 @@ function getBrowserTz(): string | undefined {
   }
 }
 
-function getGreeting(hour: number): string {
+function getFullGreeting(hour: number): string {
   if (hour < 12) return "Good morning"
   if (hour < 18) return "Good afternoon"
   return "Good evening"
+}
+
+function getShortGreeting(hour: number): string {
+  if (hour < 12) return "Morning"
+  if (hour < 18) return "Hey"
+  return "Evening"
 }
 
 function formatToday(date: Date, tz: string | undefined): string {
@@ -61,7 +67,7 @@ export function DashboardGreeting({
   const [isFirstVisit] = useState(getStoredVisitState)
   const [browserTz] = useState(getBrowserTz)
 
-  const { greeting, todayLabel } = useMemo(() => {
+  const { fullGreeting, shortGreeting, todayLabel } = useMemo(() => {
     const now = new Date()
     const hour = browserTz
       ? parseInt(
@@ -70,14 +76,15 @@ export function DashboardGreeting({
         )
       : now.getHours()
     return {
-      greeting: getGreeting(hour),
+      fullGreeting: getFullGreeting(hour),
+      shortGreeting: getShortGreeting(hour),
       todayLabel: formatToday(now, browserTz),
     }
   }, [browserTz])
 
   const heading = isFirstVisit
-    ? `${greeting}, ${firstName}! 👋`
-    : `${firstName} · ${caseCount} case${caseCount === 1 ? "" : "s"} open${
+    ? `${fullGreeting}, ${firstName}! 👋`
+    : `${shortGreeting}, ${firstName}! · ${caseCount} case${caseCount === 1 ? "" : "s"} open${
         nextMeetingMinutes !== undefined
           ? ` · next meeting in ${formatMeeting(nextMeetingMinutes)}`
           : ""
