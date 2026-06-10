@@ -15,7 +15,7 @@ import type { GCalResult, CalendarEvent, CalRange } from "@/lib/gcal"
 function formatEventTime(iso: string | null, isAllDay: boolean): string {
   if (!iso) return ""
   if (isAllDay) return "All day"
-  return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+  return new Date(iso).toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true })
 }
 
 function eventDuration(start: string | null, end: string | null): string {

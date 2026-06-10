@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useRef, useState } from "react"
+import { validTimezone } from "@/lib/timezones"
 
 const SESSION_KEY = "fv-dashboard-greeting-seen"
 
@@ -105,19 +106,19 @@ function formatToday(date: Date, tz: string | undefined): string {
 }
 
 function formatLocalTime(date: Date, tz: string | undefined): string {
-  return date.toLocaleString("en-GB", {
-    hour: "2-digit",
+  return date.toLocaleString("en-US", {
+    hour: "numeric",
     minute: "2-digit",
-    hour12: false,
+    hour12: true,
     timeZone: tz,
   })
 }
 
 function formatUkTime(date: Date): string {
-  return date.toLocaleString("en-GB", {
-    hour: "2-digit",
+  return date.toLocaleString("en-US", {
+    hour: "numeric",
     minute: "2-digit",
-    hour12: false,
+    hour12: true,
     timeZone: "Europe/London",
   })
 }
@@ -132,7 +133,7 @@ export function DashboardGreeting({
   const [browserTz] = useState(getBrowserTz)
 
   // User's saved timezone from settings takes priority; fall back to browser auto-detect
-  const tz = savedTimezone ?? browserTz
+  const tz = validTimezone(savedTimezone ?? browserTz)
 
   // Pick the time-appropriate phrase once per session mount
   const phraseRef = useRef<string | null>(null)
@@ -141,7 +142,7 @@ export function DashboardGreeting({
     const now = new Date()
     const hour = tz
       ? parseInt(
-          now.toLocaleString("en-GB", { hour: "numeric", hour12: false, timeZone: tz }),
+          now.toLocaleString("en-US", { hour: "numeric", hourCycle: "h23", timeZone: tz }),
           10,
         )
       : now.getHours()

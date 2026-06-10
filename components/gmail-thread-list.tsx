@@ -20,7 +20,7 @@ function formatDate(iso: string): string {
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate()
   if (isToday) {
-    return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+    return d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true })
   }
   const isThisYear = d.getFullYear() === now.getFullYear()
   return d.toLocaleDateString("en-GB", {

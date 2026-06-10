@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { validTimezone } from "@/lib/timezones"
 
 function getBrowserTz(): string | undefined {
   try {
@@ -11,10 +12,10 @@ function getBrowserTz(): string | undefined {
 }
 
 function formatTime(iso: string, tz: string): string {
-  return new Date(iso).toLocaleString("en-GB", {
-    hour: "2-digit",
+  return new Date(iso).toLocaleString("en-US", {
+    hour: "numeric",
     minute: "2-digit",
-    hour12: false,
+    hour12: true,
     timeZone: tz,
   })
 }
@@ -29,7 +30,7 @@ export function CalendarEventTime({
   savedTimezone?: string | null
 }) {
   const [browserTz] = useState(getBrowserTz)
-  const tz = savedTimezone ?? browserTz
+  const tz = validTimezone(savedTimezone ?? browserTz)
 
   const display = useMemo(() => {
     if (!iso || isAllDay) return null
