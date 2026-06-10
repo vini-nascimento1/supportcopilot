@@ -63,6 +63,7 @@ export default async function DashboardPage({
       firstName: "there",
       name: null,
       email: null,
+      timezone: null,
       intercomAdminId: process.env.INTERCOM_ADMIN_ID ?? null,
     }),
     safe("agent tokens", getAgentTokens, {
@@ -136,10 +137,11 @@ export default async function DashboardPage({
           firstName={agent.firstName}
           caseCount={(cases.rows ?? []).length}
           nextMeetingMinutes={getNextMeetingMinutes(gcal, nowIso)}
+          savedTimezone={agent.timezone}
         />
 
         <DashboardGrid
-          calendarCard={<CalendarCard gcal={gcal} nowIso={nowIso} range={range} />}
+          calendarCard={<CalendarCard gcal={gcal} nowIso={nowIso} range={range} savedTimezone={agent.timezone} />}
           intercomCard={<IntercomCardLive initial={cases} appId={appId} />}
           gmailCard={<GmailCardLive initial={gmail} />}
           slackCard={<SlackMiniCard slack={slack} />}

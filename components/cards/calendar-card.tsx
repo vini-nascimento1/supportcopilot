@@ -9,6 +9,7 @@ import {
   LoadErrorStatus,
   NotConnectedStatus,
 } from "@/components/cards/connection-status"
+import { CalendarEventTime } from "@/components/cards/calendar-event-time"
 import type { GCalResult, CalendarEvent, CalRange } from "@/lib/gcal"
 
 function formatEventTime(iso: string | null, isAllDay: boolean): string {
@@ -59,10 +60,12 @@ export function CalendarCard({
   gcal,
   nowIso,
   range,
+  savedTimezone,
 }: {
   gcal: GCalResult
   nowIso: string
   range: CalRange
+  savedTimezone?: string | null
 }) {
   if (!gcal.connected) {
     const hasError = "error" in gcal && gcal.error
@@ -154,8 +157,8 @@ export function CalendarCard({
                   rel="noopener noreferrer"
                   className={`flex items-center gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-muted ${now ? "bg-primary/5 ring-1 ring-primary/20" : ""}`}
                 >
-                  <span className="w-16 shrink-0 text-xs text-muted-foreground tabular-nums">
-                    {e.isAllDay ? "All day" : formatEventTime(e.start, false)}
+                  <span className="w-20 shrink-0 text-xs text-muted-foreground tabular-nums leading-tight">
+                    <CalendarEventTime iso={e.start} isAllDay={!!e.isAllDay} savedTimezone={savedTimezone} />
                   </span>
                   <span className="flex-1 truncate font-medium">{e.title}</span>
                   {e.isAllDay ? (

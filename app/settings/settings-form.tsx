@@ -5,7 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { InfoIcon } from "lucide-react"
+import { COMMON_TIMEZONES } from "@/lib/timezones"
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
@@ -117,14 +119,21 @@ export function SettingsForm({
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="timezone">Timezone</Label>
-            <Input
-              id="timezone"
-              value={timezone}
-              onChange={(e) => { setTimezone(e.target.value); setSaved(false) }}
-              placeholder="e.g. Europe/London"
-            />
+            <Select value={timezone} onValueChange={(v) => { setTimezone(v); setSaved(false) }}>
+              <SelectTrigger id="timezone" className="w-full">
+                <SelectValue placeholder="Select your timezone" />
+              </SelectTrigger>
+              <SelectContent>
+                {COMMON_TIMEZONES.map((tz) => (
+                  <SelectItem key={tz.value} value={tz.value}>
+                    {tz.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <p className="text-xs text-muted-foreground">
-              IANA timezone name. Used for shift greetings on the dashboard.
+              Used for dashboard greetings, time displays, and UK-time comparisons.{" "}
+              <span className="font-medium">Fanvue operates on London (UK) time.</span>
             </p>
           </div>
 

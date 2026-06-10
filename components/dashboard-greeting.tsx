@@ -64,6 +64,7 @@ interface DashboardGreetingProps {
   firstName: string
   caseCount: number
   nextMeetingMinutes?: number
+  savedTimezone?: string | null
 }
 
 function formatMeeting(minutes: number): string {
@@ -103,22 +104,44 @@ function formatToday(date: Date, tz: string | undefined): string {
   })
 }
 
+function formatLocalTime(date: Date, tz: string | undefined): string {
+  return date.toLocaleString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: tz,
+  })
+}
+
+function formatUkTime(date: Date): string {
+  return date.toLocaleString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Europe/London",
+  })
+}
+
 export function DashboardGreeting({
   firstName,
   caseCount,
   nextMeetingMinutes,
+  savedTimezone,
 }: DashboardGreetingProps) {
   const [isFirstVisit] = useState(getStoredVisitState)
   const [browserTz] = useState(getBrowserTz)
 
+  // User's saved timezone from settings takes priority; fall back to browser auto-detect
+  const tz = savedTimezone ?? browserTz
+
   // Pick the time-appropriate phrase once per session mount
   const phraseRef = useRef<string | null>(null)
 
-  const { shortGreeting, todayLabel } = useMemo(() => {
+  const { shortGreeting, todayLabel, localTime, ukTime } = useMemo(() => {
     const now = new Date()
-    const hour = browserTz
+    const hour = tz
       ? parseInt(
-          now.toLocaleString("en-GB", { hour: "numeric", hour12: false, timeZone: browserTz }),
+          now.toLocaleString("en-GB", { hour: "numeric", hour12: false, timeZone: tz }),
           10,
         )
       : now.getHours()
@@ -128,9 +151,11 @@ export function DashboardGreeting({
     }
     return {
       shortGreeting: getShortGreeting(hour),
-      todayLabel: formatToday(now, browserTz),
+      todayLabel: formatToday(now, tz),
+      localTime: formatLocalTime(now, tz),
+      ukTime: formatUkTime(now),
     }
-  }, [browserTz, firstName])
+  }, [tz, firstName])
 
   const heading = isFirstVisit
     ? phraseRef.current ?? `${shortGreeting}, ${firstName}!`
@@ -149,7 +174,12 @@ export function DashboardGreeting({
       >
         {heading}
       </h1>
-      <p className="mt-0.5 text-sm text-muted-foreground">{todayLabel}</p>
+      <p className="mt-0.5 text-sm text-muted-foreground">
+        {todayLabel}{" "}
+        <span className="tabular-nums">
+          · {localTime} local / {ukTime} UK
+        </span>
+      </p>
     </section>
   )
 }

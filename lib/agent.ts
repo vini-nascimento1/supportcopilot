@@ -7,6 +7,7 @@ export type AgentProfile = {
   firstName: string
   name: string | null
   email: string | null
+  timezone: string | null
   intercomAdminId: string | null
 }
 
@@ -23,6 +24,7 @@ export async function getAgentProfile(): Promise<AgentProfile> {
     firstName: email ? firstNameFromEmail(email) : "Agent",
     name: null,
     email: email ?? null,
+    timezone: null,
     intercomAdminId: process.env.INTERCOM_ADMIN_ID ?? null,
   }
 
@@ -33,7 +35,7 @@ export async function getAgentProfile(): Promise<AgentProfile> {
 
   const { data } = await supabase
     .from("agents")
-    .select("name, email, intercom_admin_id")
+    .select("name, email, timezone, intercom_admin_id")
     .eq("email", email)
     .maybeSingle()
 
@@ -43,6 +45,7 @@ export async function getAgentProfile(): Promise<AgentProfile> {
     firstName: data.name ? data.name.split(" ")[0]! : firstNameFromEmail(email),
     name: data.name ?? null,
     email: data.email ?? email,
+    timezone: data.timezone ?? null,
     intercomAdminId: data.intercom_admin_id ?? process.env.INTERCOM_ADMIN_ID ?? null,
   }
 }
