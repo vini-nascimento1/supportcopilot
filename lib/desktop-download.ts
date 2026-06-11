@@ -4,7 +4,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 // so the sidebar link stays current without a deploy. The settings row
 // (key: desktop_download_url) overrides it if we ever move distribution.
 const DEFAULT_DOWNLOAD_URL =
-  "https://github.com/vini-nascimento1/supportcopilot/releases/latest"
+  "https://github.com/vini-nascimento1/supportcopilot/releases/tag/v1.0.0"
 
 export async function getDesktopDownloadUrl(): Promise<string> {
   try {
