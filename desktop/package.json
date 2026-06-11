@@ -24,12 +24,14 @@
       "src/**/*"
     ],
     "linux": {
+      "artifactName": "Linux-SupportCopilot.${ext}",
       "target": [
         "AppImage"
       ],
       "category": "Office"
     },
     "mac": {
+      "artifactName": "MacOS-SupportCopilot.${ext}",
       "target": [
         {
           "target": "dmg",
@@ -41,6 +43,7 @@
       "category": "public.app-category.business"
     },
     "win": {
+      "artifactName": "Windows-SupportCopilot.${ext}",
       "target": [
         "nsis"
       ]

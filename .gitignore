@@ -36,6 +36,10 @@ pnpm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# desktop shell build artifacts (electron-builder)
+desktop/dist/
+desktop/node_modules/
+
 # vercel
 .vercel
 
