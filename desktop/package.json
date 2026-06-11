@@ -1,0 +1,48 @@
+{
+  "name": "fanvue-copilot-desktop",
+  "version": "0.1.0",
+  "description": "Thin Electron shell for the Fanvue Support Copilot — embeds external tools (Fadmin, ONDATO, MassPay…) as real browser views on the case canvas. All UI is served from the Vercel deploy; this package contains no business logic.",
+  "private": true,
+  "main": "src/main.js",
+  "author": "Fanvue Support",
+  "scripts": {
+    "start": "electron .",
+    "dev": "APP_URL=http://localhost:3000 electron .",
+    "dist:linux": "electron-builder --linux",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^38.2.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.fanvue.support-copilot",
+    "productName": "Fanvue Copilot",
+    "files": [
+      "src/**/*"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.business"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}

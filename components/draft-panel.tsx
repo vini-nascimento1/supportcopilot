@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { SparklesIcon, Loader2Icon, AlertCircleIcon, SendIcon, InfoIcon } from "lucide-react"
+import { SparklesIcon, Loader2Icon, AlertCircleIcon, SendIcon, InfoIcon, PencilIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -44,6 +44,8 @@ export function DraftPanel({ conversationId, playbookId, playbookName, externalD
     error: null,
   })
   const [loadingStep, setLoadingStep] = useState(0)
+  // Write the reply by hand (empty editor + Send) without generating first
+  const [manualMode, setManualMode] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendDialogOpen, setSendDialogOpen] = useState(false)
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -113,7 +115,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName, externalD
   }
 
   function handleSendClick() {
-    if (!draft.body) return
+    if (!draft.body.trim()) return
     setSendDialogOpen(true)
   }
 
@@ -185,10 +187,12 @@ export function DraftPanel({ conversationId, playbookId, playbookName, externalD
               Try again
             </button>
           </div>
-        ) : draft.body ? (
+        ) : draft.body || manualMode ? (
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground">Draft reply</span>
+              <span className="text-xs font-medium text-muted-foreground">
+                {draft.body ? "Draft reply" : "Manual reply"}
+              </span>
               <div className="flex items-center gap-1">
                 <button
                   onClick={generateDraft}
@@ -200,7 +204,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName, externalD
                 <CopyButton text={draft.body} htmlText={mdToHtml(draft.body)} />
                 <button
                   onClick={handleSendClick}
-                  disabled={sending}
+                  disabled={sending || !draft.body.trim()}
                   className="flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
                   {sending ? (
@@ -215,24 +219,37 @@ export function DraftPanel({ conversationId, playbookId, playbookName, externalD
             <Textarea
               value={draft.body}
               onChange={(e) => setDraft((prev) => ({ ...prev, body: e.target.value }))}
+              placeholder={manualMode ? "Write your reply…" : undefined}
               className="min-h-[200px] resize-y text-sm"
             />
             <p className="text-xs text-muted-foreground">
-              Edit the draft directly, then copy or send to Intercom.
+              {draft.body
+                ? "Edit the draft directly, then copy or send to Intercom."
+                : "Write your reply, then copy or send to Intercom."}
             </p>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-muted-foreground">
-              Generate an AI-powered draft reply based on the matched playbook.
+              Generate an AI-powered draft reply based on the matched playbook —
+              or write one yourself.
             </p>
-            <button
-              onClick={generateDraft}
-              className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              <SparklesIcon className="size-3.5" />
-              Generate draft
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={generateDraft}
+                className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                <SparklesIcon className="size-3.5" />
+                Generate draft
+              </button>
+              <button
+                onClick={() => setManualMode(true)}
+                className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50"
+              >
+                <PencilIcon className="size-3.5" />
+                Write manually
+              </button>
+            </div>
           </div>
         )}
       </CardContent>

@@ -6,6 +6,7 @@ import {
   MessageSquareIcon,
   MailIcon,
   BookOpenIcon,
+  GlobeIcon,
   RefreshCcwIcon,
   LayoutPanelTopIcon,
   CommandIcon,
@@ -118,13 +119,58 @@ export function CommandPalette() {
     }
   }, [open])
 
+  // Canvas tools (case_tools table) as dynamic items — fetched on first open.
+  // On a canvas page the action adds the tool as a card (with case context);
+  // elsewhere it opens the tool in a new tab.
+  const [toolItems, setToolItems] = useState<CommandItem[]>([])
+  useEffect(() => {
+    if (!open || toolItems.length > 0) return
+    fetch("/api/case-tools")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data?.tools) return
+        setToolItems(
+          data.tools
+            .filter((t: { isActive: boolean }) => t.isActive)
+            .map(
+              (t: {
+                id: string
+                name: string
+                urlTemplate: string
+                tags: string[]
+              }): CommandItem => ({
+                id: `tool-${t.id}`,
+                label: `Open ${t.name}`,
+                icon: GlobeIcon,
+                keywords: ["tool", "canvas", ...t.tags],
+                action: () => {
+                  if (window.location.pathname.includes("/canvas")) {
+                    window.dispatchEvent(
+                      new CustomEvent("canvas-add-tool", {
+                        detail: { toolId: t.id },
+                      }),
+                    )
+                  } else {
+                    // Outside a canvas: plain new tab (placeholders stripped)
+                    const url = t.urlTemplate.replace(/\{\{[a-z]+\}\}/g, "")
+                    window.open(url, "_blank", "noopener,noreferrer")
+                  }
+                },
+              }),
+            ),
+        )
+      })
+      .catch(() => {})
+  }, [open, toolItems.length])
+
+  const allItems = [...ITEMS, ...toolItems]
   const filtered = query
-    ? ITEMS.filter(
+    ? allItems.filter(
         (item) =>
           item.label.toLowerCase().includes(query.toLowerCase()) ||
           item.keywords.some((k) => k.toLowerCase().includes(query.toLowerCase())),
       )
-    : ITEMS
+    : allItems
 
   // Keep activeIndex in bounds when filter changes (synchronous, no effect needed)
   if (activeIndex >= filtered.length) {
@@ -163,6 +209,7 @@ export function CommandPalette() {
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
+      data-canvas-overlay=""
     >
       {/* Backdrop */}
       <div className="fixed inset-0 bg-black/50" />

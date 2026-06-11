@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import {
   ArrowLeftIcon,
   ExternalLinkIcon,
+  LayoutDashboardIcon,
   MessageSquareIcon,
 } from "lucide-react"
 
@@ -116,6 +117,12 @@ export default async function CasePage({
         >
           {conversation.state}
         </Badge>
+        <Button size="sm" variant="outline" asChild>
+          <Link href={`/cases/${id}/canvas`}>
+            <LayoutDashboardIcon className="size-3.5" />
+            Open in canvas
+          </Link>
+        </Button>
         {conversation.intercomUrl && (
           <Button size="sm" variant="outline" asChild>
             <a

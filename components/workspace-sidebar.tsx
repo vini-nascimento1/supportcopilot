@@ -17,6 +17,8 @@ import {
   MegaphoneIcon,
   SettingsIcon,
   ZapIcon,
+  LayoutDashboardIcon,
+  DownloadIcon,
   SendIcon,
   FileTextIcon,
   HistoryIcon,
@@ -44,6 +46,7 @@ const workspaceItems = [
   { label: "Playbooks", icon: BookOpenIcon, href: "/playbooks" },
   { label: "Metrics", icon: BarChart3Icon, href: "/metrics" },
   { label: "Automation", icon: ZapIcon, href: "/automation" },
+  { label: "Canvas", icon: LayoutDashboardIcon, href: "/canvas" },
 ]
 
 interface Props {
@@ -51,9 +54,10 @@ interface Props {
   avatarUrl: string | null
   isGmailTemplateUser?: boolean
   isManager?: boolean
+  downloadUrl?: string
 }
 
-export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser, isManager }: Props) {
+export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser, isManager, downloadUrl }: Props) {
   const pathname = usePathname()
   const initial = userEmail ? userEmail[0]?.toUpperCase() : "?"
   const [changelogOpen, setChangelogOpen] = useState(false)
@@ -151,6 +155,25 @@ export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser, is
           <SidebarGroupLabel>Support</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              {downloadUrl && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild className="h-auto py-1.5">
+                    <a
+                      href={downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <DownloadIcon className="text-primary" />
+                      <span className="flex flex-col leading-tight">
+                        <span className="font-medium">Download the app</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          Get the full experience
+                        </span>
+                      </span>
+                    </a>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton asChild isActive={pathname === "/settings"}>
                   <Link href="/settings">
