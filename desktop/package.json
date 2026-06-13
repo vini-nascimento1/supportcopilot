@@ -1,6 +1,6 @@
 {
   "name": "fanvue-copilot-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Thin Electron shell for the Fanvue Support Copilot — embeds external tools (Fadmin, ONDATO, MassPay…) as real browser views on the case canvas. All UI is served from the Vercel deploy; this package contains no business logic.",
   "private": true,
   "main": "src/main.js",
