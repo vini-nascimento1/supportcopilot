@@ -17,11 +17,21 @@
     "electron": "^38.2.1",
     "electron-builder": "^26.0.12"
   },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
   "build": {
     "appId": "com.fanvue.support-copilot",
     "productName": "Fanvue Copilot",
     "files": [
       "src/**/*"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "vini-nascimento1",
+        "repo": "supportcopilot"
+      }
     ],
     "linux": {
       "artifactName": "Linux-SupportCopilot.${ext}",

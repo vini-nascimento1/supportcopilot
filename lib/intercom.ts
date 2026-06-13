@@ -173,6 +173,7 @@ type IntercomConversationFull = {
   id: string | number
   state?: string | null
   open?: boolean | null
+  created_at?: number | null
   updated_at?: number | null
   title?: string | null
   source?: {
@@ -210,7 +211,25 @@ export async function getConversationDetail(
   const conv = (await response.json()) as IntercomConversationFull
   const parts = conv.conversation_parts?.conversation_parts ?? []
 
-  const messages: ConversationMessage[] = parts
+  // The conversation's opening message lives on `source`, NOT in
+  // conversation_parts — so the thread must start with it, otherwise the
+  // card begins mid-conversation and the first customer contact is lost.
+  const sourceBody = stripHtml(conv.source?.body)
+  const initialMessage: ConversationMessage[] = sourceBody
+    ? [
+        {
+          role: conv.source?.author?.type === "admin" ? "admin" : "customer",
+          author:
+            conv.source?.author?.name ??
+            conv.source?.author?.email ??
+            (conv.source?.author?.type === "admin" ? "Agent" : "Customer"),
+          body: sourceBody,
+          createdAt: toDate(conv.created_at) ?? "",
+        },
+      ]
+    : []
+
+  const partMessages: ConversationMessage[] = parts
     .filter((p) => p.part_type === "comment" && p.body)
     .map((p) => ({
       role: p.author?.type === "admin" ? "admin" : "customer",
@@ -218,6 +237,8 @@ export async function getConversationDetail(
       body: stripHtml(p.body),
       createdAt: toDate(p.created_at) ?? "",
     }))
+
+  const messages: ConversationMessage[] = [...initialMessage, ...partMessages]
 
   const strippedSubject = stripHtml(conv.source?.subject ?? conv.title)
 
@@ -236,12 +257,37 @@ export async function getConversationDetail(
   }
 }
 
+/**
+ * Which inbox to load. "mine" = the signed-in agent (default),
+ * "unassigned" = open conversations with no assignee (Intercom's Unassigned
+ * inbox), "admin" = a specific teammate's inbox.
+ */
+export type InboxFilter =
+  | { kind: "mine" }
+  | { kind: "unassigned" }
+  | { kind: "admin"; adminId: string }
+
 export async function getOpenCasesQueue(
   playbooks: PlaybookListItem[],
-  agentAdminId?: string | null
+  agentAdminId?: string | null,
+  inbox: InboxFilter = { kind: "mine" }
 ): Promise<CasesQueueData> {
-  const adminId = agentAdminId ?? intercomAdminId
-  if (!intercomToken || !adminId) {
+  // Resolve the assignee clause. Unassigned conversations carry
+  // admin_assignee_id = 0 in Intercom's search API.
+  let assigneeValue: string | number
+  if (inbox.kind === "unassigned") {
+    assigneeValue = 0
+  } else if (inbox.kind === "admin") {
+    assigneeValue = inbox.adminId
+  } else {
+    const adminId = agentAdminId ?? intercomAdminId
+    if (!adminId) {
+      return demoCases(playbooks)
+    }
+    assigneeValue = adminId
+  }
+
+  if (!intercomToken) {
     return demoCases(playbooks)
   }
 
@@ -256,7 +302,7 @@ export async function getOpenCasesQueue(
           {
             field: "admin_assignee_id",
             operator: "=",
-            value: adminId,
+            value: assigneeValue,
           },
           {
             field: "open",

@@ -6,6 +6,7 @@ import { NodeResizer, type Node, type NodeProps } from "@xyflow/react"
 import { InboxIcon, Loader2Icon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { relativeTime } from "@/lib/utils"
 
 interface QueueRow {
   id: string
@@ -13,6 +14,7 @@ interface QueueRow {
   email: string | null
   state: string
   snippet: string
+  updatedAt: string | null
 }
 
 export type QueueNodeData = Record<string, never>
@@ -79,12 +81,16 @@ export function QueueNode({ selected }: NodeProps<QueueNodeType>) {
           >
             <span className="flex items-center gap-2">
               <span className="truncate text-xs font-medium">{row.customer}</span>
-              <Badge
-                variant={row.state === "open" ? "default" : "outline"}
-                className="ml-auto h-4 shrink-0 px-1 text-[10px]"
-              >
-                {row.state}
-              </Badge>
+              {row.updatedAt && (
+                <span
+                  className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                  title={new Date(row.updatedAt).toLocaleString("en-GB", {
+                    timeZone: "Europe/London",
+                  })}
+                >
+                  {relativeTime(row.updatedAt)}
+                </span>
+              )}
             </span>
             <span className="truncate text-[11px] text-muted-foreground">
               {row.snippet}

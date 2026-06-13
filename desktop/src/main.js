@@ -15,6 +15,7 @@ const {
   shell,
 } = require("electron")
 const path = require("node:path")
+const { autoUpdater } = require("electron-updater")
 
 const APP_URL =
   process.env.APP_URL || "https://project-z4cpw-vini-s-projects10.vercel.app"
@@ -163,11 +164,29 @@ function createWindow() {
   win.loadURL(APP_URL)
 }
 
+// Shell auto-update: the UI is served from Vercel (updates instantly), so the
+// only thing that ever needs a new binary is this Electron shell. On launch a
+// packaged build checks the GitHub Releases feed (latest*.yml published by
+// electron-builder) and, if a newer version exists, downloads it in the
+// background and installs it on the next quit. Dev runs skip this — there's no
+// update feed and autoUpdater would throw.
+function initAutoUpdate() {
+  if (!app.isPackaged) return
+  autoUpdater.autoDownload = true
+  autoUpdater.on("error", (err) => {
+    console.error("[autoUpdater]", err?.message ?? err)
+  })
+  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+    console.error("[autoUpdater] check failed", err?.message ?? err)
+  })
+}
+
 app.whenReady().then(() => {
   app.userAgentFallback = CHROME_UA
   session.fromPartition(TOOLS_PARTITION).setUserAgent(CHROME_UA)
   registerIpc()
   createWindow()
+  initAutoUpdate()
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

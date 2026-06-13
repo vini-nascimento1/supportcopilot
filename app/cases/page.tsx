@@ -17,15 +17,30 @@ import { WorkspaceLayout } from "@/components/workspace-layout"
 import { getOpenCasesQueue } from "@/lib/intercom"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
 import { getAgentProfile } from "@/lib/agent"
+import { cn, relativeTime } from "@/lib/utils"
 
 export const dynamic = "force-dynamic"
 
-export default async function CasesPage() {
+export default async function CasesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string }>
+}) {
+  const { sort } = await searchParams
+  const oldestFirst = sort === "oldest"
+
   const [playbooks, agent] = await Promise.all([
     getPlaybooksDashboardData(),
     getAgentProfile(),
   ])
   const cases = await getOpenCasesQueue(playbooks.allRows, agent.intercomAdminId)
+
+  // Sort by last activity (newest first by default).
+  const rows = [...cases.rows].sort((a, b) => {
+    const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0
+    const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0
+    return oldestFirst ? ta - tb : tb - ta
+  })
 
   return (
     <WorkspaceLayout>
@@ -78,12 +93,39 @@ export default async function CasesPage() {
                     <TableHead>Message preview</TableHead>
                     <TableHead>Matched playbook</TableHead>
                     <TableHead>Confidence</TableHead>
+                    <TableHead>
+                      <span className="flex items-center gap-1">
+                        Last activity
+                        <span className="flex items-center gap-1 text-xs font-normal">
+                          <Link
+                            href="/cases?sort=newest"
+                            className={cn(
+                              "hover:text-foreground",
+                              !oldestFirst ? "text-foreground" : "text-muted-foreground",
+                            )}
+                            title="Newest first"
+                          >
+                            ↓
+                          </Link>
+                          <Link
+                            href="/cases?sort=oldest"
+                            className={cn(
+                              "hover:text-foreground",
+                              oldestFirst ? "text-foreground" : "text-muted-foreground",
+                            )}
+                            title="Oldest first"
+                          >
+                            ↑
+                          </Link>
+                        </span>
+                      </span>
+                    </TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {cases.rows.map((row) => (
+                  {rows.map((row) => (
                     <TableRow
                       key={row.id}
                       className="group cursor-pointer"
@@ -134,6 +176,18 @@ export default async function CasesPage() {
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
+                      </TableCell>
+                      <TableCell
+                        className="align-top text-sm text-muted-foreground"
+                        title={
+                          row.updatedAt
+                            ? new Date(row.updatedAt).toLocaleString("en-GB", {
+                                timeZone: "Europe/London",
+                              })
+                            : undefined
+                        }
+                      >
+                        {relativeTime(row.updatedAt) || "—"}
                       </TableCell>
                       <TableCell className="align-top">
                         <Badge variant="outline">{row.state}</Badge>

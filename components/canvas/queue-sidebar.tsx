@@ -11,7 +11,14 @@ import {
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { cn, relativeTime } from "@/lib/utils"
 
 interface QueueRow {
   id: string
@@ -19,7 +26,16 @@ interface QueueRow {
   email: string | null
   state: string
   snippet: string
+  updatedAt: string | null
 }
+
+interface TeammateOption {
+  intercom_admin_id: string | null
+  name: string | null
+}
+
+// Persist the chosen inbox across canvases (same shift, same focus).
+const INBOX_KEY = "fv-canvas-queue-inbox"
 
 const COLLAPSE_KEY = "fv-canvas-queue-collapsed"
 const COLLAPSE_EVENT = "fv-canvas-queue-toggled"
@@ -44,6 +60,15 @@ export function QueueSidebar() {
   const pathname = usePathname()
   const [rows, setRows] = useState<QueueRow[] | null>(null)
   const [error, setError] = useState(false)
+  const [teammates, setTeammates] = useState<TeammateOption[]>([])
+  const [inbox, setInbox] = useState<string>(() => {
+    if (typeof window === "undefined") return "mine"
+    try {
+      return localStorage.getItem(INBOX_KEY) ?? "mine"
+    } catch {
+      return "mine"
+    }
+  })
 
   // Collapse preference in localStorage (expanded by default)
   const collapsed =
@@ -57,11 +82,28 @@ export function QueueSidebar() {
     window.dispatchEvent(new Event(COLLAPSE_EVENT))
   }
 
+  // Load the teammate list once — used to populate the inbox selector.
+  useEffect(() => {
+    let cancelled = false
+    fetch("/api/agents")
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return
+        const list: TeammateOption[] = Array.isArray(data.agents) ? data.agents : []
+        setTeammates(list.filter((a) => a.intercom_admin_id))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // (Re)load the queue whenever the selected inbox changes; poll every 30s.
   useEffect(() => {
     let cancelled = false
     const load = async () => {
       try {
-        const res = await fetch("/api/cases")
+        const res = await fetch(`/api/cases?inbox=${encodeURIComponent(inbox)}`)
         const data = await res.json()
         if (!cancelled) {
           setRows(Array.isArray(data.rows) ? data.rows : [])
@@ -77,7 +119,17 @@ export function QueueSidebar() {
       cancelled = true
       clearInterval(id)
     }
-  }, [])
+  }, [inbox])
+
+  const onInboxChange = (value: string) => {
+    setRows(null)
+    setInbox(value)
+    try {
+      localStorage.setItem(INBOX_KEY, value)
+    } catch {
+      // ignore
+    }
+  }
 
   if (collapsed) {
     return (
@@ -115,6 +167,25 @@ export function QueueSidebar() {
           <PanelLeftCloseIcon className="size-4" />
         </button>
       </div>
+      <div className="shrink-0 border-b px-2 py-2">
+        <Select value={inbox} onValueChange={onInboxChange}>
+          <SelectTrigger className="h-7 w-full text-xs">
+            <SelectValue placeholder="Inbox" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="mine">My inbox</SelectItem>
+            <SelectItem value="unassigned">Unassigned</SelectItem>
+            {teammates.map((t) => (
+              <SelectItem
+                key={t.intercom_admin_id as string}
+                value={`admin:${t.intercom_admin_id}`}
+              >
+                {t.name ?? "Teammate"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       <div className="flex-1 overflow-y-auto">
         {rows === null && (
           <div className="flex h-24 items-center justify-center">
@@ -142,12 +213,16 @@ export function QueueSidebar() {
                 <span className="truncate text-xs font-medium">
                   {row.customer}
                 </span>
-                <Badge
-                  variant={row.state === "open" ? "default" : "outline"}
-                  className="ml-auto h-4 shrink-0 px-1 text-[10px]"
-                >
-                  {row.state}
-                </Badge>
+                {row.updatedAt && (
+                  <span
+                    className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                    title={new Date(row.updatedAt).toLocaleString("en-GB", {
+                      timeZone: "Europe/London",
+                    })}
+                  >
+                    {relativeTime(row.updatedAt)}
+                  </span>
+                )}
               </span>
               <span className="truncate text-[11px] text-muted-foreground">
                 {row.snippet}
