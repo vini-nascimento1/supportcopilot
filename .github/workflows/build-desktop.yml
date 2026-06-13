@@ -1,68 +1,39 @@
-name: Build desktop shell                                                                                                                                                                                                         
-on:                                                                                                                                                                                                           
-    push:                                                                                                                                                                                                       
-      tags:                                                                                                                                                                                                     
-        - "v*"                                                                                                                                                                                                  
-    workflow_dispatch:                                            
-      inputs:                                                                                                                                                                                                   
-        tag:                                                                                                                                                                                                    
-          description: "Release tag to attach artifacts to"                                                                                                                                                     
-          required: false                                                                                                                                                                                       
-          default: "v1.0.0"                                                                                                                                                                                     
-                                                                                                                                                                                                                
-jobs:                                                                                                                                                                                                         
-    build:                                                                                                                                                                                                      
-      strategy:                                                                                                                                                                                                 
-        matrix:                                                                                                                                                                                                 
-          os:                                                                                                                                                                                                   
-            - ubuntu-22.04                                                                                                                                                                                      
-            - macos-latest                                                                                                                                                                                      
-            - windows-latest                                                                                                                                                                                    
-        fail-fast: false                                                                                                                                                                                        
-      runs-on: ${{ matrix.os }}                                                                                                                                                                                 
-      defaults:                                                                                                                                                                                                 
-        run:                                                                                                                                                                                                    
-          working-directory: desktop                                                                                                                                                                            
-      steps:                                                                                                                                                                                                    
-        - uses: actions/checkout@v4                                                                                                                                                                             
-        - uses: actions/setup-node@v4                                                                                                                                                                           
-          with:                                                                                                                                                                                                 
-            node-version: 20                                                                                                                                                                                    
-        - name: Install dependencies                                                                                                                                                                            
-          run: npm ci                                                                                                                                                                                           
-        - name: Package                                                                                                                                                                                         
-          run: |                                                                                                                                                                                                
-            if [ "$RUNNER_OS" = "Linux" ]; then npm run dist:linux; fi                                                                                                                                          
-            if [ "$RUNNER_OS" = "macOS" ]; then npm run dist:mac; fi                                                                                                                                            
-            if [ "$RUNNER_OS" = "Windows" ]; then npm run dist:win; fi                                                                                                                                          
-          shell: bash                                                                                                                                                                                           
-        - uses: actions/upload-artifact@v4                                                                                                                                                                      
-          with:                                                                                                                                                                                                 
-            name: fanvue-copilot-${{ runner.os }}                                                                                                                                                               
-            path: desktop/dist/                                                                                                                                                                                 
-            if-no-files-found: error                                                                                                                                                                            
-                                                                                                                                                                                                                
-    release:                                                                                                                                                                                                    
-      needs: build                                                                                                                                                                                              
-      runs-on: ubuntu-22.04                                                                                                                                                                                     
-      permissions:                                                                                                                                                                                              
-        contents: write                                                                                                                                                                                         
-      steps:                                                                                                                                                                                                    
-        - name: Resolve tag name                                                                                                                                                                                
-          id: tag                                                                                                                                                                                               
-          run: |                                                                                                                                                                                                
-            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then                                                                                                                                       
-              echo "tag=${{ github.event.inputs.tag }}"                                                                                                                                                         
-            else                                                                                                                                                                                                
-              echo "tag=${{ github.ref_name }}"                                                                                                                                                                 
-            fi >> "$GITHUB_OUTPUT"                                                                                                                                                                              
-        - uses: actions/download-artifact@v4                                                                                                                                                                    
-          with:                                                                                                                                                                                                 
-            pattern: fanvue-copilot-*                                                                                                                                                                           
-            merge-multiple: true                                                                                                                                                                                
-            path: artifacts                                                                                                                                                                                     
-        - uses: softprops/action-gh-release@v2                                                                                                                                                                  
-          with:                                                                                                                                                                                                 
-            files: artifacts/*                                                                                                                                                                                  
-            tag_name: ${{ steps.tag.outputs.tag }}                                                                                                                                                              
-            fail_on_unmatched: false
+name: Build desktop shell
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci
+      # electron-builder publishes the installers AND the latest*.yml update
+      # metadata that electron-updater reads, to a GitHub Release for the tag
+      # (created as a draft — publish it manually to roll the update out). Each
+      # OS job appends its own artifacts to the same draft release.
+      - name: Build and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then npm run dist:linux -- --publish always; fi
+          if [ "$RUNNER_OS" = "macOS" ]; then npm run dist:mac -- --publish always; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then npm run dist:win -- --publish always; fi
+        shell: bash
