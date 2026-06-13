@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react"
-import { BotIcon, Loader2Icon, SendIcon } from "lucide-react"
+import { BotIcon, CheckIcon, CopyIcon, Loader2Icon, SendIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,6 +10,29 @@ import { MarkdownPreview } from "@/components/markdown-preview"
 import { PinButton } from "@/components/canvas/pin-button"
 
 type Message = { role: "user" | "assistant"; content: string }
+
+// Copy-to-clipboard button shown on hover over a message. Click copies the
+// raw message text (markdown source for assistant answers).
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={() => {
+        void navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1000)
+      }}
+      title="Copy message"
+      className="nodrag shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover/msg:opacity-100"
+    >
+      {copied ? (
+        <CheckIcon className="size-3 text-emerald-500" />
+      ) : (
+        <CopyIcon className="size-3" />
+      )}
+    </button>
+  )
+}
 
 export type AiNodeData = {
   /** When set, the assistant is a copilot for THIS ticket: full conversation
@@ -82,7 +105,7 @@ export function AiNode({ id, data, selected }: NodeProps<AiNodeType>) {
       </div>
       <div
         ref={listRef}
-        className="nodrag nowheel flex flex-1 flex-col gap-2 overflow-y-auto p-3"
+        className="nodrag nowheel flex flex-1 cursor-auto flex-col gap-2 overflow-y-auto p-3 select-text"
       >
         {messages.length === 0 && !loading && (
           <p className="m-auto text-center text-xs text-muted-foreground">
@@ -95,14 +118,23 @@ export function AiNode({ id, data, selected }: NodeProps<AiNodeType>) {
           m.role === "user" ? (
             <div
               key={i}
-              className="ml-6 self-end rounded-lg bg-primary px-2.5 py-1.5 text-xs text-primary-foreground"
+              className="group/msg flex items-start gap-1 self-end"
             >
-              {m.content}
+              <div className="ml-6 select-text rounded-lg bg-primary px-2.5 py-1.5 text-xs text-primary-foreground">
+                {m.content}
+              </div>
+              <CopyButton text={m.content} />
             </div>
           ) : (
             // The model answers in markdown — render it properly
-            <div key={i} className="mr-2 self-start [&_.markdown-preview]:text-xs">
-              <MarkdownPreview content={m.content} />
+            <div
+              key={i}
+              className="group/msg flex items-start gap-1 self-start"
+            >
+              <div className="mr-1 select-text [&_.markdown-preview]:text-xs">
+                <MarkdownPreview content={m.content} />
+              </div>
+              <CopyButton text={m.content} />
             </div>
           ),
         )}
