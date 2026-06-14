@@ -111,22 +111,22 @@ function openTool(id, url) {
 
     if (isImage) {
       items.push({
-        label: "Pesquisar imagem no Google Lens",
+        label: "Search image with Google Lens",
         click: () =>
           shell.openExternal(
             `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(params.srcURL)}`,
           ),
       })
       items.push({
-        label: "Copiar imagem",
+        label: "Copy image",
         click: () => wc.copyImageAt(params.x, params.y),
       })
       items.push({
-        label: "Copiar endereço da imagem",
+        label: "Copy image address",
         click: () => clipboard.writeText(params.srcURL),
       })
       items.push({
-        label: "Abrir imagem em nova guia",
+        label: "Open image in new tab",
         click: () => shell.openExternal(params.srcURL),
       })
       items.push({ type: "separator" })
@@ -135,11 +135,11 @@ function openTool(id, url) {
     if (params.selectionText) {
       const text = params.selectionText.trim().slice(0, 80)
       items.push({
-        label: "Copiar",
+        label: "Copy",
         role: "copy",
       })
       items.push({
-        label: `Pesquisar "${text}" no Google`,
+        label: `Search Google for "${text}"`,
         click: () =>
           shell.openExternal(
             `https://www.google.com/search?q=${encodeURIComponent(params.selectionText)}`,
@@ -149,14 +149,14 @@ function openTool(id, url) {
     }
 
     if (params.isEditable) {
-      items.push({ label: "Recortar", role: "cut" })
-      items.push({ label: "Colar", role: "paste" })
+      items.push({ label: "Cut", role: "cut" })
+      items.push({ label: "Paste", role: "paste" })
       items.push({ type: "separator" })
     }
 
-    items.push({ label: "Recarregar", click: () => wc.reload() })
+    items.push({ label: "Reload", click: () => wc.reload() })
     items.push({
-      label: "Inspecionar elemento",
+      label: "Inspect element",
       click: () => wc.inspectElement(params.x, params.y),
     })
 
