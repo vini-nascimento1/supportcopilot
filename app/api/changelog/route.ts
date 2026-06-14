@@ -16,6 +16,41 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-06-14-a",
+    date: "2026-06-14",
+    title: "Macros on the case canvas",
+    description:
+      "All Intercom macros are mirrored into the app — search them in the new Macros card, copy the text, or send one straight into the conversation as an admin reply (with a confirm step). Personal/team-specific macros are hidden, so you only see shared ones. Hit the sync button to refresh from Intercom.",
+  },
+  {
+    id: "seed-2026-06-14-b",
+    date: "2026-06-14",
+    title: "Close a case from the canvas",
+    description:
+      "The case info card now has a 'Close case' button that closes the Intercom conversation directly (with a confirm). No more switching to Intercom just to wrap up.",
+  },
+  {
+    id: "seed-2026-06-14-c",
+    date: "2026-06-14",
+    title: "Latest Slack threads on the case card",
+    description:
+      "The case info card now shows the latest Slack threads mentioning the customer — the same finder from the case sidebar, right where you need it on the canvas.",
+  },
+  {
+    id: "seed-2026-06-14-d",
+    date: "2026-06-14",
+    title: "Find on page (Ctrl+F) in embedded tools — desktop app",
+    description:
+      "Press Ctrl/Cmd+F inside any embedded tool card (Fadmin, ONDATO, MassPay…) to search the page, with match counter and next/previous, just like Chrome. Requires the desktop app (v1.1.0+).",
+  },
+  {
+    id: "seed-2026-06-14-e",
+    date: "2026-06-14",
+    title: "Right-click image → Google Lens — desktop app",
+    description:
+      "Right-click any image inside an embedded tool to reverse-search it with Google Lens — built for spotting stolen/stock images uploaded to Fanvue. Also copy image, copy address, and search selected text. Requires the desktop app (v1.1.0+).",
+  },
+  {
     id: "seed-2026-06-09-a",
     date: "2026-06-09",
     title: "Slack Thread Finder — auto-discover internal workflow threads",
