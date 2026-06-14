@@ -56,6 +56,10 @@ export async function GET(request: Request) {
   }
 
   let lastError: string | null = null
+  // True once any token completed a search successfully (ok:true) — even if it
+  // returned zero matches. Lets a clean "no threads" win over a later token's
+  // capability error (e.g. the bot token can't call search.messages at all).
+  let hadSuccessfulSearch = false
 
   for (const { token } of tokensToTry) {
     // Resolve bot user id so we can filter out bot's own messages (SLA alerts, etc.)
@@ -88,12 +92,19 @@ export async function GET(request: Request) {
     }
 
     if (!data.ok) {
-      if (data.error === "missing_scope") {
+      // Token can't perform search.messages — skip it and try the next one.
+      // `not_allowed_token_type` is what a *bot* token returns (search is a
+      // user-token-only method); `missing_scope` is a user token lacking
+      // search:read. Neither is a real failure — fall through to the clean
+      // "no threads" / missing-scope handling once all tokens are exhausted.
+      if (data.error === "missing_scope" || data.error === "not_allowed_token_type") {
         lastError = "missing_scope"
         continue // try next token
       }
       return NextResponse.json({ ok: false, error: "search_failed", detail: data.error })
     }
+
+    hadSuccessfulSearch = true
 
     // Filter out bot's own messages (automation alerts, SLA warnings) and DMs with bot
     const validMatches = (data.messages?.matches ?? []).filter((m) => {
@@ -124,7 +135,13 @@ export async function GET(request: Request) {
     })
   }
 
-  // No valid results found across all tokens
+  // A token searched fine but found nothing → genuine "no threads" (don't let a
+  // later token's capability error mask it).
+  if (hadSuccessfulSearch) {
+    return NextResponse.json({ ok: true, threads: [] })
+  }
+
+  // No token could search at all (scope missing / wrong token type)
   if (lastError === "missing_scope") {
     return NextResponse.json({
       ok: false,

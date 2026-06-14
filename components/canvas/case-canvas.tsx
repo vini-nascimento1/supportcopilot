@@ -354,6 +354,9 @@ function applyPins(layout: SavedLayout): { nodes: Node[]; edges: Edge[] } {
       width: pin.width ?? n.width,
       height: pin.height ?? n.height,
       draggable: false,
+      // nopan keeps a non-draggable card interactive (text selection / clicks);
+      // React Flow only adds it to draggable nodes. See PinButton.
+      className: n.className ? `${n.className} nopan` : "nopan",
     }
   })
   return { nodes, edges: layout.edges }

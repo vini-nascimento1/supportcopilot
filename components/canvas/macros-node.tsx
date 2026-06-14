@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { type Node, type NodeProps } from "@xyflow/react"
+import { NodeResizer, type Node, type NodeProps } from "@xyflow/react"
 import {
   CheckIcon,
   CopyIcon,
@@ -32,7 +32,7 @@ function htmlToText(html: string): string {
   return (doc.body.textContent ?? "").replace(/\s+\n/g, "\n").trim()
 }
 
-export function MacrosNode({ id, data }: NodeProps<MacrosNodeType>) {
+export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
   const [macros, setMacros] = useState<MacroRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -117,6 +117,7 @@ export function MacrosNode({ id, data }: NodeProps<MacrosNodeType>) {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border bg-card shadow-md">
+      <NodeResizer isVisible={selected} minWidth={300} minHeight={240} />
       <div className="flex h-10 shrink-0 cursor-grab items-center gap-2 border-b bg-muted/50 px-3 active:cursor-grabbing">
         <ZapIcon className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="text-sm font-semibold">Macros</span>

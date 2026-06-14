@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useReactFlow, type Node, type NodeProps } from "@xyflow/react"
+import { NodeResizer, useReactFlow, type Node, type NodeProps } from "@xyflow/react"
 import {
   CheckIcon,
   ExternalLinkIcon,
@@ -138,7 +138,7 @@ function CopyTag({ tag }: { tag: string }) {
 // Case snapshot. Live data comes from Intercom; name/email are editable and
 // the overrides persist with the canvas layout (the canvas — tool URLs
 // included — then uses the corrected values).
-export function CaseInfoNode({ id, data }: NodeProps<CaseInfoNodeType>) {
+export function CaseInfoNode({ id, data, selected }: NodeProps<CaseInfoNodeType>) {
   const { updateNodeData } = useReactFlow()
   const name = data.overrides?.customerName ?? data.customerName
   const email = data.overrides?.customerEmail ?? data.customerEmail
@@ -178,6 +178,7 @@ export function CaseInfoNode({ id, data }: NodeProps<CaseInfoNodeType>) {
 
   return (
     <div className="flex h-full w-full cursor-grab flex-col gap-3 overflow-y-auto rounded-xl border bg-card p-4 shadow-md active:cursor-grabbing">
+      <NodeResizer isVisible={selected} minWidth={280} minHeight={260} />
       <div className="flex items-center gap-2">
         <UserIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm font-semibold">{name}</span>

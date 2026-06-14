@@ -27,14 +27,18 @@ export function PinButton({ nodeId }: { nodeId: string }) {
     if (!node) return
     if (pinned) {
       removePin(nodeId)
-      updateNode(nodeId, { draggable: true })
+      updateNode(nodeId, { draggable: true, className: undefined })
     } else {
       setPin(nodeId, {
         position: node.position,
         width: node.width ?? undefined,
         height: node.height ?? undefined,
       })
-      updateNode(nodeId, { draggable: false })
+      // React Flow only auto-adds the `nopan` class to *draggable* nodes. A
+      // pinned node is draggable:false, so without this any mousedown-drag on
+      // the card pans the whole canvas — which blocks text selection and
+      // swallows clicks. Add nopan explicitly so the card stays interactive.
+      updateNode(nodeId, { draggable: false, className: "nopan" })
     }
   }
 

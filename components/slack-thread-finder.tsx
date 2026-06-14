@@ -29,6 +29,28 @@ import {
 
 const POLL_INTERVAL_MS = 60_000
 
+// Slack API error codes are snake_case machine strings — never show them raw.
+// Map the ones we might still surface to plain English; fall back to a generic
+// line for anything unrecognised.
+function humanizeSlackError(code: string | undefined): string {
+  switch (code) {
+    case "not_allowed_token_type":
+    case "missing_scope":
+      return "the connected Slack token can't run searches."
+    case "invalid_auth":
+    case "token_revoked":
+    case "account_inactive":
+      return "your Slack connection expired — reconnect it in Settings."
+    case "ratelimited":
+      return "Slack is rate-limiting us — try again in a moment."
+    case undefined:
+    case "":
+      return "an unexpected error occurred."
+    default:
+      return "an unexpected error occurred."
+  }
+}
+
 type ThreadInfo = {
   ts: string
   channelId: string
@@ -95,7 +117,7 @@ export function SlackThreadFinder({
         } else if (data.error === "auth_required") {
           setFetchState({ status: "auth_required" })
         } else {
-          setFetchState({ status: "error", message: data.detail ?? data.error ?? "Search failed" })
+          setFetchState({ status: "error", message: humanizeSlackError(data.detail ?? data.error) })
         }
         return
       }
