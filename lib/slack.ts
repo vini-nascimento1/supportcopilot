@@ -713,13 +713,3 @@ export async function sendSlackMessage(
 export function countUnreadConversations(conversations: SlackConversation[]): number {
   return conversations.filter((c) => c.unreadCount > 0).length
 }
-
-/** Build a permalink to a specific Slack message. */
-export function getMessagePermalink(
-  workspaceUrl: string,
-  channelId: string,
-  ts: string
-): string {
-  const tsClean = ts.replace(".", "")
-  return `${workspaceUrl}/archives/${channelId}/p${tsClean}`
-}
