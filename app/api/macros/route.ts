@@ -32,7 +32,13 @@ export async function GET(req: NextRequest) {
     .order("name", { ascending: true })
     .limit(500)
 
-  if (visibility) query = query.eq("visibility", visibility)
+  if (visibility) {
+    query = query.eq("visibility", visibility)
+  } else {
+    // Default: never expose "specific_teams" macros — Intercom doesn't tell us
+    // which team they belong to, so they can't be scoped per agent (ADR-0011).
+    query = query.neq("visibility", "specific_teams")
+  }
   if (q) query = query.or(`name.ilike.%${q}%,body_text.ilike.%${q}%`)
 
   const { data, error } = await query

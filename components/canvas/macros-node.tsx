@@ -42,7 +42,12 @@ export function MacrosNode({ id, data }: NodeProps<MacrosNodeType>) {
 
   const load = useCallback(async (q: string) => {
     try {
-      const res = await fetch(`/api/macros?q=${encodeURIComponent(q)}`)
+      // Only "everyone" macros: Intercom's API never populates
+      // visible_to_team_ids, so we can't tell which agent a "specific_teams"
+      // (personal/team) macro belongs to — they'd leak to everyone. See ADR-0011.
+      const res = await fetch(
+        `/api/macros?visibility=everyone&q=${encodeURIComponent(q)}`,
+      )
       if (!res.ok) throw new Error(await res.text())
       const json = (await res.json()) as { macros: MacroRow[] }
       setMacros(json.macros)
