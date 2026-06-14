@@ -5,7 +5,7 @@
 const { contextBridge, ipcRenderer } = require("electron")
 
 contextBridge.exposeInMainWorld("canvasHost", {
-  version: 1,
+  version: 2,
   openTool: (id, url) => ipcRenderer.invoke("canvas:open-tool", { id, url }),
   closeTool: (id) => ipcRenderer.send("canvas:close-tool", { id }),
   closeAllTools: () => ipcRenderer.send("canvas:close-all"),
@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld("canvasHost", {
     ipcRenderer.send("canvas:set-visible", { id, visible }),
   reloadTool: (id) => ipcRenderer.send("canvas:reload", { id }),
   navigateTool: (id, url) => ipcRenderer.send("canvas:navigate", { id, url }),
+  findInTool: (id, text, opts) =>
+    ipcRenderer.send("canvas:find", { id, text, ...(opts || {}) }),
+  stopFind: (id) => ipcRenderer.send("canvas:stop-find", { id }),
   onToolEvent: (cb) => {
     const handler = (_event, payload) => cb(payload)
     ipcRenderer.on("canvas:tool-event", handler)

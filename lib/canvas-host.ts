@@ -11,10 +11,22 @@ export interface ToolBounds {
   height: number
 }
 
+export interface FindResult {
+  active: number
+  total: number
+}
+
 export type ToolEvent =
   | { id: string; kind: "title"; value: string }
   | { id: string; kind: "loading"; value: boolean }
   | { id: string; kind: "url"; value: string }
+  | { id: string; kind: "find-result"; value: FindResult }
+  | { id: string; kind: "find-open"; value: boolean }
+
+export interface FindOptions {
+  forward?: boolean
+  findNext?: boolean
+}
 
 export interface CanvasHost {
   version: number
@@ -25,6 +37,9 @@ export interface CanvasHost {
   setToolVisible(id: string, visible: boolean): void
   reloadTool(id: string): void
   navigateTool(id: string, url: string): void
+  // Optional: only present when the desktop shell is v2+ (find-in-page).
+  findInTool?(id: string, text: string, opts?: FindOptions): void
+  stopFind?(id: string): void
   onToolEvent(cb: (event: ToolEvent) => void): () => void
 }
 

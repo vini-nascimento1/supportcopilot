@@ -10,7 +10,9 @@ const {
   app,
   BrowserWindow,
   WebContentsView,
+  clipboard,
   ipcMain,
+  Menu,
   session,
   shell,
 } = require("electron")
@@ -80,6 +82,87 @@ function openTool(id, url) {
   wc.on("did-navigate", (_e, url) => sendToolEvent(id, "url", url))
   wc.on("did-navigate-in-page", (_e, url) => sendToolEvent(id, "url", url))
 
+  // Ctrl/Cmd+F is pressed while focus is inside this native view, so the React
+  // renderer never sees it — intercept here and ask the card to open its find
+  // bar. Escape closes it. (The actual search runs via the canvas:find IPC.)
+  wc.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return
+    if ((input.control || input.meta) && input.key.toLowerCase() === "f") {
+      event.preventDefault()
+      sendToolEvent(id, "find-open", true)
+    }
+  })
+
+  // Forward in-page find results to the card's find bar.
+  wc.on("found-in-page", (_e, result) =>
+    sendToolEvent(id, "find-result", {
+      active: result.activeMatchOrdinal,
+      total: result.matches,
+    }),
+  )
+
+  // Chrome-like right-click menu. The key use case is reverse-searching media
+  // (stolen images uploaded to Fanvue) via Google Lens. Lens fetches the URL
+  // anonymously, so it works for public/CDN-signed image URLs; auth-only images
+  // may 403 — "Copy/Save image" is the fallback there.
+  wc.on("context-menu", (_e, params) => {
+    const items = []
+    const isImage = params.mediaType === "image" && params.srcURL
+
+    if (isImage) {
+      items.push({
+        label: "Pesquisar imagem no Google Lens",
+        click: () =>
+          shell.openExternal(
+            `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(params.srcURL)}`,
+          ),
+      })
+      items.push({
+        label: "Copiar imagem",
+        click: () => wc.copyImageAt(params.x, params.y),
+      })
+      items.push({
+        label: "Copiar endereço da imagem",
+        click: () => clipboard.writeText(params.srcURL),
+      })
+      items.push({
+        label: "Abrir imagem em nova guia",
+        click: () => shell.openExternal(params.srcURL),
+      })
+      items.push({ type: "separator" })
+    }
+
+    if (params.selectionText) {
+      const text = params.selectionText.trim().slice(0, 80)
+      items.push({
+        label: "Copiar",
+        role: "copy",
+      })
+      items.push({
+        label: `Pesquisar "${text}" no Google`,
+        click: () =>
+          shell.openExternal(
+            `https://www.google.com/search?q=${encodeURIComponent(params.selectionText)}`,
+          ),
+      })
+      items.push({ type: "separator" })
+    }
+
+    if (params.isEditable) {
+      items.push({ label: "Recortar", role: "cut" })
+      items.push({ label: "Colar", role: "paste" })
+      items.push({ type: "separator" })
+    }
+
+    items.push({ label: "Recarregar", click: () => wc.reload() })
+    items.push({
+      label: "Inspecionar elemento",
+      click: () => wc.inspectElement(params.x, params.y),
+    })
+
+    Menu.buildFromTemplate(items).popup({ window: win })
+  })
+
   toolViews.set(id, view)
   wc.loadURL(url)
 }
@@ -126,6 +209,17 @@ function registerIpc() {
   ipcMain.on("canvas:navigate", (_e, { id, url }) => {
     if (typeof url !== "string" || !/^https?:\/\//.test(url)) return
     toolViews.get(id)?.webContents.loadURL(url)
+  })
+  ipcMain.on("canvas:find", (_e, { id, text, forward, findNext }) => {
+    const view = toolViews.get(id)
+    if (!view || typeof text !== "string" || !text) return
+    view.webContents.findInPage(text, {
+      forward: forward !== false,
+      findNext: Boolean(findNext),
+    })
+  })
+  ipcMain.on("canvas:stop-find", (_e, { id }) => {
+    toolViews.get(id)?.webContents.stopFindInPage("clearSelection")
   })
 }
 

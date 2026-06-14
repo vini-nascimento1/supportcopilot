@@ -10,11 +10,14 @@ import {
 } from "@xyflow/react"
 import {
   CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CopyIcon,
   ExternalLinkIcon,
   Loader2Icon,
   MinusIcon,
   RotateCcwIcon,
+  SearchIcon,
   SquareIcon,
   XIcon,
 } from "lucide-react"
@@ -56,6 +59,15 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
   const [liveUrl, setLiveUrl] = useState(data.url)
   const [urlDraft, setUrlDraft] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  // Find-in-page (Ctrl/Cmd+F). Opened from the native view via a tool event,
+  // because the keystroke lands in the WebContentsView, not this renderer.
+  const [findOpen, setFindOpen] = useState(false)
+  const [findText, setFindText] = useState("")
+  const [findResult, setFindResult] = useState<{
+    active: number
+    total: number
+  } | null>(null)
+  const findInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     minimizedRef.current = minimized
@@ -72,6 +84,8 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
       if (event.kind === "title") setTitle(event.value)
       if (event.kind === "loading") setLoading(event.value)
       if (event.kind === "url") setLiveUrl(event.value)
+      if (event.kind === "find-result") setFindResult(event.value)
+      if (event.kind === "find-open") setFindOpen(true)
     })
     void host.openTool(id, data.url)
 
@@ -123,6 +137,32 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
   const handleClose = useCallback(() => {
     void deleteElements({ nodes: [{ id }] })
   }, [deleteElements, id])
+
+  // Select the field when the bar opens so the user can type immediately;
+  // also pulls OS keyboard focus back from the native view into the renderer.
+  useEffect(() => {
+    if (findOpen) findInputRef.current?.focus()
+  }, [findOpen])
+
+  const runFind = useCallback(
+    (text: string, opts?: { findNext?: boolean; forward?: boolean }) => {
+      if (!host?.findInTool) return
+      if (!text) {
+        host.stopFind?.(id)
+        setFindResult(null)
+        return
+      }
+      host.findInTool(id, text, opts)
+    },
+    [host, id],
+  )
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false)
+    setFindText("")
+    setFindResult(null)
+    host?.stopFind?.(id)
+  }, [host, id])
 
   if (ghost) {
     return (
@@ -261,6 +301,69 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
             ) : (
               <CopyIcon className="size-3" />
             )}
+          </Button>
+        </div>
+      )}
+
+      {!minimized && findOpen && host?.findInTool && (
+        <div className="nodrag flex h-8 shrink-0 items-center gap-1 border-b bg-muted/40 px-2">
+          <SearchIcon className="size-3 shrink-0 text-muted-foreground" />
+          <input
+            ref={findInputRef}
+            className="h-5 w-full min-w-0 flex-1 rounded bg-transparent px-1 text-xs outline-none focus:bg-background focus:ring-1 focus:ring-ring"
+            placeholder="Find on page…"
+            value={findText}
+            spellCheck={false}
+            onChange={(e) => {
+              setFindText(e.target.value)
+              runFind(e.target.value, { findNext: false })
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                runFind(findText, { findNext: true, forward: !e.shiftKey })
+              }
+              if (e.key === "Escape") {
+                e.preventDefault()
+                closeFind()
+              }
+            }}
+          />
+          <span className="shrink-0 px-1 font-mono text-[10px] tabular-nums text-muted-foreground">
+            {findText
+              ? findResult
+                ? `${findResult.active}/${findResult.total}`
+                : "0/0"
+              : ""}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-5 shrink-0"
+            title="Previous (Shift+Enter)"
+            disabled={!findResult?.total}
+            onClick={() => runFind(findText, { findNext: true, forward: false })}
+          >
+            <ChevronUpIcon className="size-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-5 shrink-0"
+            title="Next (Enter)"
+            disabled={!findResult?.total}
+            onClick={() => runFind(findText, { findNext: true, forward: true })}
+          >
+            <ChevronDownIcon className="size-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-5 shrink-0"
+            title="Close (Esc)"
+            onClick={closeFind}
+          >
+            <XIcon className="size-3" />
           </Button>
         </div>
       )}
