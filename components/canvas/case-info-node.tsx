@@ -5,14 +5,18 @@ import { useReactFlow, type Node, type NodeProps } from "@xyflow/react"
 import {
   CheckIcon,
   ExternalLinkIcon,
+  Loader2Icon,
   PencilIcon,
   UserIcon,
+  XCircleIcon,
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PinButton } from "@/components/canvas/pin-button"
+import { SlackThreadFinder } from "@/components/slack-thread-finder"
 import { cn } from "@/lib/utils"
 
 export type CaseInfoData = {
@@ -139,21 +143,49 @@ export function CaseInfoNode({ id, data }: NodeProps<CaseInfoNodeType>) {
   const name = data.overrides?.customerName ?? data.customerName
   const email = data.overrides?.customerEmail ?? data.customerEmail
 
+  const [closing, setClosing] = useState(false)
+  const [closed, setClosed] = useState(false)
+
   const saveOverride = (key: "customerName" | "customerEmail", value: string) =>
     updateNodeData(id, {
       overrides: { ...data.overrides, [key]: value },
     })
 
+  const closeCase = async () => {
+    if (
+      !window.confirm(
+        `Close this Intercom conversation as resolved?\n\nThis sends a real "close" to Intercom and cannot be undone from here.`,
+      )
+    ) {
+      return
+    }
+    setClosing(true)
+    try {
+      const res = await fetch("/api/cases/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: data.conversationId }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      setClosed(true)
+      toast.success("Conversation closed in Intercom")
+    } catch (e) {
+      toast.error(`Close failed: ${(e as Error).message}`)
+    } finally {
+      setClosing(false)
+    }
+  }
+
   return (
-    <div className="flex h-full w-full cursor-grab flex-col gap-3 overflow-hidden rounded-xl border bg-card p-4 shadow-md active:cursor-grabbing">
+    <div className="flex h-full w-full cursor-grab flex-col gap-3 overflow-y-auto rounded-xl border bg-card p-4 shadow-md active:cursor-grabbing">
       <div className="flex items-center gap-2">
         <UserIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm font-semibold">{name}</span>
         <Badge
-          variant={data.state === "open" ? "default" : "outline"}
+          variant={!closed && data.state === "open" ? "default" : "outline"}
           className="ml-auto shrink-0"
         >
-          {data.state}
+          {closed ? "closed" : data.state}
         </Badge>
         <PinButton nodeId={id} />
       </div>
@@ -182,14 +214,45 @@ export function CaseInfoNode({ id, data }: NodeProps<CaseInfoNodeType>) {
       )}
       <Field label="Conversation ID" value={data.conversationId} mono />
 
-      {data.intercomUrl && (
-        <Button asChild size="sm" variant="outline" className="nodrag mt-auto">
-          <a href={data.intercomUrl} target="_blank" rel="noopener noreferrer">
-            <ExternalLinkIcon className="size-3.5" />
-            Open in Intercom
-          </a>
+      {/* Latest Slack threads mentioning this customer — same finder used in the
+          /cases sidebar. Drafts generated from a thread are copied to clipboard
+          (the canvas has a separate Draft card for composing). */}
+      <div className="nodrag flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">Latest Slack threads</span>
+        <SlackThreadFinder
+          conversationId={data.conversationId}
+          customerEmail={email}
+          onGenerateDraft={(body) => {
+            void navigator.clipboard.writeText(body)
+            toast.success("Draft from Slack copied to clipboard")
+          }}
+        />
+      </div>
+
+      <div className="nodrag mt-auto flex flex-col gap-2 pt-1">
+        {data.intercomUrl && (
+          <Button asChild size="sm" variant="outline">
+            <a href={data.intercomUrl} target="_blank" rel="noopener noreferrer">
+              <ExternalLinkIcon className="size-3.5" />
+              Open in Intercom
+            </a>
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          className="text-destructive hover:text-destructive"
+          onClick={closeCase}
+          disabled={closing || closed}
+        >
+          {closing ? (
+            <Loader2Icon className="size-3.5 animate-spin" />
+          ) : (
+            <XCircleIcon className="size-3.5" />
+          )}
+          {closed ? "Closed" : "Close case"}
         </Button>
-      )}
+      </div>
     </div>
   )
 }

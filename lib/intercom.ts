@@ -816,3 +816,93 @@ export async function searchMetricsForAdmin(
     perDayCsat: csatScores.length > 0 ? Math.round((csatScores.length / days) * 10) / 10 : null,
   }
 }
+
+// --- Macros (canned/saved replies) ------------------------------------------
+// Intercom only serves macros under the "Unstable" API version; 2.11 returns
+// intercom_version_invalid. Cursor-paginated via pages.next.starting_after.
+
+export interface IntercomMacro {
+  intercomId: string
+  name: string
+  body: string
+  bodyText: string | null
+  visibility: string
+  intercomUpdatedAt: string | null
+  raw: unknown
+}
+
+/** Fetch all macros from Intercom (follows cursor pagination). */
+export async function listIntercomMacros(): Promise<IntercomMacro[]> {
+  if (!intercomToken) return []
+  const out: IntercomMacro[] = []
+  let startingAfter: string | null = null
+  // Hard page cap to avoid runaway loops if the cursor never terminates.
+  for (let page = 0; page < 50; page++) {
+    const url = new URL("https://api.intercom.io/macros")
+    url.searchParams.set("per_page", "50")
+    if (startingAfter) url.searchParams.set("starting_after", startingAfter)
+    const res = await fetchIntercom(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${intercomToken}`,
+        Accept: "application/json",
+        "Intercom-Version": "Unstable",
+      },
+    })
+    if (!res.ok) {
+      throw new Error(`Intercom macros fetch failed: ${res.status} ${await res.text().catch(() => "")}`)
+    }
+    const json = (await res.json()) as {
+      data?: Array<Record<string, unknown>>
+      pages?: { next?: { starting_after?: string } | null } | null
+    }
+    for (const m of json.data ?? []) {
+      const id = m.id
+      if (typeof id !== "string") continue
+      out.push({
+        intercomId: id,
+        name: typeof m.name === "string" ? m.name : "(untitled)",
+        body: typeof m.body === "string" ? m.body : "",
+        bodyText: typeof m.body_text === "string" ? m.body_text : null,
+        visibility: typeof m.visible_to === "string" ? m.visible_to : "everyone",
+        intercomUpdatedAt: toDate(m.updated_at),
+        raw: m,
+      })
+    }
+    const next = json.pages?.next?.starting_after
+    if (!next) break
+    startingAfter = next
+  }
+  return out
+}
+
+// --- Conversation state -----------------------------------------------------
+
+/** Close an Intercom conversation. Real write — only ever called behind an
+    explicit human click (see ADR-0011). Returns true on success. */
+export async function closeConversation(
+  conversationId: string,
+  adminId: string,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!intercomToken) return { ok: false, status: 500, error: "No Intercom token" }
+  const res = await fetchIntercom(
+    `https://api.intercom.io/conversations/${conversationId}/parts`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${intercomToken}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "Intercom-Version": "2.11",
+      },
+      body: JSON.stringify({
+        message_type: "close",
+        type: "admin",
+        admin_id: adminId,
+      }),
+    },
+  )
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await res.text().catch(() => "") }
+  }
+  return { ok: true, status: res.status }
+}

@@ -65,6 +65,7 @@ import { CaseInfoNode, type CaseInfoData } from "@/components/canvas/case-info-n
 import { DraftNode } from "@/components/canvas/draft-node"
 import { NotesNode } from "@/components/canvas/notes-node"
 import { AiNode } from "@/components/canvas/ai-node"
+import { MacrosNode } from "@/components/canvas/macros-node"
 import { QueueNode } from "@/components/canvas/queue-node"
 import { QueueSidebar } from "@/components/canvas/queue-sidebar"
 import {
@@ -106,6 +107,7 @@ const nodeTypes = {
   draft: DraftNode,
   notes: NotesNode,
   ai: AiNode,
+  macros: MacrosNode,
   queue: QueueNode,
   conversation: ConversationNode,
 }
@@ -205,8 +207,8 @@ function buildDefaultLayout(props: CaseCanvasProps): SavedLayout {
       id: "case-info",
       type: "case-info",
       position: { x: 0, y: 0 },
-      width: 300,
-      height: 230,
+      width: 320,
+      height: 460,
       data: props.caseInfo,
     })
     nodes.push({
@@ -228,6 +230,14 @@ function buildDefaultLayout(props: CaseCanvasProps): SavedLayout {
       width: 380,
       height: 180,
       data: { text: "" },
+    })
+    nodes.push({
+      id: "macros",
+      type: "macros",
+      position: { x: 0, y: 960 },
+      width: 380,
+      height: 320,
+      data: { conversationId: props.caseInfo.conversationId },
     })
     // Case copilot — open by default, knows the full ticket + playbooks
     nodes.push({
@@ -275,6 +285,12 @@ function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
               data: { conversationId: props.caseInfo.conversationId },
             }
           }
+          if (n.type === "macros" && props.caseInfo) {
+            return {
+              ...n,
+              data: { conversationId: props.caseInfo.conversationId },
+            }
+          }
           if (n.type === "draft" && props.caseInfo) {
             return {
               ...n,
@@ -299,6 +315,17 @@ function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
             width: 420,
             height: 560,
             data: props.conversation,
+          })
+        }
+        // Layouts saved before the Macros card existed: inject it
+        if (props.caseInfo && !nodes.some((n) => n.type === "macros")) {
+          nodes.push({
+            id: "macros",
+            type: "macros",
+            position: { x: 0, y: 960 },
+            width: 380,
+            height: 320,
+            data: { conversationId: props.caseInfo.conversationId },
           })
         }
         return { nodes: nodes as Node[], edges: saved.edges ?? [] }

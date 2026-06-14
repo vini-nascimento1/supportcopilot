@@ -12,9 +12,12 @@ export async function POST(req: NextRequest) {
     return new Response("Unauthorized", { status: 401 })
   }
 
-  const { conversationId, body } = (await req.json()) as {
+  const { conversationId, body, html } = (await req.json()) as {
     conversationId: string
     body: string
+    /** When true, body is already HTML (e.g. an Intercom macro) — send as-is
+        instead of converting markdown. */
+    html?: boolean
   }
 
   if (!conversationId || !body) {
@@ -38,8 +41,8 @@ export async function POST(req: NextRequest) {
     return new Response("No Intercom admin ID found for your account", { status: 400 })
   }
 
-  // Convert markdown to HTML for Intercom rendering
-  const htmlBody = mdToHtml(body)
+  // Macros arrive as HTML already; drafts are markdown and need conversion.
+  const htmlBody = html ? body : mdToHtml(body)
 
   // Send reply to Intercom
   const response = await fetch(`${INTERCOM_API}/conversations/${conversationId}/reply`, {
