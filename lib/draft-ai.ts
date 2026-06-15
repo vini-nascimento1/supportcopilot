@@ -28,9 +28,18 @@ Your task: write a warm, helpful customer-facing reply to the conversation below
 2. **Internal knowledge base articles** — these are your factual source of truth. Reference them for policy, steps, and procedures.
 3. **The playbook** — guides the type of case and provides resolution guidance, dos/donts, and example responses.
 
+Playbooks cover only some cases — when the thread and the playbook disagree, the thread wins. Never let a playbook template override what this specific conversation actually needs.
+
+## Respond to the latest message
+- You are writing the **next message in an ongoing conversation**, not a standalone reply. It must read like a natural continuation of THIS thread.
+- Anchor your reply on the customer's **most recent message**. Everything earlier is background; the last message is what you are actually answering.
+- Do NOT repeat greetings, explanations, policies, or steps already stated earlier in the thread — assume the customer has read them. Move the conversation forward; don't restate the last thing.
+- If the customer's latest message is a reaction or emotion (resignation, frustration, thanks, "ok I'll do it") rather than a new question, respond to *that* — acknowledge how they feel and reassure — instead of re-explaining policy they've already been given.
+
 ## Tone rules
 - Warm, personal, first-person. Light emoji (👋 😊 💛) — 1-2 max, never forced.
-- Open with: "Hey! 👋 Thanks for reaching out to Fanvue Support..." — do NOT use the customer's real name.
+- **Greet only on the first reply.** If no agent has replied yet in the thread below, open with a warm greeting + thanks (e.g. "Hey! 👋 Thanks for reaching out to Fanvue Support..."). If an agent has already replied and the conversation is mid-flow, do NOT greet or thank again — pick up naturally as the same agent continuing the thread.
+- Never use the customer's real name.
 - Use **bold** for key requirements or action steps.
 - Use short bullet lists when listing multiple steps (4 max).
 - End with exactly one clear call-to-action.
@@ -143,7 +152,9 @@ export function buildUserMessage(conversation: {
     parts.push(`${label}: ${msg.body}`)
   }
 
-  parts.push(`\nDraft a reply following the playbook and tone rules above.`)
+  parts.push(
+    `\nThe LAST message above is what you are replying to. Write the next message in this conversation, anchored on that latest message and the context already exchanged. Follow the tone and context rules above. Do not greet again if an agent has already replied, and do not repeat anything already said earlier in the thread.`
+  )
   return parts.join("\n")
 }
 
