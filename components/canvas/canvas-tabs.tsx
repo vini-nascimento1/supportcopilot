@@ -6,41 +6,12 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { PlusIcon, XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-
-interface CanvasTab {
-  /** conversation id, or "adhoc:<id>" for scratch canvases */
-  id: string
-  title: string
-}
-
-const TABS_KEY = "fv-canvas-tabs-v1"
-const TABS_EVENT = "fv-canvas-tabs-changed"
-
-function readRaw(): string {
-  try {
-    return localStorage.getItem(TABS_KEY) ?? "[]"
-  } catch {
-    return "[]"
-  }
-}
-
-function writeTabs(tabs: CanvasTab[]) {
-  try {
-    localStorage.setItem(TABS_KEY, JSON.stringify(tabs.slice(0, 12)))
-  } catch {
-    // ignore
-  }
-  window.dispatchEvent(new Event(TABS_EVENT))
-}
-
-function subscribe(cb: () => void) {
-  window.addEventListener(TABS_EVENT, cb)
-  window.addEventListener("storage", cb)
-  return () => {
-    window.removeEventListener(TABS_EVENT, cb)
-    window.removeEventListener("storage", cb)
-  }
-}
+import {
+  readTabsRaw,
+  subscribeTabs,
+  writeTabs,
+  type CanvasTab,
+} from "@/lib/canvas-tabs-store"
 
 function hrefFor(tab: CanvasTab): string {
   if (tab.id.startsWith("adhoc")) {
@@ -58,7 +29,7 @@ export function CanvasTabs({ current }: { current: CanvasTab }) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const raw = useSyncExternalStore(subscribe, readRaw, () => "[]")
+  const raw = useSyncExternalStore(subscribeTabs, readTabsRaw, () => "[]")
   const tabs = useMemo<CanvasTab[]>(() => {
     try {
       const parsed = JSON.parse(raw) as CanvasTab[]

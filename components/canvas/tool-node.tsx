@@ -24,6 +24,7 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { PinButton } from "@/components/canvas/pin-button"
+import { useCanvasActive } from "@/components/canvas/active-context"
 import { getCanvasHost } from "@/lib/canvas-host"
 import { hasBlockingOverlay } from "@/lib/canvas-overlay"
 import { ToolIcon } from "@/lib/tool-icons"
@@ -46,6 +47,11 @@ export type ToolNodeType = Node<ToolNodeData, "tool">
 // resize are all covered by one mechanism.
 export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
   const host = getCanvasHost()
+  // In the keep-alive workspace only the visible pane owns its native views.
+  // When a pane is hidden, active flips false and the effect below tears the
+  // webview down (reopened when the pane is shown again). This keeps a single
+  // pane's tools alive at a time — no id collisions, bounded memory.
+  const active = useCanvasActive()
   const bodyRef = useRef<HTMLDivElement>(null)
   const { deleteElements, updateNodeData } = useReactFlow()
   const store = useStoreApi()
@@ -76,7 +82,7 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
   const ghost = data.ghost === true
 
   useEffect(() => {
-    if (!host || ghost) return
+    if (!host || ghost || !active) return
     let raf = 0
     let lastKey = ""
     const unsubscribe = host.onToolEvent((event) => {
@@ -130,9 +136,10 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
       unsubscribe()
       host.closeTool(id)
     }
-    // host/id/url are stable for the lifetime of the node; ghost flips once
+    // host/id/url are stable for the lifetime of the node; ghost flips once,
+    // active flips when the pane is shown/hidden in the keep-alive workspace.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ghost])
+  }, [ghost, active])
 
   const handleClose = useCallback(() => {
     void deleteElements({ nodes: [{ id }] })

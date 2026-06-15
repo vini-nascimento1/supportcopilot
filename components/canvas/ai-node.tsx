@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { NodeResizer, type Node, type NodeProps } from "@xyflow/react"
+import { NodeResizer, useReactFlow, type Node, type NodeProps } from "@xyflow/react"
 import { BotIcon, CheckIcon, CopyIcon, Loader2Icon, SendIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -38,6 +38,10 @@ export type AiNodeData = {
   /** When set, the assistant is a copilot for THIS ticket: full conversation
       + matched playbooks in context (via /api/ai/case-chat). */
   conversationId?: string
+  /** Persisted transcript — written back into node data so the canvas layout
+      save (localStorage) restores it after a reload, not just across tab
+      switches. */
+  messages?: Message[]
 }
 
 export type AiNodeType = Node<AiNodeData, "ai">
@@ -46,11 +50,20 @@ export type AiNodeType = Node<AiNodeData, "ai">
 // open ticket and its playbooks ARE its context, so "summarise the case"
 // means this case. On ad-hoc canvases it falls back to the general assistant.
 export function AiNode({ id, data, selected }: NodeProps<AiNodeType>) {
-  const [messages, setMessages] = useState<Message[]>([])
+  const { updateNodeData } = useReactFlow()
+  // Seed from persisted data so a reload (or returning to a kept-alive pane)
+  // restores the transcript; thereafter local state is the source of truth and
+  // every change is mirrored back into node data via updateNodeData.
+  const [messages, setMessages] = useState<Message[]>(() => data.messages ?? [])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+
+  const persist = (next: Message[]) => {
+    setMessages(next)
+    updateNodeData(id, { messages: next })
+  }
 
   const send = async () => {
     const text = input.trim()
@@ -58,7 +71,7 @@ export function AiNode({ id, data, selected }: NodeProps<AiNodeType>) {
     setInput("")
     setError(null)
     const updated: Message[] = [...messages, { role: "user", content: text }]
-    setMessages(updated)
+    persist(updated)
     setLoading(true)
     try {
       const endpoint = data.conversationId ? "/api/ai/case-chat" : "/api/ai/chat"
@@ -74,10 +87,7 @@ export function AiNode({ id, data, selected }: NodeProps<AiNodeType>) {
       if (!res.ok) {
         setError(payload.error ?? "Something went wrong")
       } else {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: payload.message },
-        ])
+        persist([...updated, { role: "assistant", content: payload.message }])
       }
     } catch {
       setError("Network error. Check your connection.")

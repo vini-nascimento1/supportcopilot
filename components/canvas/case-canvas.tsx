@@ -60,11 +60,12 @@ import {
   suggestedTools,
   type CanvasTool,
 } from "@/lib/canvas-tools"
+import { CanvasActiveContext } from "@/components/canvas/active-context"
 import { ToolNode } from "@/components/canvas/tool-node"
 import { CaseInfoNode, type CaseInfoData } from "@/components/canvas/case-info-node"
 import { DraftNode } from "@/components/canvas/draft-node"
 import { NotesNode } from "@/components/canvas/notes-node"
-import { AiNode } from "@/components/canvas/ai-node"
+import { AiNode, type AiNodeData } from "@/components/canvas/ai-node"
 import { MacrosNode } from "@/components/canvas/macros-node"
 import { QueueNode } from "@/components/canvas/queue-node"
 import { QueueSidebar } from "@/components/canvas/queue-sidebar"
@@ -88,6 +89,14 @@ export interface CaseCanvasProps {
   tools?: CanvasTool[]
   /** Latest desktop build — shown on the browser gate */
   downloadUrl?: string
+  /** False when this canvas is a hidden pane in the keep-alive workspace.
+      Drives the active context so embedded tools pause while off-screen.
+      Defaults to true for the standalone route-per-canvas pages. */
+  active?: boolean
+  /** True when several canvases are mounted at once (workspace host). Then we
+      must NOT closeAllTools on unmount — that would kill the visible pane's
+      tools too; per-card teardown (gated on `active`) handles it instead. */
+  multiplexed?: boolean
 }
 
 // false during SSR/hydration, true once mounted on the client — lets us read
@@ -280,9 +289,14 @@ function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
             return { ...n, data: props.conversation }
           }
           if (n.type === "ai" && props.caseInfo) {
+            // Refresh the live conversationId, but keep the saved transcript so
+            // the copilot chat survives reloads.
             return {
               ...n,
-              data: { conversationId: props.caseInfo.conversationId },
+              data: {
+                conversationId: props.caseInfo.conversationId,
+                messages: (n.data as AiNodeData).messages,
+              },
             }
           }
           if (n.type === "macros" && props.caseInfo) {
@@ -364,6 +378,8 @@ function applyPins(layout: SavedLayout): { nodes: Node[]; edges: Edge[] } {
 
 function CanvasInner(props: CaseCanvasProps) {
   const host = getCanvasHost()
+  const active = props.active ?? true
+  const multiplexed = props.multiplexed ?? false
   const storageKey = STORAGE_PREFIX + props.storageKey
   const initial = useMemo(
     () => applyPins(loadLayout(storageKey, props)),
@@ -414,10 +430,25 @@ function CanvasInner(props: CaseCanvasProps) {
     }
   }, [nodes, edges, storageKey])
 
-  // Leaving the page must never strand native views over the UI
+  // Leaving the page must never strand native views over the UI. In the
+  // workspace host several canvases are mounted at once, so a blanket
+  // closeAllTools() on unmount would tear down the visible pane's tools too —
+  // there, per-card teardown (ToolNode, gated on `active`) does the cleanup.
   useEffect(() => {
+    if (multiplexed) return
     return () => getCanvasHost()?.closeAllTools()
-  }, [])
+  }, [multiplexed])
+
+  // Panes in the workspace mount hidden (zero-size), so the initial fitView
+  // runs against an empty box. Re-fit the first time this pane is actually
+  // shown; afterwards the user's pan/zoom is left untouched.
+  const fittedRef = useRef(false)
+  useEffect(() => {
+    if (!active || fittedRef.current) return
+    fittedRef.current = true
+    const t = setTimeout(() => fitView({ padding: 0.1 }), 60)
+    return () => clearTimeout(t)
+  }, [active, fitView])
 
   const onConnect = useCallback(
     (connection: Connection) =>
@@ -611,6 +642,7 @@ function CanvasInner(props: CaseCanvasProps) {
   }
 
   return (
+    <CanvasActiveContext.Provider value={active}>
     <div className="relative h-full w-full">
       <QueueSidebar />
 
@@ -795,6 +827,7 @@ function CanvasInner(props: CaseCanvasProps) {
         </ReactFlow>
       </div>
     </div>
+    </CanvasActiveContext.Provider>
   )
 }
 

@@ -18,6 +18,7 @@ import { getSignedInEmail } from "@/lib/auth"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getAllCaseTools } from "@/lib/case-tools-db"
 import { CaseToolsSettings } from "@/components/case-tools-settings"
+import { CanvasModeSettings } from "@/components/canvas-mode-settings"
 import { SettingsForm } from "./settings-form"
 
 export const dynamic = "force-dynamic"
@@ -164,6 +165,8 @@ export default async function SettingsPage({
         <SettingsForm email={email ?? ""} agent={agent ? { name: agent.name, timezone: agent.timezone, working_days: agent.working_days } : null} />
 
         <CaseToolsSettings tools={caseTools} />
+
+        <CanvasModeSettings />
 
         {/* Connected integrations */}
         <Card>

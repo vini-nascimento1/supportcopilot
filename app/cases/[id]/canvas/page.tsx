@@ -5,6 +5,7 @@ import { ArrowLeftIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CaseCanvas } from "@/components/canvas/case-canvas"
 import { CanvasTabs } from "@/components/canvas/canvas-tabs"
+import { CanvasModeGuard } from "@/components/canvas/canvas-mode-guard"
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
@@ -44,6 +45,7 @@ export default async function CaseCanvasPage({
 
   return (
     <div className="flex h-svh w-full flex-col">
+      <CanvasModeGuard workspaceId={id} />
       <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-background px-4">
         <Button variant="ghost" size="sm" asChild>
           <Link href={`/cases/${id}`}>

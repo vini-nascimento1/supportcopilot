@@ -4,6 +4,7 @@ import { redirect } from "next/navigation"
 import { WorkspaceLayout } from "@/components/workspace-layout"
 import { CanvasTabs } from "@/components/canvas/canvas-tabs"
 import { CaseCanvas } from "@/components/canvas/case-canvas"
+import { CanvasModeGuard } from "@/components/canvas/canvas-mode-guard"
 import { getCaseTools } from "@/lib/case-tools-db"
 import { getDesktopDownloadUrl } from "@/lib/desktop-download"
 
@@ -29,6 +30,7 @@ export default async function CanvasPage({
   return (
     <WorkspaceLayout>
       <div className="flex h-svh w-full flex-col">
+        <CanvasModeGuard workspaceId={`adhoc:${c}`} />
         <div className="flex h-10 shrink-0 items-center border-b px-3">
           <CanvasTabs current={{ id: `adhoc:${c}`, title: "Canvas" }} />
         </div>
