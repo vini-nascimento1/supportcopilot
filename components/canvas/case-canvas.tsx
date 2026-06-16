@@ -643,11 +643,17 @@ function CanvasInner(props: CaseCanvasProps) {
 
   return (
     <CanvasActiveContext.Provider value={active}>
-    <div className="relative h-full w-full">
+    {/* data-canvas-pane marks the safe region for native tool views — they're
+        clipped to it (minus the docked chrome below) so they never overlay the
+        sidebars or toolbox. See lib/canvas-bounds.ts. */}
+    <div data-canvas-pane className="relative h-full w-full">
       <QueueSidebar />
 
-      {/* Toolbox */}
-      <div className="absolute right-4 top-4 z-10 flex max-h-[calc(100%-6rem)] flex-col items-end gap-1.5">
+      {/* Toolbox — right-docked chrome; native tool views are clipped to its left edge */}
+      <div
+        data-canvas-chrome="right"
+        className="absolute right-4 top-4 z-10 flex max-h-[calc(100%-6rem)] flex-col items-end gap-1.5"
+      >
         <div className="flex items-center gap-1.5">
           <button
             onClick={toggleEdges}
@@ -804,12 +810,7 @@ function CanvasInner(props: CaseCanvasProps) {
         </DialogContent>
       </Dialog>
 
-      <div
-        className={cn(
-          "h-full w-full",
-          !edgesVisible && "[&_.react-flow__edges]:hidden",
-        )}
-      >
+      <div className={cn("h-full w-full", !edgesVisible && "canvas-edges-hidden")}>
         <ReactFlow
           nodes={nodes}
           edges={edges}

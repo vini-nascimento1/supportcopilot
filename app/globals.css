@@ -180,3 +180,11 @@
 .drag-handle {
   user-select: none;
 }
+
+/* ── canvas link-wires toggle ──────────────────────────────────
+   The toolbox NetworkIcon hides/shows React Flow edges. This can't be a
+   Tailwind arbitrary variant (`[&_.react-flow__edges]:hidden`) — v4 rewrites
+   the BEM "__" to a space, yielding the dead selector `.react-flow edges`. */
+.canvas-edges-hidden .react-flow__edges {
+  display: none;
+}

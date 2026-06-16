@@ -47,9 +47,12 @@ function subscribeCollapse(cb: () => void) {
 
 function readCollapsed(): string {
   try {
-    return localStorage.getItem(COLLAPSE_KEY) ?? "0"
+    // Collapsed by default — the canvas already shows the app sidebar, so
+    // opening the queue too would eat ~a third of the window. Agents open it
+    // when they want to work the queue; the choice then persists.
+    return localStorage.getItem(COLLAPSE_KEY) ?? "1"
   } catch {
-    return "0"
+    return "1"
   }
 }
 
@@ -70,9 +73,9 @@ export function QueueSidebar() {
     }
   })
 
-  // Collapse preference in localStorage (expanded by default)
+  // Collapse preference in localStorage (collapsed by default)
   const collapsed =
-    useSyncExternalStore(subscribeCollapse, readCollapsed, () => "0") === "1"
+    useSyncExternalStore(subscribeCollapse, readCollapsed, () => "1") === "1"
   const toggle = () => {
     try {
       localStorage.setItem(COLLAPSE_KEY, collapsed ? "0" : "1")
@@ -133,7 +136,10 @@ export function QueueSidebar() {
 
   if (collapsed) {
     return (
-      <div className="absolute left-0 top-0 z-10 flex h-full w-9 flex-col items-center gap-2 border-r bg-card/95 py-3 backdrop-blur">
+      <div
+        data-canvas-chrome="left"
+        className="absolute left-0 top-0 z-10 flex h-full w-9 flex-col items-center gap-2 border-r bg-card/95 py-3 backdrop-blur"
+      >
         <button
           onClick={toggle}
           title="Open the case queue"
@@ -150,7 +156,10 @@ export function QueueSidebar() {
   }
 
   return (
-    <div className="absolute left-0 top-0 z-10 flex h-full w-64 flex-col border-r bg-card/95 backdrop-blur">
+    <div
+      data-canvas-chrome="left"
+      className="absolute left-0 top-0 z-10 flex h-full w-64 flex-col border-r bg-card/95 backdrop-blur"
+    >
       <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
         <InboxIcon className="size-4 text-muted-foreground" />
         <span className="text-xs font-medium">Case queue</span>

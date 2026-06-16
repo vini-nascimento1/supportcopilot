@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button"
 import { PinButton } from "@/components/canvas/pin-button"
 import { useCanvasActive } from "@/components/canvas/active-context"
 import { getCanvasHost } from "@/lib/canvas-host"
+import { clipToolBounds } from "@/lib/canvas-bounds"
 import { hasBlockingOverlay } from "@/lib/canvas-overlay"
 import { ToolIcon } from "@/lib/tool-icons"
 import { cn } from "@/lib/utils"
@@ -98,31 +99,26 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
     const tick = () => {
       const el = bodyRef.current
       if (el) {
-        const r = el.getBoundingClientRect()
         const zoom = store.getState().transform[2]
-        const hidden =
-          minimizedRef.current ||
-          r.width < 60 ||
-          r.height < 60 ||
-          hasBlockingOverlay()
-        const key = hidden
-          ? "hidden"
-          : `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)},${zoom.toFixed(2)}`
+        // Clip the view to the canvas area minus the chrome, so a native
+        // WebContentsView never paints over the sidebars or toolbox (it can't
+        // respect their z-index). null → the card is fully occluded; hide it.
+        const bounds =
+          minimizedRef.current || hasBlockingOverlay()
+            ? null
+            : clipToolBounds(
+                el.getBoundingClientRect(),
+                el.closest("[data-canvas-pane]"),
+              )
+        const key = bounds
+          ? `${bounds.x},${bounds.y},${bounds.width},${bounds.height},${zoom.toFixed(2)}`
+          : "hidden"
         if (key !== lastKey) {
           lastKey = key
-          if (hidden) {
+          if (!bounds) {
             host.setToolVisible(id, false)
           } else {
-            host.setToolBounds(
-              id,
-              {
-                x: Math.round(r.x),
-                y: Math.round(r.y),
-                width: Math.round(r.width),
-                height: Math.round(r.height),
-              },
-              zoom,
-            )
+            host.setToolBounds(id, bounds, zoom)
             host.setToolVisible(id, true)
           }
         }
