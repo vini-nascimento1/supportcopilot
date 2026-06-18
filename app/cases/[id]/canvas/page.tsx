@@ -8,6 +8,10 @@ import { CanvasTabs } from "@/components/canvas/canvas-tabs"
 import { CanvasModeGuard } from "@/components/canvas/canvas-mode-guard"
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
+import {
+  classifyPlaybookMatch,
+  GATE_CONFIDENCE_THRESHOLD,
+} from "@/lib/playbook-gate"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
 import { getCaseTools } from "@/lib/case-tools-db"
 import { getDesktopDownloadUrl } from "@/lib/desktop-download"
@@ -41,7 +45,16 @@ export default async function CaseCanvasPage({
   ]
     .filter(Boolean)
     .join(" ")
-  const topMatch = getTopMatches(searchText, playbooksData.allRows, 1)[0]
+  const gate = await classifyPlaybookMatch(searchText, playbooksData.allRows)
+
+  // On a Verboo error, degrade to the legacy keyword matcher so behaviour
+  // never regresses; otherwise honour the confidence threshold.
+  const matched =
+    gate.reason === "error"
+      ? getTopMatches(searchText, playbooksData.allRows, 1)[0]?.playbook ?? null
+      : gate.playbookId && gate.confidence >= GATE_CONFIDENCE_THRESHOLD
+        ? playbooksData.allRows.find((p) => p.id === gate.playbookId) ?? null
+        : null
 
   return (
     <div className="flex h-svh w-full flex-col">
@@ -76,8 +89,8 @@ export default async function CaseCanvasPage({
             subject: conversation.subject,
             messages: conversation.messages,
           }}
-          playbookId={topMatch?.playbook.id}
-          playbookName={topMatch?.playbook.caseType}
+          playbookId={matched?.id}
+          playbookName={matched?.caseType}
         />
       </div>
     </div>
