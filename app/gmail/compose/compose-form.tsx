@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { PaperclipIcon, SendIcon, XIcon } from "lucide-react"
+import { AtSignIcon, PaperclipIcon, SendIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,10 +15,13 @@ type SelectedFile = {
   id: string
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 export default function ComposeForm() {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [to, setTo] = useState("")
+  const [toChips, setToChips] = useState<string[]>([])
+  const [pendingTo, setPendingTo] = useState("")
   const [subject, setSubject] = useState("")
   const [body, setBody] = useState("")
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([])
@@ -43,6 +46,46 @@ export default function ComposeForm() {
     setSelectedFiles((prev) => prev.filter((f) => f.id !== id))
   }
 
+  function commitTo(raw: string): boolean {
+    const candidate = raw.trim().replace(/,+$/, "").trim()
+    if (!candidate) return false
+    if (!EMAIL_RE.test(candidate)) return false
+    setToChips((prev) =>
+      prev.some((e) => e.toLowerCase() === candidate.toLowerCase()) ? prev : [...prev, candidate]
+    )
+    return true
+  }
+
+  function removeToChip(email: string) {
+    setToChips((prev) => prev.filter((e) => e !== email))
+  }
+
+  function handleToKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault()
+      if (commitTo(pendingTo)) setPendingTo("")
+    } else if (e.key === "Backspace" && !pendingTo && toChips.length > 0) {
+      setToChips((prev) => prev.slice(0, -1))
+    }
+  }
+
+  function handleToPaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text")
+    if (!/[\s,;]/.test(text)) return
+    e.preventDefault()
+    const parts = text.split(/[\s,;]+/).map((p) => p.trim()).filter(Boolean)
+    setToChips((prev) => {
+      const next = [...prev]
+      for (const p of parts) {
+        if (EMAIL_RE.test(p) && !next.some((x) => x.toLowerCase() === p.toLowerCase())) {
+          next.push(p)
+        }
+      }
+      return next
+    })
+    setPendingTo("")
+  }
+
   function formatSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -50,7 +93,19 @@ export default function ComposeForm() {
   }
 
   async function handleSend() {
-    if (!to.trim() || !subject.trim() || !body.trim()) return
+    let finalTo = toChips
+    const pending = pendingTo.trim().replace(/,+$/, "").trim()
+    if (pending) {
+      if (EMAIL_RE.test(pending) && !finalTo.some((e) => e.toLowerCase() === pending.toLowerCase())) {
+        finalTo = [...finalTo, pending]
+      }
+      setToChips(finalTo)
+      setPendingTo("")
+    }
+
+    if (finalTo.length === 0 || !subject.trim() || !body.trim()) return
+    const toJoined = finalTo.join(", ")
+
     setStatus("sending")
     setError("")
 
@@ -61,7 +116,7 @@ export default function ComposeForm() {
       if (hasFiles) {
         // Send as FormData when there are attachments
         const formData = new FormData()
-        formData.append("to", to.trim())
+        formData.append("to", toJoined)
         formData.append("subject", subject.trim())
         formData.append("body", body.trim())
         for (const sf of selectedFiles) {
@@ -72,7 +127,7 @@ export default function ComposeForm() {
         res = await fetch("/api/gmail/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ to: to.trim(), subject: subject.trim(), body: body.trim() }),
+          body: JSON.stringify({ to: toJoined, subject: subject.trim(), body: body.trim() }),
         })
       }
 
@@ -105,15 +160,36 @@ export default function ComposeForm() {
   return (
     <main className="flex flex-col gap-4 p-4 lg:p-6">
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="to">To</Label>
-        <Input
-          id="to"
-          type="email"
-          placeholder="recipient@example.com"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          disabled={status === "sending"}
-        />
+        <Label>To</Label>
+        <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1.5 focus-within:ring-1 focus-within:ring-ring">
+          {toChips.map((email) => (
+            <span
+              key={email}
+              className="flex items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-0.5 text-xs"
+            >
+              <AtSignIcon className="size-3 shrink-0 text-muted-foreground" />
+              <span className="max-w-48 truncate">{email}</span>
+              <button
+                type="button"
+                onClick={() => removeToChip(email)}
+                className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                disabled={status === "sending"}
+              >
+                <XIcon className="size-3" />
+              </button>
+            </span>
+          ))}
+          <input
+            value={pendingTo}
+            onChange={(e) => setPendingTo(e.target.value)}
+            onKeyDown={handleToKeyDown}
+            onPaste={handleToPaste}
+            onBlur={() => { if (pendingTo.trim() && commitTo(pendingTo)) setPendingTo("") }}
+            placeholder={toChips.length === 0 ? "recipient@example.com" : "Add another…"}
+            disabled={status === "sending"}
+            className="min-w-40 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          />
+        </div>
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -199,7 +275,7 @@ export default function ComposeForm() {
       <div className="flex justify-end">
         <Button
           onClick={handleSend}
-          disabled={!to.trim() || !subject.trim() || !body.trim() || status === "sending"}
+          disabled={(toChips.length === 0 && !pendingTo.trim()) || !subject.trim() || !body.trim() || status === "sending"}
         >
           <SendIcon className="size-4" />
           {status === "sending" ? "Sending…" : "Send"}

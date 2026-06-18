@@ -32,10 +32,32 @@ type Template = {
   body: string
 }
 
-function fillPlaceholders(text: string, userEmail: string, agentName: string): string {
-  return text
-    .replace(/\{\{useremail\}\}/gi, userEmail)
-    .replace(/\{\{agentname\}\}/gi, agentName)
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function isValidEmail(email: string): boolean {
+  return EMAIL_RE.test(email.trim())
+}
+
+// Context-aware placeholder fill for {{useremail}} / {{agentname}}.
+// - Subject:        comma-joined (stays on one line)
+// - Body, 1 email:  inline (identical to the original single-user behavior)
+// - Body, 2+ emails: newline bulleted list, with spaces adjacent to the token trimmed
+//                    so surrounding prose flows cleanly around the block.
+function fillPlaceholders(
+  text: string,
+  emails: string[],
+  agentName: string,
+  mode: "subject" | "body"
+): string {
+  const withAgent = text.replace(/\{\{agentname\}\}/gi, agentName)
+
+  if (mode === "subject" || emails.length <= 1) {
+    const value = mode === "subject" ? emails.join(", ") : (emails[0] ?? "")
+    return withAgent.replace(/\{\{useremail\}\}/gi, value)
+  }
+
+  const list = emails.map((e) => `- ${e}`).join("\n")
+  return withAgent.replace(/[ \t]*\{\{useremail\}\}[ \t]*/gi, `\n${list}\n`)
 }
 
 export default function QuickSendPage({ agentName }: { agentName: string | null }) {
@@ -45,7 +67,8 @@ export default function QuickSendPage({ agentName }: { agentName: string | null 
   const [loading, setLoading] = useState(true)
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
-  const [userEmail, setUserEmail] = useState("")
+  const [emails, setEmails] = useState<string[]>([])
+  const [pendingEmail, setPendingEmail] = useState("")
   const [recipient, setRecipient] = useState("")
   const [cc, setCc] = useState("")
   const [subject, setSubject] = useState("")
@@ -69,6 +92,50 @@ export default function QuickSendPage({ agentName }: { agentName: string | null 
 
   function removeFile(id: string) {
     setSelectedFiles((prev) => prev.filter((f) => f.id !== id))
+  }
+
+  // Commit a single typed email to a chip. Returns true when the input can be cleared.
+  function commitEmail(raw: string): boolean {
+    const candidate = raw.trim().replace(/,+$/, "").trim()
+    if (!candidate) return false
+    if (!isValidEmail(candidate)) {
+      toast.error(`"${candidate}" is not a valid email`)
+      return false
+    }
+    setEmails((prev) =>
+      prev.some((e) => e.toLowerCase() === candidate.toLowerCase()) ? prev : [...prev, candidate]
+    )
+    return true
+  }
+
+  function removeEmail(email: string) {
+    setEmails((prev) => prev.filter((e) => e !== email))
+  }
+
+  function handleEmailKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault()
+      if (commitEmail(pendingEmail)) setPendingEmail("")
+    } else if (e.key === "Backspace" && !pendingEmail && emails.length > 0) {
+      setEmails((prev) => prev.slice(0, -1))
+    }
+  }
+
+  function handleEmailPaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text")
+    if (!/[\s,;]/.test(text)) return // single token — let normal typing handle it
+    e.preventDefault()
+    const parts = text.split(/[\s,;]+/).map((p) => p.trim()).filter(Boolean)
+    setEmails((prev) => {
+      const next = [...prev]
+      for (const p of parts) {
+        if (isValidEmail(p) && !next.some((x) => x.toLowerCase() === p.toLowerCase())) {
+          next.push(p)
+        }
+      }
+      return next
+    })
+    setPendingEmail("")
   }
 
   function formatSize(bytes: number): string {
@@ -102,17 +169,33 @@ export default function QuickSendPage({ agentName }: { agentName: string | null 
     setBody(t.body)
   }
 
-  function getPreviewText(text: string): string {
-    return fillPlaceholders(text, userEmail || "{{useremail}}", agentName || "{{agentname}}")
+  function getPreviewText(text: string, mode: "subject" | "body"): string {
+    const previewEmails = emails.length > 0 ? emails : ["{{useremail}}"]
+    return fillPlaceholders(text, previewEmails, agentName || "{{agentname}}", mode)
   }
 
   async function handleSend() {
+    // Auto-commit any text still sitting in the input as a final chip.
+    let finalEmails = emails
+    const pending = pendingEmail.trim().replace(/,+$/, "").trim()
+    if (pending) {
+      if (!isValidEmail(pending)) {
+        toast.error(`"${pending}" is not a valid email`)
+        return
+      }
+      if (!finalEmails.some((e) => e.toLowerCase() === pending.toLowerCase())) {
+        finalEmails = [...finalEmails, pending]
+      }
+      setEmails(finalEmails)
+      setPendingEmail("")
+    }
+
     if (!recipient || !subject || !body) {
       toast.error("Please fill in all fields")
       return
     }
-    if (!userEmail) {
-      toast.error("Please enter the customer email")
+    if (finalEmails.length === 0) {
+      toast.error("Please add at least one customer email")
       return
     }
 
@@ -120,8 +203,9 @@ export default function QuickSendPage({ agentName }: { agentName: string | null 
     try {
       const template = templates.find((t) => t.id === selectedTemplateId)
 
-      const resolvedSubject = fillPlaceholders(subject, userEmail, agentName ?? "")
-      const resolvedBody = fillPlaceholders(body, userEmail, agentName ?? "")
+      const resolvedSubject = fillPlaceholders(subject, finalEmails, agentName ?? "", "subject")
+      const resolvedBody = fillPlaceholders(body, finalEmails, agentName ?? "", "body")
+      const trackedEmails = finalEmails.join(", ")
 
       const hasFiles = selectedFiles.length > 0
 
@@ -145,7 +229,7 @@ export default function QuickSendPage({ agentName }: { agentName: string | null 
             templateName: template?.name ?? "Manual",
             recipient,
             cc: cc || undefined,
-            userEmail,
+            userEmail: trackedEmails,
             subject: resolvedSubject,
             body: resolvedBody,
             visibility,
@@ -168,7 +252,7 @@ export default function QuickSendPage({ agentName }: { agentName: string | null 
             templateName: template?.name ?? "Manual",
             recipient,
             cc: cc || undefined,
-            userEmail,
+            userEmail: trackedEmails,
             subject: resolvedSubject,
             body: resolvedBody,
             visibility,
@@ -193,13 +277,13 @@ export default function QuickSendPage({ agentName }: { agentName: string | null 
         <span className="text-4xl">✓</span>
         <p className="font-medium">Email sent!</p>
         <p className="text-sm text-muted-foreground">
-          To: {recipient} &middot; User: {userEmail}
+          To: {recipient} &middot; {emails.length > 1 ? "Users" : "User"}: {emails.join(", ")}
         </p>
         <div className="flex gap-2 mt-2">
           <Button variant="outline" size="sm" onClick={() => router.push("/gmail/sent")}>
             View sent tracker
           </Button>
-          <Button size="sm" onClick={() => { setSent(false); setSelectedTemplateId(""); setUserEmail(""); setRecipient(""); setCc(""); setSubject(""); setBody(""); setSelectedFiles([]); setVisibility("private") }}>
+          <Button size="sm" onClick={() => { setSent(false); setSelectedTemplateId(""); setEmails([]); setPendingEmail(""); setRecipient(""); setCc(""); setSubject(""); setBody(""); setSelectedFiles([]); setVisibility("private") }}>
             Send another
           </Button>
         </div>
@@ -247,16 +331,39 @@ export default function QuickSendPage({ agentName }: { agentName: string | null 
 
           {selectedTemplateId && (
             <>
-              {/* User Email */}
+              {/* Customer Emails */}
               <div>
-                <Label>Customer Email</Label>
-                <Input
-                  value={userEmail}
-                  onChange={(e) => setUserEmail(e.target.value)}
-                  placeholder="user@example.com"
-                />
+                <Label>Customer Emails</Label>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1.5 focus-within:ring-1 focus-within:ring-ring">
+                  {emails.map((email) => (
+                    <span
+                      key={email}
+                      className="flex items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-0.5 text-xs"
+                    >
+                      <AtSignIcon className="size-3 shrink-0 text-muted-foreground" />
+                      <span className="max-w-48 truncate">{email}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeEmail(email)}
+                        className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        disabled={sending}
+                      >
+                        <XIcon className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    value={pendingEmail}
+                    onChange={(e) => setPendingEmail(e.target.value)}
+                    onKeyDown={handleEmailKeyDown}
+                    onPaste={handleEmailPaste}
+                    onBlur={() => { if (pendingEmail.trim() && commitEmail(pendingEmail)) setPendingEmail("") }}
+                    placeholder={emails.length === 0 ? "user@example.com" : "Add another…"}
+                    className="min-w-32 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  />
+                </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {"{{useremail}}"} is replaced with the email above; {"{{agentname}}"} with your name
+                  Press Enter or comma to add each email. {"{{useremail}}"} expands to all of them — a bulleted list when you add more than one; {"{{agentname}}"} → your name
                 </p>
               </div>
 
@@ -395,16 +502,16 @@ export default function QuickSendPage({ agentName }: { agentName: string | null 
                   <div className="mt-2 rounded-md border bg-muted p-3 text-sm">
                     <p><strong>To:</strong> {recipient}</p>
                     {cc && <p><strong>CC:</strong> {cc}</p>}
-                    <p><strong>Subject:</strong> {getPreviewText(subject)}</p>
+                    <p><strong>Subject:</strong> {getPreviewText(subject, "subject")}</p>
                     <pre className="mt-2 whitespace-pre-wrap font-sans text-muted-foreground">
-                      {getPreviewText(body)}
+                      {getPreviewText(body, "body")}
                     </pre>
                   </div>
                 )}
               </div>
 
               {/* Send */}
-              <Button onClick={handleSend} disabled={sending || !userEmail}>
+              <Button onClick={handleSend} disabled={sending || (emails.length === 0 && !pendingEmail.trim())}>
                 <SendIcon className="mr-2 size-4" />
                 {sending ? "Sending..." : "Send Email"}
               </Button>
