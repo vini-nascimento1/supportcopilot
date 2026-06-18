@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest"
 
-import { buildNotionAwareSystemPrompt, buildSystemPrompt } from "./draft-ai"
+import {
+  buildMacroAdaptSystemPrompt,
+  buildNotionAwareSystemPrompt,
+  buildSystemPrompt,
+} from "./draft-ai"
 import type { NotionSnippet } from "./notion-retrieval"
 
 const snippet = (over: Partial<NotionSnippet>): NotionSnippet => ({
@@ -60,5 +64,36 @@ describe("buildNotionAwareSystemPrompt", () => {
     const out = buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])
     expect(out).toContain("support copilot for Vini")
     expect(out.length).toBeGreaterThan(buildSystemPrompt(undefined, [], "Vini", []).length)
+  })
+})
+
+describe("buildMacroAdaptSystemPrompt", () => {
+  const macroText =
+    "Hey! To enable payouts you need to complete KYC verification in your dashboard under Settings → Payouts."
+
+  it("embeds the macro text under an 'Approved macro to adapt' heading", () => {
+    const out = buildMacroAdaptSystemPrompt(macroText, "Vini")
+    expect(out).toContain("## Approved macro to adapt")
+    expect(out).toContain(macroText)
+  })
+
+  it("includes the agent name", () => {
+    const out = buildMacroAdaptSystemPrompt(macroText, "Vini")
+    expect(out).toContain("Vini")
+  })
+
+  it("instructs the model to adapt the macro to this case", () => {
+    const out = buildMacroAdaptSystemPrompt(macroText, "Vini")
+    expect(out.toLowerCase()).toContain("adapt")
+  })
+
+  it("instructs the model not to invent policy", () => {
+    const out = buildMacroAdaptSystemPrompt(macroText, "Vini")
+    expect(out.toLowerCase()).toContain("do not invent")
+  })
+
+  it("asks for the customer-facing message only", () => {
+    const out = buildMacroAdaptSystemPrompt(macroText, "Vini")
+    expect(out.toLowerCase()).toContain("output only the customer-facing message")
   })
 })
