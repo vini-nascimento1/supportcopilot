@@ -99,7 +99,9 @@ export async function classifyPlaybookMatch(
       },
       body: JSON.stringify({
         model: "deepseek-v4-flash",
-        max_tokens: 200,
+        // 512, not 200: a smoke test showed 200 truncated the JSON verdict
+        // mid-"reason", which then parses as unparseable → a real match dropped.
+        max_tokens: 512,
         temperature: 0,
         stream: false,
         messages: buildGatePrompt(caseText, playbooks),
