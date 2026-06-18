@@ -1,5 +1,6 @@
 import type { IntercomArticle } from "@/lib/intercom"
 import type { PlaybookListItem, ResponseItem } from "@/lib/playbooks"
+import type { NotionSnippet } from "@/lib/notion-retrieval"
 
 export type OpenAIMessage = {
   role: "system" | "user" | "assistant"
@@ -131,6 +132,50 @@ The Slack thread above contains internal team discussion. When writing the custo
 - Maintain the same warm, first-person tone from the main prompt.`
 
   return base + slackSection
+}
+
+// ── Notion-aware system prompt builder ─────────────────────────────────────
+// Used for the "tail" (no confident playbook): grounds the draft in fresh
+// Notion retrieval (lib/notion-retrieval) while firewalling connector/internal
+// content out of the customer-facing text. See spec D10. Mirrors the
+// Slack-aware builder above.
+
+export function buildNotionAwareSystemPrompt(
+  playbook: PlaybookListItem | undefined,
+  examples: ResponseItem[],
+  agentName: string,
+  articles: IntercomArticle[],
+  notionSnippets: NotionSnippet[]
+): string {
+  const base = buildSystemPrompt(playbook, examples, agentName, articles)
+  if (notionSnippets.length === 0) return base
+
+  const citable = notionSnippets.filter((s) => !s.isInternalSource)
+  const internal = notionSnippets.filter((s) => s.isInternalSource)
+
+  const sections: string[] = [`\n\n## Fresh knowledge from Notion (retrieved for this case)`]
+
+  if (citable.length > 0) {
+    const lines = citable.map((s, i) => `[${i + 1}] ${s.title}: ${s.text}`)
+    sections.push(
+      `### Support knowledge — you MAY ground your reply on this (paraphrase, never paste)\n${lines.join("\n")}`
+    )
+  }
+
+  if (internal.length > 0) {
+    const lines = internal.map((s) => `- (${s.source}) ${s.title}: ${s.text}`)
+    sections.push(
+      `### Internal context — DO NOT quote or reveal to the customer\nThese come from internal/connected sources (Slack, Drive, Linear, etc.). Use them ONLY to reason about what is true and what to do internally — never repeat them to the customer.\n${lines.join("\n")}`
+    )
+  }
+
+  sections.push(`## Firewall rules for the Notion knowledge above
+- The customer-facing reply must be **your own paraphrase** in Fanvue tone — never paste a snippet verbatim.
+- Ground the reply only on the **Support knowledge** items, the knowledge base articles, and the playbook. Treat the **Internal context** items as background reasoning only.
+- Never reveal: internal plans/roadmap, other users' data or flags, Slack channel names, staff names, document names, system/tool names, or that any internal source exists.
+- If the only relevant information is in the Internal context, do not invent a customer answer — acknowledge warmly and ask one focused clarifying question, or hold the policy line.`)
+
+  return base + sections.join("\n\n")
 }
 
 // ── User message builder ───────────────────────────────────────────────────
