@@ -17,6 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { CanvasLink } from "@/components/canvas/canvas-link"
 import { parseSteps } from "@/lib/parse-steps"
 import { CaseSidebar } from "@/components/case-sidebar"
 import { PlaybookCard } from "@/components/playbook-card"
@@ -118,10 +119,10 @@ export default async function CasePage({
           {conversation.state}
         </Badge>
         <Button size="sm" variant="outline" asChild>
-          <Link href={`/cases/${id}/canvas`}>
+          <CanvasLink conversationId={id}>
             <LayoutDashboardIcon className="size-3.5" />
             Open in canvas
-          </Link>
+          </CanvasLink>
         </Button>
         {conversation.intercomUrl && (
           <Button size="sm" variant="outline" asChild>

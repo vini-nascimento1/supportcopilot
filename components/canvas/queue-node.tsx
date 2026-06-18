@@ -6,7 +6,9 @@ import { NodeResizer, type Node, type NodeProps } from "@xyflow/react"
 import { InboxIcon, Loader2Icon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { relativeTime } from "@/lib/utils"
+import { useCanvasNav } from "@/components/canvas/canvas-nav"
+import { onCanvasRefresh } from "@/lib/canvas-refresh"
+import { cn, relativeTime } from "@/lib/utils"
 
 interface QueueRow {
   id: string
@@ -27,6 +29,7 @@ export type QueueNodeType = Node<QueueNodeData, "queue">
 export function QueueNode({ selected }: NodeProps<QueueNodeType>) {
   const [rows, setRows] = useState<QueueRow[] | null>(null)
   const [error, setError] = useState(false)
+  const nav = useCanvasNav()
 
   useEffect(() => {
     let cancelled = false
@@ -44,9 +47,11 @@ export function QueueNode({ selected }: NodeProps<QueueNodeType>) {
     }
     void load()
     const id = setInterval(load, 30_000)
+    const off = onCanvasRefresh(() => void load())
     return () => {
       cancelled = true
       clearInterval(id)
+      off()
     }
   }, [])
 
@@ -73,30 +78,50 @@ export function QueueNode({ selected }: NodeProps<QueueNodeType>) {
             {error ? "Couldn't load the queue." : "Queue is clear."}
           </p>
         )}
-        {rows?.map((row) => (
-          <Link
-            key={row.id}
-            href={`/cases/${row.id}/canvas`}
-            className="flex flex-col gap-0.5 border-b px-3 py-2 last:border-0 hover:bg-muted/50"
-          >
-            <span className="flex items-center gap-2">
-              <span className="truncate text-xs font-medium">{row.customer}</span>
-              {row.updatedAt && (
-                <span
-                  className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground"
-                  title={new Date(row.updatedAt).toLocaleString("en-GB", {
-                    timeZone: "Europe/London",
-                  })}
-                >
-                  {relativeTime(row.updatedAt)}
-                </span>
+        {rows?.map((row) => {
+          const inner = (
+            <>
+              <span className="flex items-center gap-2">
+                <span className="truncate text-xs font-medium">{row.customer}</span>
+                {row.updatedAt && (
+                  <span
+                    className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                    title={new Date(row.updatedAt).toLocaleString("en-GB", {
+                      timeZone: "Europe/London",
+                    })}
+                  >
+                    {relativeTime(row.updatedAt)}
+                  </span>
+                )}
+              </span>
+              <span className="truncate text-[11px] text-muted-foreground">
+                {row.snippet}
+              </span>
+            </>
+          )
+          const cls =
+            "flex flex-col gap-0.5 border-b px-3 py-2 last:border-0 hover:bg-muted/50"
+          // Inside the keep-alive workspace, switch tabs client-side; otherwise
+          // fall back to navigating to the route-per-canvas page.
+          return nav ? (
+            <button
+              key={row.id}
+              type="button"
+              onClick={() => nav.open(row.id)}
+              className={cn(
+                cls,
+                "w-full text-left",
+                nav.activeId === row.id && "bg-muted",
               )}
-            </span>
-            <span className="truncate text-[11px] text-muted-foreground">
-              {row.snippet}
-            </span>
-          </Link>
-        ))}
+            >
+              {inner}
+            </button>
+          ) : (
+            <Link key={row.id} href={`/cases/${row.id}/canvas`} className={cls}>
+              {inner}
+            </Link>
+          )
+        })}
       </div>
     </div>
   )

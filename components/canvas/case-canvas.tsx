@@ -31,6 +31,7 @@ import {
   MonitorIcon,
   NetworkIcon,
   PlusIcon,
+  RefreshCwIcon,
   StickyNoteIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -54,6 +55,7 @@ import { ToolIcon } from "@/lib/tool-icons"
 import { cn } from "@/lib/utils"
 import { getCanvasHost } from "@/lib/canvas-host"
 import { getPins } from "@/lib/canvas-pins"
+import { broadcastCanvasRefresh } from "@/lib/canvas-refresh"
 import {
   FALLBACK_TOOLS,
   resolveToolUrl,
@@ -606,6 +608,60 @@ function CanvasInner(props: CaseCanvasProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey, setNodes, setEdges, fitView])
 
+  // Live refresh — the conversation/case-info cards are seeded once at mount
+  // (loadLayout) and don't follow props, so a reopened or closed ticket would
+  // otherwise stay stale. Re-fetch the thread and patch just those two cards,
+  // preserving the agent's saved overrides and all other cards' state.
+  const conversationId = props.caseInfo?.conversationId
+  const [refreshing, setRefreshing] = useState(false)
+  const refreshConversation = useCallback(async () => {
+    if (!conversationId) return
+    const res = await fetch(
+      `/api/canvas/conversation?id=${encodeURIComponent(conversationId)}`,
+    )
+    if (!res.ok) throw new Error(`Refresh failed (${res.status})`)
+    const fresh = (await res.json()) as {
+      caseInfo: CaseInfoData
+      conversation: ConversationData
+    }
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.id === "conversation") return { ...n, data: fresh.conversation }
+        if (n.id === "case-info") {
+          const overrides = (n.data as Partial<CaseInfoData>)?.overrides
+          return { ...n, data: { ...fresh.caseInfo, overrides } }
+        }
+        return n
+      }),
+    )
+  }, [conversationId, setNodes])
+
+  const manualRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await refreshConversation()
+      broadcastCanvasRefresh() // also nudge the live queue cards
+    } catch {
+      toast.error("Couldn't refresh — try again in a moment")
+    } finally {
+      setRefreshing(false)
+    }
+  }, [refreshConversation])
+
+  // Auto-refresh while this pane is on screen (~30s), and immediately when a
+  // backgrounded workspace pane is brought back to the foreground (it may have
+  // gone stale while another ticket was worked). The first foreground after
+  // mount is already fresh from the server, so it's skipped.
+  const prevActive = useRef(active)
+  useEffect(() => {
+    if (!conversationId) return
+    if (active && !prevActive.current) void refreshConversation().catch(() => {})
+    prevActive.current = active
+    if (!active) return
+    const t = setInterval(() => void refreshConversation().catch(() => {}), 30_000)
+    return () => clearInterval(t)
+  }, [active, conversationId, refreshConversation])
+
   const mounted = useMounted()
   // The canvas is a desktop-only feature: embedded tools need the Electron
   // shell. In a regular browser, gate it behind the download link.
@@ -655,6 +711,16 @@ function CanvasInner(props: CaseCanvasProps) {
         className="absolute right-4 top-4 z-10 flex max-h-[calc(100%-6rem)] flex-col items-end gap-1.5"
       >
         <div className="flex items-center gap-1.5">
+          {conversationId && (
+            <button
+              onClick={() => void manualRefresh()}
+              disabled={refreshing}
+              title="Refresh conversation & queue"
+              className="flex size-6 items-center justify-center rounded-md border bg-card/95 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground disabled:opacity-50"
+            >
+              <RefreshCwIcon className={cn("size-3.5", refreshing && "animate-spin")} />
+            </button>
+          )}
           <button
             onClick={toggleEdges}
             title={edgesVisible ? "Hide link wires" : "Show link wires"}

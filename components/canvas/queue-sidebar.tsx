@@ -18,6 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useCanvasNav } from "@/components/canvas/canvas-nav"
+import { onCanvasRefresh } from "@/lib/canvas-refresh"
 import { cn, relativeTime } from "@/lib/utils"
 
 interface QueueRow {
@@ -61,6 +63,7 @@ function readCollapsed(): string {
 // can be worked without leaving canvas mode.
 export function QueueSidebar() {
   const pathname = usePathname()
+  const nav = useCanvasNav()
   const [rows, setRows] = useState<QueueRow[] | null>(null)
   const [error, setError] = useState(false)
   const [teammates, setTeammates] = useState<TeammateOption[]>([])
@@ -118,9 +121,11 @@ export function QueueSidebar() {
     }
     void load()
     const id = setInterval(load, 30_000)
+    const off = onCanvasRefresh(() => void load())
     return () => {
       cancelled = true
       clearInterval(id)
+      off()
     }
   }, [inbox])
 
@@ -208,16 +213,15 @@ export function QueueSidebar() {
         )}
         {rows?.map((row) => {
           const href = `/cases/${row.id}/canvas`
-          const active = pathname === href
-          return (
-            <Link
-              key={row.id}
-              href={href}
-              className={cn(
-                "flex flex-col gap-0.5 border-b px-3 py-2 last:border-0 hover:bg-muted/50",
-                active && "bg-muted",
-              )}
-            >
+          // In the keep-alive workspace the active case comes from the nav
+          // context (the URL stays /workspace); otherwise it's the route.
+          const active = nav ? nav.activeId === row.id : pathname === href
+          const cls = cn(
+            "flex flex-col gap-0.5 border-b px-3 py-2 last:border-0 hover:bg-muted/50",
+            active && "bg-muted",
+          )
+          const inner = (
+            <>
               <span className="flex items-center gap-2">
                 <span className="truncate text-xs font-medium">
                   {row.customer}
@@ -236,6 +240,21 @@ export function QueueSidebar() {
               <span className="truncate text-[11px] text-muted-foreground">
                 {row.snippet}
               </span>
+            </>
+          )
+          // Switch tabs client-side inside the workspace; navigate otherwise.
+          return nav ? (
+            <button
+              key={row.id}
+              type="button"
+              onClick={() => nav.open(row.id)}
+              className={cn(cls, "w-full text-left")}
+            >
+              {inner}
+            </button>
+          ) : (
+            <Link key={row.id} href={href} className={cls}>
+              {inner}
             </Link>
           )
         })}

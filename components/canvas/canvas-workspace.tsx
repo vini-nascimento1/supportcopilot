@@ -15,6 +15,7 @@ import {
 } from "@/lib/canvas-tabs-store"
 import { type CanvasTool } from "@/lib/canvas-tools"
 import { CanvasPane } from "@/components/canvas/canvas-pane"
+import { CanvasNavProvider } from "@/components/canvas/canvas-nav"
 
 interface Props {
   tools: CanvasTool[]
@@ -172,20 +173,24 @@ export function CanvasWorkspace({ tools, downloadUrl, initialActiveId }: Props) 
 
       <div className="relative min-h-0 flex-1">
         {!ready && <div className="h-full w-full" />}
-        {panes.map((tab) => (
-          <div
-            key={tab.id}
-            className={cn("absolute inset-0", tab.id !== activeId && "hidden")}
-          >
-            <CanvasPane
-              tab={tab}
-              active={tab.id === activeId}
-              tools={tools}
-              downloadUrl={downloadUrl}
-              onResolveTitle={handleResolveTitle}
-            />
-          </div>
-        ))}
+        {/* Opening a case from a queue card/sidebar inside a pane switches tabs
+            client-side via `select` — no route change, no reload. */}
+        <CanvasNavProvider open={select} activeId={activeId}>
+          {panes.map((tab) => (
+            <div
+              key={tab.id}
+              className={cn("absolute inset-0", tab.id !== activeId && "hidden")}
+            >
+              <CanvasPane
+                tab={tab}
+                active={tab.id === activeId}
+                tools={tools}
+                downloadUrl={downloadUrl}
+                onResolveTitle={handleResolveTitle}
+              />
+            </div>
+          ))}
+        </CanvasNavProvider>
       </div>
     </div>
   )

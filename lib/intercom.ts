@@ -229,14 +229,23 @@ export async function getConversationDetail(
       ]
     : []
 
+  // A customer-visible message rides on more part types than just `comment`:
+  // when a customer replies to a *closed* conversation the reply arrives as an
+  // `open` part (it reopens the thread), an agent's first reply can ride on the
+  // `assignment` part, and a reply that also closes rides on `close` — all
+  // carry their text in `body`. Filtering to `comment` alone silently dropped
+  // reopen messages and assignment greetings. Internal `note` parts stay
+  // hidden; structural events (assignments, tag updates, SLA, etc.) carry no
+  // body and fall out once we strip HTML.
   const partMessages: ConversationMessage[] = parts
-    .filter((p) => p.part_type === "comment" && p.body)
+    .filter((p) => p.part_type !== "note")
     .map((p) => ({
-      role: p.author?.type === "admin" ? "admin" : "customer",
+      role: (p.author?.type === "admin" ? "admin" : "customer") as "admin" | "customer",
       author: p.author?.name ?? (p.author?.type === "admin" ? "Agent" : "Customer"),
       body: stripHtml(p.body),
       createdAt: toDate(p.created_at) ?? "",
     }))
+    .filter((m) => m.body)
 
   const messages: ConversationMessage[] = [...initialMessage, ...partMessages]
 
