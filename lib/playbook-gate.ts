@@ -72,3 +72,52 @@ export function parseGateResponse(
     reason: typeof raw.reason === "string" ? raw.reason : "",
   }
 }
+
+const VERBOO_API_KEY = process.env.VERBOO_API_KEY
+const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
+
+// Use the playbook only when the classifier is at least this confident.
+// Below it → "no playbook applies" (the tail Phase 2 routes to Notion).
+export const GATE_CONFIDENCE_THRESHOLD = 0.6
+
+// Returns a verdict; on any failure returns reason "error" so callers can
+// fall back to the keyword matcher and never regress on a Verboo outage.
+export async function classifyPlaybookMatch(
+  caseText: string,
+  playbooks: PlaybookListItem[]
+): Promise<PlaybookGateResult> {
+  if (!VERBOO_API_KEY || playbooks.length === 0) {
+    return { playbookId: null, confidence: 0, reason: "error" }
+  }
+
+  try {
+    const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${VERBOO_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "deepseek-v4-flash",
+        max_tokens: 200,
+        temperature: 0,
+        stream: false,
+        messages: buildGatePrompt(caseText, playbooks),
+      }),
+    })
+    if (!res.ok) return { playbookId: null, confidence: 0, reason: "error" }
+
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string } }[]
+    }
+    const content = data.choices?.[0]?.message?.content
+    if (!content) return { playbookId: null, confidence: 0, reason: "error" }
+
+    return parseGateResponse(
+      content,
+      playbooks.map((p) => p.id)
+    )
+  } catch {
+    return { playbookId: null, confidence: 0, reason: "error" }
+  }
+}
