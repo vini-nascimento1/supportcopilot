@@ -44,3 +44,42 @@ describe("buildGatePrompt", () => {
     expect(user).toContain("payout stuck")
   })
 })
+
+import { parseGateResponse } from "./playbook-gate"
+
+const ids = ["p-kyc", "p-pay"]
+
+describe("parseGateResponse", () => {
+  it("parses a clean JSON verdict and keeps a known id", () => {
+    const r = parseGateResponse('{"match":"p-kyc","confidence":0.82,"reason":"verification"}', ids)
+    expect(r).toEqual({ playbookId: "p-kyc", confidence: 0.82, reason: "verification" })
+  })
+
+  it("strips ```json code fences", () => {
+    const r = parseGateResponse('```json\n{"match":"p-pay","confidence":0.7,"reason":"hold"}\n```', ids)
+    expect(r.playbookId).toBe("p-pay")
+    expect(r.confidence).toBe(0.7)
+  })
+
+  it("treats an unknown id as no match", () => {
+    const r = parseGateResponse('{"match":"p-ghost","confidence":0.9,"reason":"x"}', ids)
+    expect(r.playbookId).toBeNull()
+  })
+
+  it("accepts an explicit null match", () => {
+    const r = parseGateResponse('{"match":null,"confidence":0.1,"reason":"off-topic"}', ids)
+    expect(r.playbookId).toBeNull()
+    expect(r.confidence).toBe(0.1)
+  })
+
+  it("clamps confidence to [0,1] and defaults missing fields", () => {
+    expect(parseGateResponse('{"match":"p-kyc","confidence":5}', ids).confidence).toBe(1)
+    expect(parseGateResponse('{"match":"p-kyc","confidence":-2}', ids).confidence).toBe(0)
+    expect(parseGateResponse('{"match":"p-kyc"}', ids).confidence).toBe(0)
+  })
+
+  it("returns a null/zero verdict on malformed JSON instead of throwing", () => {
+    const r = parseGateResponse("not json at all", ids)
+    expect(r).toEqual({ playbookId: null, confidence: 0, reason: "unparseable" })
+  })
+})

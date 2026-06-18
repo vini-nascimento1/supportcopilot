@@ -35,3 +35,40 @@ export function buildGatePrompt(
     { role: "user", content: user },
   ]
 }
+
+export type PlaybookGateResult = {
+  playbookId: string | null
+  confidence: number
+  reason: string
+}
+
+function clamp01(n: unknown): number {
+  const x = typeof n === "number" ? n : Number(n)
+  if (!Number.isFinite(x)) return 0
+  return Math.max(0, Math.min(1, x))
+}
+
+export function parseGateResponse(
+  content: string,
+  playbookIds: string[]
+): PlaybookGateResult {
+  const cleaned = content
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim()
+
+  let raw: { match?: unknown; confidence?: unknown; reason?: unknown }
+  try {
+    raw = JSON.parse(cleaned)
+  } catch {
+    return { playbookId: null, confidence: 0, reason: "unparseable" }
+  }
+
+  const match = typeof raw.match === "string" && playbookIds.includes(raw.match) ? raw.match : null
+  return {
+    playbookId: match,
+    confidence: clamp01(raw.confidence),
+    reason: typeof raw.reason === "string" ? raw.reason : "",
+  }
+}
