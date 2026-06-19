@@ -16,6 +16,34 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-06-19-a",
+    date: "2026-06-19",
+    title: "Drafts now read your live Notion — connect it in Settings",
+    description:
+      "Connect Notion in Settings → Integrations and AI reply drafts pull from your live Notion knowledge base (plus Slack, Drive and other connectors) — not just the matched playbook. Works on both playbook and non-playbook cases. Internal/connector content is firewalled out of the customer-facing text. Each agent connects once via 'Connect Notion → Allow' and reconnects roughly monthly.",
+  },
+  {
+    id: "seed-2026-06-19-b",
+    date: "2026-06-19",
+    title: "Smarter playbook matching — no more wrong-playbook drafts",
+    description:
+      "The draft no longer force-matches every case onto a playbook. An AI classifier decides which playbook truly applies — or recognises that none does — so cases outside the playbooks stop getting confident-but-wrong drafts (those now fall back to live Notion knowledge). If the classifier is unavailable, it safely falls back to the old keyword matching.",
+  },
+  {
+    id: "seed-2026-06-19-c",
+    date: "2026-06-19",
+    title: "Case copilot now answers from live Notion",
+    description:
+      "Ask the Case copilot things like “what’s our policy on X?” and it answers from your live Notion (KB + connectors), on top of the ticket and matched playbooks. Still draft-only — it never sends anything, and never quotes internal sources to a customer.",
+  },
+  {
+    id: "seed-2026-06-19-d",
+    date: "2026-06-19",
+    title: "Adapt a macro to the case",
+    description:
+      "New ✨ Adapt button on each macro: instead of pasting the canned text as-is, it rewrites the macro to fit the specific conversation in Fanvue tone, keeping the macro's facts. Shown as a draft to review and copy — never auto-sent. The verbatim Send still works exactly as before.",
+  },
+  {
     id: "seed-2026-06-14-a",
     date: "2026-06-14",
     title: "Macros on the case canvas",
