@@ -17,6 +17,7 @@ import { Separator } from "@/components/ui/separator"
 import { getSignedInEmail } from "@/lib/auth"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getAllCaseTools } from "@/lib/case-tools-db"
+import { refreshTokenExpired } from "@/lib/notion-mcp-auth"
 import { CaseToolsSettings } from "@/components/case-tools-settings"
 import { CanvasModeSettings } from "@/components/canvas-mode-settings"
 import { SettingsForm } from "./settings-form"
@@ -28,7 +29,9 @@ async function getAgentRow(email: string) {
   if (!supabase) return null
   const { data } = await supabase
     .from("agents")
-    .select("id, name, email, timezone, intercom_admin_id, slack_token, notion_token, working_days")
+    .select(
+      "id, name, email, timezone, intercom_admin_id, slack_token, notion_token, notion_mcp_refresh_token, notion_mcp_refresh_expires_at, working_days"
+    )
     .eq("email", email)
     .maybeSingle()
   return data
@@ -39,19 +42,25 @@ async function disconnectIntegration(formData: FormData) {
   const email = formData.get("email") as string
   const integration = formData.get("integration") as string
 
-  const column =
-    integration === "slack"
-      ? "slack_token"
-      : integration === "notion"
-        ? "notion_token"
-        : null
-
   const supabase = getSupabaseAdminClient()
-  if (supabase && email && column) {
-    await supabase
-      .from("agents")
-      .update({ [column]: null })
-      .eq("email", email)
+  if (supabase && email) {
+    // Notion now uses the hosted-MCP OAuth columns; clear them all so a
+    // disconnect fully revokes the local connection.
+    const patch: Record<string, null> =
+      integration === "slack"
+        ? { slack_token: null }
+        : integration === "notion"
+          ? {
+              notion_token: null,
+              notion_mcp_access_token: null,
+              notion_mcp_refresh_token: null,
+              notion_mcp_token_expires_at: null,
+              notion_mcp_refresh_expires_at: null,
+            }
+          : {}
+    if (Object.keys(patch).length > 0) {
+      await supabase.from("agents").update(patch).eq("email", email)
+    }
   }
   revalidatePath("/settings")
 }
@@ -130,7 +139,18 @@ export default async function SettingsPage({
   const slackOAuthReady = Boolean(process.env.SLACK_CLIENT_ID)
   const intercomConnected = Boolean(process.env.INTERCOM_ACCESS_TOKEN)
   const slackConnected = Boolean(agent?.slack_token ?? process.env.SLACK_BOT_TOKEN)
-  const notionConnected = Boolean(agent?.notion_token ?? process.env.NOTION_API_KEY)
+
+  // Notion now uses the hosted-MCP OAuth (rotating refresh token, absolute
+  // ~30-day window). Connected = we hold a refresh token; needs-reconsent =
+  // the token exists but its absolute window has elapsed → re-Connect.
+  // `nowMs` is captured at request time (mirrors app/page.tsx) so the purity
+  // rule isn't tripped by calling Date.now() during render.
+  const nowMs = new Date().getTime()
+  const notionHasToken = Boolean(agent?.notion_mcp_refresh_token)
+  const notionWindowExpired =
+    notionHasToken && refreshTokenExpired(agent?.notion_mcp_refresh_expires_at ?? null, nowMs)
+  const notionConnected = notionHasToken && !notionWindowExpired
+  const notionNeedsReconsent = notionHasToken && notionWindowExpired
 
   return (
     <div className="min-h-screen bg-background">
@@ -246,29 +266,37 @@ export default async function SettingsPage({
 
             <Separator />
 
-            {/* Notion — per-agent OAuth */}
+            {/* Notion — per-agent hosted-MCP OAuth (live AI-search retrieval) */}
             <IntegrationRow
               icon={<BookOpenIcon className="size-4 text-muted-foreground" />}
               name="Notion"
-              blurb="Knowledge base · playbook mining"
+              blurb={
+                notionNeedsReconsent
+                  ? "Connection expired — reconnect to keep grounding drafts in your Notion knowledge"
+                  : notionConnected
+                    ? "Knowledge base · live AI-search retrieval for tail cases"
+                    : "Connect Notion to ground drafts in your knowledge base"
+              }
               connected={notionConnected}
               action={
-                agent?.notion_token ? (
-                  <form action={disconnectIntegration}>
-                    <input type="hidden" name="email" value={email ?? ""} />
-                    <input type="hidden" name="integration" value="notion" />
-                    <Button size="sm" variant="ghost" type="submit">
-                      Disconnect
+                <div className="flex items-center gap-2">
+                  {notionConnected ? (
+                    <form action={disconnectIntegration}>
+                      <input type="hidden" name="email" value={email ?? ""} />
+                      <input type="hidden" name="integration" value="notion" />
+                      <Button size="sm" variant="ghost" type="submit">
+                        Disconnect
+                      </Button>
+                    </form>
+                  ) : (
+                    <Button size="sm" variant={notionNeedsReconsent ? "default" : "outline"} asChild>
+                      <a href="/api/auth/notion">
+                        <PlugIcon className="size-3.5" />
+                        {notionNeedsReconsent ? "Reconnect" : "Connect"}
+                      </a>
                     </Button>
-                  </form>
-                ) : !notionConnected ? (
-                  <Button size="sm" variant="outline" asChild>
-                    <a href="/api/auth/notion">
-                      <PlugIcon className="size-3.5" />
-                      Connect
-                    </a>
-                  </Button>
-                ) : undefined
+                  )}
+                </div>
               }
             />
           </CardContent>
