@@ -2,6 +2,10 @@ import { NextResponse } from "next/server"
 
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
+import {
+  classifyPlaybookMatch,
+  GATE_CONFIDENCE_THRESHOLD,
+} from "@/lib/playbook-gate"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
 
 export const dynamic = "force-dynamic"
@@ -34,7 +38,16 @@ export async function GET(request: Request) {
     .filter(Boolean)
     .join(" ")
 
-  const topMatch = getTopMatches(ticketText, playbooksData.allRows, 1)[0]
+  const gate = await classifyPlaybookMatch(ticketText, playbooksData.allRows)
+
+  // On a Verboo error, degrade to the legacy keyword matcher so behaviour
+  // never regresses; otherwise honour the confidence threshold.
+  const matched =
+    gate.reason === "error"
+      ? getTopMatches(ticketText, playbooksData.allRows, 1)[0]?.playbook ?? null
+      : gate.playbookId && gate.confidence >= GATE_CONFIDENCE_THRESHOLD
+        ? playbooksData.allRows.find((p) => p.id === gate.playbookId) ?? null
+        : null
 
   return NextResponse.json({
     caseInfo: {
@@ -50,8 +63,13 @@ export async function GET(request: Request) {
       subject: conversation.subject,
       messages: conversation.messages,
     },
-    playbookId: topMatch?.playbook.id,
-    playbookName: topMatch?.playbook.caseType,
+    playbookId: matched?.id,
+    playbookName: matched?.caseType,
+    gate: {
+      matched: Boolean(matched),
+      confidence: gate.confidence,
+      reason: gate.reason,
+    },
     ticketText,
   })
 }
