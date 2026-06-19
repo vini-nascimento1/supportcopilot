@@ -73,21 +73,17 @@ export async function POST(req: NextRequest) {
 
   const agentName = await getAgentName(email)
 
-  // Head (confident playbook) → base prompt unchanged.
-  // Tail (no playbook) → ground the draft in live Notion retrieval via the
-  // agent's hosted-MCP connection, firewalling internal sources out of the
-  // customer text. Falls back to the base prompt when retrieval yields nothing.
-  let systemPrompt: string
-  if (playbook) {
-    systemPrompt = buildSystemPrompt(playbook, responseTemplates, agentName, articles)
-  } else {
-    const { origin } = new URL(req.url)
-    const snippets = await retrieveNotionSnippets(email, origin, searchQuery)
-    systemPrompt =
-      snippets.length > 0
-        ? buildNotionAwareSystemPrompt(playbook, responseTemplates, agentName, articles, snippets)
-        : buildSystemPrompt(playbook, responseTemplates, agentName, articles)
-  }
+  // Always ground in live Notion (best-effort), for BOTH the head (a playbook
+  // matched) and the tail (none) — the playbook gives the procedure, Notion adds
+  // fresh KB/connector context, with internal sources firewalled out of the
+  // customer text. Falls back to the base prompt when retrieval yields nothing
+  // (not connected, needs re-consent, or no hits).
+  const { origin } = new URL(req.url)
+  const snippets = await retrieveNotionSnippets(email, origin, searchQuery)
+  const systemPrompt =
+    snippets.length > 0
+      ? buildNotionAwareSystemPrompt(playbook, responseTemplates, agentName, articles, snippets)
+      : buildSystemPrompt(playbook, responseTemplates, agentName, articles)
 
   const userMessage = buildUserMessage(conversation)
 
