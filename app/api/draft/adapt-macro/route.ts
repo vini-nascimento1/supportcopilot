@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
           { role: "user", content: userMessage },
         ]
 
-        for await (const chunk of streamChatCompletion(messages)) {
+        for await (const chunk of streamChatCompletion(messages, { maxTokens: 2048 })) {
           controller.enqueue(encoder.encode(chunk))
         }
       } catch (err) {
