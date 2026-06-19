@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getSignedInEmail } from "@/lib/auth"
 import { getConversationDetail } from "@/lib/intercom"
-import { buildMacroAdaptSystemPrompt, buildUserMessage, streamChatCompletion } from "@/lib/draft-ai"
+import { buildMacroAdaptSystemPrompt, buildMacroAdaptUserMessage, streamChatCompletion } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
 
 async function getAgentName(email: string): Promise<string> {
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
 
   const agentName = await getAgentName(email)
   const systemPrompt = buildMacroAdaptSystemPrompt(macroText, agentName)
-  const userMessage = buildUserMessage(conversation)
+  const userMessage = buildMacroAdaptUserMessage(conversation)
 
   const encoder = new TextEncoder()
 
