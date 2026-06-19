@@ -4,6 +4,7 @@ import { getSignedInEmail } from "@/lib/auth"
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
+import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
 
 export const dynamic = "force-dynamic"
 
@@ -81,6 +82,24 @@ export async function POST(request: Request) {
         .join("\n\n")
     : "No playbook matched this case — say so when relevant and never invent policy."
 
+  // Ground the copilot in live Notion (the agent's own hosted-MCP connection),
+  // keyed on their latest question. Best-effort: [] when not connected/errors.
+  const { origin } = new URL(request.url)
+  const latestUserQuestion =
+    [...messages].reverse().find((m) => m.role === "user")?.content ?? searchText
+  const notionSnippets = await retrieveNotionSnippets(email, origin, latestUserQuestion)
+  const notionSection = notionSnippets.length
+    ? `\n\n## Fresh Notion knowledge (retrieved live for this question — newer than the playbooks)
+${notionSnippets
+  .map((s) =>
+    s.isInternalSource
+      ? `- [internal · ${s.source} · never quote to a customer] ${s.title}: ${s.text}`
+      : `- ${s.title}: ${s.text}`,
+  )
+  .join("\n")}
+Use this to inform your answer — it is fresher than the playbooks. If you draft a customer-facing reply, paraphrase: never quote internal/connector sources (Slack, Drive, etc.) and never reveal internal plans, other users, or internal tools.`
+    : ""
+
   const systemPrompt = `You are the Fanvue support copilot embedded in the canvas for ONE open ticket. Fanvue is a British creator-subscription platform. You assist the support agent working THIS case — every question ("summarise the case", "what can it be?", "what should I check?") refers to this ticket unless the agent clearly says otherwise.
 
 ## The open case
@@ -92,7 +111,7 @@ export async function POST(request: Request) {
 ${thread || "(empty)"}
 
 ## Matched playbooks (source of truth for policy — cite them by name)
-${playbookSection}
+${playbookSection}${notionSection}
 
 ## How to behave
 - Be concise and practical: summaries, likely root causes, the internal checks to run (e.g. fadmin paths from the playbook), and what to reply.
