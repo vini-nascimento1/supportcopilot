@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest"
 
-import { isInternalSource, mapAiSearchResults } from "./notion-retrieval"
+import {
+  isInternalSource,
+  mapAiSearchResults,
+  extractSearchPayload,
+} from "./notion-retrieval"
 
 // Real captured shape of the hosted-MCP notion-search (ai_search mode) response.
 const SAMPLE = {
@@ -183,5 +187,71 @@ describe("mapAiSearchResults", () => {
       expect(snippets).toHaveLength(1)
       expect(snippets[0].isInternalSource).toBe(true)
     })
+  })
+})
+
+describe("extractSearchPayload", () => {
+  it("prefers structuredContent with a results array", () => {
+    const payload = extractSearchPayload({
+      structuredContent: { results: [{ id: "1" }] },
+      content: [{ type: "text", text: '{"results":[]}' }],
+    })
+    expect(payload).toEqual({ results: [{ id: "1" }] })
+  })
+
+  it("parses a JSON string from a text content block", () => {
+    const payload = extractSearchPayload({
+      content: [{ type: "text", text: '{"results":[{"id":"abc"}]}' }],
+    })
+    expect(payload).toEqual({ results: [{ id: "abc" }] })
+  })
+
+  it("skips non-JSON text blocks and finds the parseable one", () => {
+    const payload = extractSearchPayload({
+      content: [
+        { type: "text", text: "not json" },
+        { type: "text", text: '{"results":[]}' },
+      ],
+    })
+    expect(payload).toEqual({ results: [] })
+  })
+
+  it("ignores structuredContent without a results array", () => {
+    expect(extractSearchPayload({ structuredContent: { foo: "bar" } })).toBeNull()
+  })
+
+  it("ignores text blocks whose JSON lacks a results array", () => {
+    expect(extractSearchPayload({ content: [{ type: "text", text: '{"foo":"bar"}' }] })).toBeNull()
+  })
+
+  it("returns null for malformed input", () => {
+    expect(extractSearchPayload(null)).toBeNull()
+    expect(extractSearchPayload("string")).toBeNull()
+    expect(extractSearchPayload({})).toBeNull()
+    expect(extractSearchPayload({ content: "nope" })).toBeNull()
+  })
+
+  it("the extracted payload feeds straight into mapAiSearchResults", () => {
+    const payload = extractSearchPayload({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            results: [
+              {
+                id: "page-1",
+                title: "Payout holds",
+                url: "https://notion.so/p/1",
+                type: "page",
+                highlight: "Compliance hold...",
+              },
+            ],
+          }),
+        },
+      ],
+    })
+    const snippets = mapAiSearchResults(payload, 5)
+    expect(snippets).toHaveLength(1)
+    expect(snippets[0]).toMatchObject({ id: "page-1", source: "page", isInternalSource: false })
   })
 })

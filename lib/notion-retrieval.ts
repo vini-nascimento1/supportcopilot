@@ -74,3 +74,39 @@ export function mapAiSearchResults(raw: unknown, limit: number): NotionSnippet[]
 
   return snippets
 }
+
+// Normalise a raw hosted-MCP `tools/call` result into the object
+// mapAiSearchResults wants (something with a `results` array). The hosted MCP
+// may return the search payload either as:
+//   - result.structuredContent: { results: [...] }
+//   - result.content[i].text: a JSON string '{"results":[...]}'
+// Pure + unit-tested (lives here, not in the server-only client module, so it's
+// testable without Next's bundler). Returns null when no parseable payload is
+// found.
+export function extractSearchPayload(result: unknown): unknown {
+  if (!isRecord(result)) return null
+
+  // 1. structuredContent (preferred — already an object).
+  const structured = result.structuredContent
+  if (isRecord(structured) && Array.isArray(structured.results)) {
+    return structured
+  }
+
+  // 2. text content blocks — parse the first that yields an object with results.
+  const content = result.content
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (!isRecord(block)) continue
+      const text = block.text
+      if (typeof text !== "string") continue
+      try {
+        const parsed: unknown = JSON.parse(text)
+        if (isRecord(parsed) && Array.isArray(parsed.results)) return parsed
+      } catch {
+        // not JSON — skip
+      }
+    }
+  }
+
+  return null
+}
