@@ -3,9 +3,14 @@ import { NextResponse } from "next/server"
 
 import { getSignedInEmail } from "@/lib/auth"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { getStoredMcpClient } from "@/lib/notion-mcp-client-store"
+import { buildTokenExchangeBody, parseTokenResponse } from "@/lib/notion-mcp-oauth"
+import { nextTokenColumns } from "@/lib/notion-mcp-auth"
 
-// Completes the per-agent Notion OAuth flow: exchanges the code and stores
-// the access token in agents.notion_token for the signed-in agent.
+// Completes the per-agent hosted Notion MCP OAuth flow: verifies the CSRF
+// state, exchanges the authorization code (with the PKCE verifier) for tokens,
+// and stores them into the agents.notion_mcp_* columns for the signed-in agent.
+// On initial consent we stamp the absolute ~30-day refresh window.
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const settings = (notice: string) =>
@@ -13,18 +18,19 @@ export async function GET(request: Request) {
 
   const code = searchParams.get("code")
   const state = searchParams.get("state")
-  const cookieStore = await cookies()
-  const expectedState = cookieStore.get("notion_oauth_state")?.value
-  cookieStore.delete("notion_oauth_state")
 
-  if (!code || !state || state !== expectedState) {
+  const cookieStore = await cookies()
+  const expectedState = cookieStore.get("notion_mcp_oauth_state")?.value
+  const codeVerifier = cookieStore.get("notion_mcp_pkce_verifier")?.value
+  cookieStore.delete("notion_mcp_oauth_state")
+  cookieStore.delete("notion_mcp_pkce_verifier")
+
+  // The provider may redirect back with an explicit error (e.g. access_denied).
+  if (searchParams.get("error")) {
     return settings("notion-failed")
   }
-
-  const clientId = process.env.NOTION_CLIENT_ID
-  const clientSecret = process.env.NOTION_CLIENT_SECRET
-  if (!clientId || !clientSecret) {
-    return settings("notion-unavailable")
+  if (!code || !state || state !== expectedState || !codeVerifier) {
+    return settings("notion-failed")
   }
 
   const email = await getSignedInEmail()
@@ -33,30 +39,42 @@ export async function GET(request: Request) {
     return settings("notion-failed")
   }
 
+  const client = await getStoredMcpClient(origin)
+  if (!client) {
+    return settings("notion-unavailable")
+  }
+
+  const redirectUri = `${origin}/api/auth/notion/callback`
+
   try {
-    const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64")
-    const res = await fetch("https://api.notion.com/v1/oauth/token", {
+    const res = await fetch(client.token_endpoint, {
       method: "POST",
       headers: {
-        Authorization: `Basic ${basic}`,
-        "Content-Type": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
       },
-      body: JSON.stringify({
-        grant_type: "authorization_code",
+      body: buildTokenExchangeBody({
+        clientId: client.client_id,
         code,
-        redirect_uri: `${origin}/api/auth/notion/callback`,
+        redirectUri,
+        codeVerifier,
+        clientSecret: client.client_secret,
       }),
+      cache: "no-store",
     })
-    const data = (await res.json()) as { access_token?: string }
 
-    if (!data.access_token) {
+    const parsed = parseTokenResponse(await res.json().catch(() => null))
+    if (!parsed.ok) {
       return settings("notion-failed")
     }
 
-    await adminClient
-      .from("agents")
-      .update({ notion_token: data.access_token })
-      .eq("email", email)
+    // Initial consent → stamp the absolute (non-sliding) refresh window.
+    const cols = nextTokenColumns(parsed, Date.now(), {
+      isInitialConsent: true,
+      existingRefreshExpiresAt: null,
+    })
+
+    await adminClient.from("agents").update(cols).eq("email", email)
 
     return settings("notion-connected")
   } catch {
