@@ -203,6 +203,34 @@ export function buildUserMessage(conversation: {
   return parts.join("\n")
 }
 
+// ── Macro adaptation user message ─────────────────────────────────────────
+// The macro-adapt path must NOT reuse buildUserMessage: that ends with "Write
+// the next message in this conversation…", which a flash model follows over the
+// system instruction → it writes a generic draft and ignores the macro. This
+// builder presents the thread but anchors the task on the macro instead.
+
+export function buildMacroAdaptUserMessage(conversation: {
+  customer: string
+  firstMessage: string
+  messages: { role: string; body: string }[]
+}): string {
+  const parts = [`Customer: ${conversation.customer}`]
+
+  parts.push(`\nConversation thread:`)
+  parts.push(`Customer: ${conversation.firstMessage}`)
+
+  for (const msg of conversation.messages) {
+    if (!msg.body.trim()) continue
+    const label = msg.role === "admin" ? "Agent" : "Customer"
+    parts.push(`${label}: ${msg.body}`)
+  }
+
+  parts.push(
+    `\nNow take the **approved macro from the system message** and rewrite it so it fits this conversation, anchored on the customer's LAST message. Your reply MUST be built from the macro's content — keep its facts, policy, steps and links, and tailor the wording to this case. Do NOT write a fresh, unrelated reply, and do NOT add anything the macro and thread don't support. Output only the customer-facing message.`
+  )
+  return parts.join("\n")
+}
+
 // ── Focused Slack thread translation prompt ───────────────────────────────
 // Used by /api/draft/from-slack — purely translates internal Slack discussion
 // into customer-facing wording. No playbooks, no KB articles, no extra context.
@@ -247,7 +275,7 @@ export function buildMacroAdaptSystemPrompt(
 ): string {
   return `You are a support copilot for ${agentName}, a senior support agent at Fanvue — a creator subscription platform (AI creators and human creators both use it).
 
-Your task: **adapt the approved macro below** to fit this specific conversation. The macro is canned, approved text. Reshape it so it reads as a natural reply to what THIS customer actually asked.
+Your task: **rewrite the approved macro below** so it fits this specific conversation. The macro is canned, approved text and it is your STARTING MATERIAL — you are tailoring it, **not** writing a fresh reply from scratch. Reshape it so it reads as a natural reply to what THIS customer actually asked, but every claim must come from the macro (or the thread).
 
 ## How to adapt
 - Keep the macro's **facts, policy, requirements, steps, and links exactly** — do not change, soften, or embellish what it states.

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 
 import {
   buildMacroAdaptSystemPrompt,
+  buildMacroAdaptUserMessage,
   buildNotionAwareSystemPrompt,
   buildSystemPrompt,
 } from "./draft-ai"
@@ -95,5 +96,35 @@ describe("buildMacroAdaptSystemPrompt", () => {
   it("asks for the customer-facing message only", () => {
     const out = buildMacroAdaptSystemPrompt(macroText, "Vini")
     expect(out.toLowerCase()).toContain("output only the customer-facing message")
+  })
+})
+
+describe("buildMacroAdaptUserMessage", () => {
+  const convo = {
+    customer: "Alex",
+    firstMessage: "How do I turn on payouts?",
+    messages: [
+      { role: "customer", body: "How do I turn on payouts?" },
+      { role: "admin", body: "Let me check that for you." },
+      { role: "customer", body: "still stuck, can you help?" },
+    ],
+  }
+
+  it("includes the conversation thread", () => {
+    const out = buildMacroAdaptUserMessage(convo)
+    expect(out).toContain("Conversation thread:")
+    expect(out).toContain("How do I turn on payouts?")
+    expect(out).toContain("still stuck, can you help?")
+  })
+
+  it("anchors the task on the macro from the system message", () => {
+    const out = buildMacroAdaptUserMessage(convo)
+    expect(out).toContain("approved macro from the system message")
+    expect(out.toLowerCase()).toContain("must be built from the macro")
+  })
+
+  it("does NOT reuse the generic draft instruction (the bug that ignored the macro)", () => {
+    const out = buildMacroAdaptUserMessage(convo)
+    expect(out).not.toContain("Write the next message in this conversation")
   })
 })
