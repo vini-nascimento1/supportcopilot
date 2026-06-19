@@ -148,7 +148,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName, externalD
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
           <SparklesIcon className="size-4 text-primary" />
-          Intercom AI Answer
+          AI reply draft
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -157,7 +157,7 @@ export function DraftPanel({ conversationId, playbookId, playbookName, externalD
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-64 text-xs leading-relaxed">
-                Generates a customer-facing draft reply using your matched playbook, the conversation thread, and internal knowledge base articles as context.
+                Generates a reply draft from your matched playbook, the conversation, and Intercom help articles — plus live Notion (your KB + Slack/Drive via connectors), with internal content firewalled out. Draft-only: review before sending.
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -231,8 +231,8 @@ export function DraftPanel({ conversationId, playbookId, playbookName, externalD
         ) : (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-muted-foreground">
-              Generate an AI-powered draft reply based on the matched playbook —
-              or write one yourself.
+              Drafts a reply from your playbooks, help articles, and live Notion
+              knowledge — or write one yourself.
             </p>
             <div className="flex items-center gap-2">
               <button
