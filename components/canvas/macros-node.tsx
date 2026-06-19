@@ -9,6 +9,7 @@ import {
   RefreshCwIcon,
   SearchIcon,
   SendIcon,
+  SparklesIcon,
   ZapIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -39,6 +40,10 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
   const [syncing, setSyncing] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [sendingId, setSendingId] = useState<string | null>(null)
+  // D9 "Adapt to case": draft-only, per-macro inline preview. Never sent.
+  const [adaptingId, setAdaptingId] = useState<string | null>(null)
+  const [adaptedDrafts, setAdaptedDrafts] = useState<Record<string, string>>({})
+  const [adaptCopiedId, setAdaptCopiedId] = useState<string | null>(null)
 
   const load = useCallback(async (q: string) => {
     try {
@@ -114,6 +119,53 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
     },
     [data.conversationId],
   )
+
+  // Adapt a macro to THIS case via deepseek. Streams a draft into an inline,
+  // editable preview under the row. Draft-only: nothing is ever sent here.
+  const adapt = useCallback(
+    async (m: MacroRow) => {
+      if (!data.conversationId) return
+      setAdaptingId(m.id)
+      setAdaptedDrafts((d) => ({ ...d, [m.id]: "" }))
+      try {
+        const res = await fetch("/api/draft/adapt-macro", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: data.conversationId,
+            macroId: m.id,
+          }),
+        })
+        if (!res.ok || !res.body) throw new Error(await res.text())
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let acc = ""
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          acc += decoder.decode(value, { stream: true })
+          setAdaptedDrafts((d) => ({ ...d, [m.id]: acc }))
+        }
+      } catch (e) {
+        toast.error(`Adapt failed: ${(e as Error).message}`)
+        setAdaptedDrafts((d) => {
+          const next = { ...d }
+          delete next[m.id]
+          return next
+        })
+      } finally {
+        setAdaptingId((a) => (a === m.id ? null : a))
+      }
+    },
+    [data.conversationId],
+  )
+
+  const copyAdapted = useCallback((id: string, text: string) => {
+    void navigator.clipboard.writeText(text)
+    setAdaptCopiedId(id)
+    setTimeout(() => setAdaptCopiedId((c) => (c === id ? null : c)), 1000)
+  }, [])
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border bg-card shadow-md">
@@ -191,6 +243,22 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
                       variant="ghost"
                       size="icon"
                       className="size-6"
+                      title="Adapt to this case (AI draft — review before sending)"
+                      onClick={() => adapt(m)}
+                      disabled={adaptingId === m.id}
+                    >
+                      {adaptingId === m.id ? (
+                        <Loader2Icon className="size-3 animate-spin" />
+                      ) : (
+                        <SparklesIcon className="size-3 text-violet-500" />
+                      )}
+                    </Button>
+                  )}
+                  {data.conversationId && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-6"
                       title="Send as admin reply in Intercom"
                       onClick={() => send(m)}
                       disabled={sendingId === m.id}
@@ -207,6 +275,40 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
               <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
                 {m.bodyText ?? htmlToText(m.body)}
               </p>
+              {adaptedDrafts[m.id] !== undefined && (
+                <div className="mt-2 rounded-md border border-violet-200 bg-violet-50/50 p-1.5 dark:border-violet-900 dark:bg-violet-950/20">
+                  <div className="mb-1 flex items-center gap-1">
+                    <SparklesIcon className="size-2.5 text-violet-500" />
+                    <span className="text-[10px] font-medium text-violet-700 dark:text-violet-300">
+                      Adapted draft — review &amp; copy (not sent)
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="ml-auto size-5"
+                      title="Copy adapted draft"
+                      disabled={!adaptedDrafts[m.id]}
+                      onClick={() => copyAdapted(m.id, adaptedDrafts[m.id])}
+                    >
+                      {adaptCopiedId === m.id ? (
+                        <CheckIcon className="size-2.5 text-emerald-500" />
+                      ) : (
+                        <CopyIcon className="size-2.5" />
+                      )}
+                    </Button>
+                  </div>
+                  <textarea
+                    className="h-24 w-full resize-y rounded border bg-background p-1.5 text-[11px] leading-snug focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-violet-400"
+                    value={adaptedDrafts[m.id]}
+                    placeholder={
+                      adaptingId === m.id ? "Adapting…" : "Adapted draft"
+                    }
+                    onChange={(e) =>
+                      setAdaptedDrafts((d) => ({ ...d, [m.id]: e.target.value }))
+                    }
+                  />
+                </div>
+              )}
             </li>
           ))}
         </ul>
