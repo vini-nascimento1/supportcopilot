@@ -10,36 +10,7 @@ import {
   streamChatCompletion,
 } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
-import { getFreshNotionMcpToken } from "@/lib/notion-mcp-auth-server"
-import { searchNotionViaMcp } from "@/lib/notion-mcp-client"
-import type { NotionSnippet } from "@/lib/notion-retrieval"
-
-// How many Notion snippets to retrieve for a tail case.
-const NOTION_RETRIEVAL_LIMIT = 5
-
-// For the "tail" (no confident playbook), ground the draft in live Notion
-// retrieval via the agent's own hosted-MCP connection. Pure best-effort: any
-// failure (not connected, needs re-consent, network/MCP error) returns [] and
-// the caller falls back to the base prompt — never surfaces an error to the UI.
-async function retrieveNotionSnippets(
-  email: string,
-  origin: string,
-  query: string
-): Promise<NotionSnippet[]> {
-  if (!query.trim()) return []
-  try {
-    const tokenResult = await getFreshNotionMcpToken(email, origin)
-    if (!tokenResult.accessToken) return []
-    const result = await searchNotionViaMcp(
-      tokenResult.accessToken,
-      query,
-      NOTION_RETRIEVAL_LIMIT
-    )
-    return result.backend === "ai_search" ? result.snippets : []
-  } catch {
-    return []
-  }
-}
+import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
 
 async function getAgentName(email: string): Promise<string> {
   const supabase = getSupabaseAdminClient()
