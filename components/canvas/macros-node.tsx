@@ -5,6 +5,7 @@ import { NodeResizer, type Node, type NodeProps } from "@xyflow/react"
 import {
   CheckIcon,
   CopyIcon,
+  InfoIcon,
   Loader2Icon,
   RefreshCwIcon,
   SearchIcon,
@@ -173,6 +174,13 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
       <div className="flex h-10 shrink-0 cursor-grab items-center gap-2 border-b bg-muted/50 px-3 active:cursor-grabbing">
         <ZapIcon className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="text-sm font-semibold">Macros</span>
+        <span
+          className="flex shrink-0 items-center text-muted-foreground"
+          aria-label="About macros"
+          title="Approved canned replies synced from Intercom. Send inserts one as-is; ✨ Adapt rewrites one to fit this case (macro + conversation). No Notion."
+        >
+          <InfoIcon className="size-3" />
+        </span>
         <div className="nodrag ml-auto flex items-center gap-1">
           <Button
             variant="ghost"

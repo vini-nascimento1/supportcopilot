@@ -10,36 +10,7 @@ import {
   streamChatCompletion,
 } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
-import { getFreshNotionMcpToken } from "@/lib/notion-mcp-auth-server"
-import { searchNotionViaMcp } from "@/lib/notion-mcp-client"
-import type { NotionSnippet } from "@/lib/notion-retrieval"
-
-// How many Notion snippets to retrieve for a tail case.
-const NOTION_RETRIEVAL_LIMIT = 5
-
-// For the "tail" (no confident playbook), ground the draft in live Notion
-// retrieval via the agent's own hosted-MCP connection. Pure best-effort: any
-// failure (not connected, needs re-consent, network/MCP error) returns [] and
-// the caller falls back to the base prompt — never surfaces an error to the UI.
-async function retrieveNotionSnippets(
-  email: string,
-  origin: string,
-  query: string
-): Promise<NotionSnippet[]> {
-  if (!query.trim()) return []
-  try {
-    const tokenResult = await getFreshNotionMcpToken(email, origin)
-    if (!tokenResult.accessToken) return []
-    const result = await searchNotionViaMcp(
-      tokenResult.accessToken,
-      query,
-      NOTION_RETRIEVAL_LIMIT
-    )
-    return result.backend === "ai_search" ? result.snippets : []
-  } catch {
-    return []
-  }
-}
+import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
 
 async function getAgentName(email: string): Promise<string> {
   const supabase = getSupabaseAdminClient()
@@ -102,21 +73,17 @@ export async function POST(req: NextRequest) {
 
   const agentName = await getAgentName(email)
 
-  // Head (confident playbook) → base prompt unchanged.
-  // Tail (no playbook) → ground the draft in live Notion retrieval via the
-  // agent's hosted-MCP connection, firewalling internal sources out of the
-  // customer text. Falls back to the base prompt when retrieval yields nothing.
-  let systemPrompt: string
-  if (playbook) {
-    systemPrompt = buildSystemPrompt(playbook, responseTemplates, agentName, articles)
-  } else {
-    const { origin } = new URL(req.url)
-    const snippets = await retrieveNotionSnippets(email, origin, searchQuery)
-    systemPrompt =
-      snippets.length > 0
-        ? buildNotionAwareSystemPrompt(playbook, responseTemplates, agentName, articles, snippets)
-        : buildSystemPrompt(playbook, responseTemplates, agentName, articles)
-  }
+  // Always ground in live Notion (best-effort), for BOTH the head (a playbook
+  // matched) and the tail (none) — the playbook gives the procedure, Notion adds
+  // fresh KB/connector context, with internal sources firewalled out of the
+  // customer text. Falls back to the base prompt when retrieval yields nothing
+  // (not connected, needs re-consent, or no hits).
+  const { origin } = new URL(req.url)
+  const snippets = await retrieveNotionSnippets(email, origin, searchQuery)
+  const systemPrompt =
+    snippets.length > 0
+      ? buildNotionAwareSystemPrompt(playbook, responseTemplates, agentName, articles, snippets)
+      : buildSystemPrompt(playbook, responseTemplates, agentName, articles)
 
   const userMessage = buildUserMessage(conversation)
 
