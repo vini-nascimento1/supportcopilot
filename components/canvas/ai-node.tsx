@@ -120,7 +120,7 @@ export function AiNode({ id, data, selected }: NodeProps<AiNodeType>) {
         {messages.length === 0 && !loading && (
           <p className="m-auto text-center text-xs text-muted-foreground">
             {data.conversationId
-              ? "This assistant knows the full ticket and its playbooks.\nTry: “summarise the case”, “what should I check?”"
+              ? "Knows the full ticket, your playbooks, and live Notion (your KB + connectors).\nTry: “summarise the case”, “what should I check?”, “what’s our policy on X?”"
               : "Ask anything while you work."}
           </p>
         )}
