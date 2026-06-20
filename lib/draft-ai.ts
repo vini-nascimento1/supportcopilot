@@ -226,7 +226,7 @@ export function buildMacroAdaptUserMessage(conversation: {
   }
 
   parts.push(
-    `\nNow rewrite the **approved macro from the system message** to reply to this conversation, anchored on the customer's LAST message — keep its facts, policy, steps and links, and tailor the wording to this case. If the macro doesn't fully cover what they asked, adapt what fits and answer the rest helpfully from the thread. Always output a complete customer-facing message (never empty).`
+    `\nNow take the **approved macro from the system message** and rewrite it so it fits this conversation, anchored on the customer's LAST message. Your reply MUST be built from the macro's content — keep its facts, policy, steps and links, and tailor the wording to this case. Do NOT write a fresh, unrelated reply, and do NOT add anything the macro and thread don't support. Output only the customer-facing message.`
   )
   return parts.join("\n")
 }
@@ -275,7 +275,7 @@ export function buildMacroAdaptSystemPrompt(
 ): string {
   return `You are a support copilot for ${agentName}, a senior support agent at Fanvue — a creator subscription platform (AI creators and human creators both use it).
 
-Your task: **rewrite the approved macro below** to reply to this conversation. The macro is canned, approved text — use it as your starting material and tailor it to what THIS customer actually asked. Prefer the macro's facts and wording; if part of it doesn't fit this case, adapt the parts that do and handle the rest naturally from the conversation. **Always produce a complete customer-facing reply — never return an empty message.**
+Your task: **rewrite the approved macro below** so it fits this specific conversation. The macro is canned, approved text and it is your STARTING MATERIAL — you are tailoring it, **not** writing a fresh reply from scratch. Reshape it so it reads as a natural reply to what THIS customer actually asked, but every claim must come from the macro (or the thread).
 
 ## How to adapt
 - Keep the macro's **facts, policy, requirements, steps, and links exactly** — do not change, soften, or embellish what it states.
@@ -301,8 +301,7 @@ ${macroBodyText}`
 }
 
 export async function* streamChatCompletion(
-  messages: OpenAIMessage[],
-  opts?: { maxTokens?: number }
+  messages: OpenAIMessage[]
 ): AsyncGenerator<string> {
   const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
     method: "POST",
@@ -312,10 +311,7 @@ export async function* streamChatCompletion(
     },
     body: JSON.stringify({
       model: "deepseek-v4-flash",
-      // deepseek-v4 spends tokens on internal reasoning before the answer; too
-      // low a cap (e.g. a hard macro-adapt) can burn the whole budget reasoning
-      // and emit empty content (finish_reason "length"). Callers can raise it.
-      max_tokens: opts?.maxTokens ?? 1024,
+      max_tokens: 1024,
       stream: true,
       messages,
     }),
