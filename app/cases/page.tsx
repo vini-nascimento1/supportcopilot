@@ -14,26 +14,81 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { WorkspaceLayout } from "@/components/workspace-layout"
-import { getOpenCasesQueue } from "@/lib/intercom"
+import { getOpenCasesQueue, listIntercomAdmins, type InboxFilter } from "@/lib/intercom"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
 import { getAgentProfile } from "@/lib/agent"
 import { cn, relativeTime } from "@/lib/utils"
 
 export const dynamic = "force-dynamic"
 
+type CasesSearchParams = {
+  inbox?: string
+  sort?: string
+}
+
+function hrefForInbox(inbox: string, sort: string | undefined) {
+  const params = new URLSearchParams()
+  if (inbox !== "mine") params.set("inbox", inbox)
+  if (sort) params.set("sort", sort)
+  const query = params.toString()
+  return query ? `/cases?${query}` : "/cases"
+}
+
+function hrefForSort(sort: string, inbox: string) {
+  const params = new URLSearchParams()
+  if (inbox !== "mine") params.set("inbox", inbox)
+  params.set("sort", sort)
+  return `/cases?${params.toString()}`
+}
+
+function getInboxFilter(inboxParam: string | undefined): {
+  filter: InboxFilter
+  key: string
+} {
+  if (inboxParam === "unassigned") {
+    return { filter: { kind: "unassigned" }, key: "unassigned" }
+  }
+
+  if (inboxParam?.startsWith("admin:")) {
+    const adminId = inboxParam.slice("admin:".length)
+    if (adminId) {
+      return { filter: { kind: "admin", adminId }, key: inboxParam }
+    }
+  }
+
+  return { filter: { kind: "mine" }, key: "mine" }
+}
+
 export default async function CasesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sort?: string }>
+  searchParams: Promise<CasesSearchParams>
 }) {
-  const { sort } = await searchParams
+  const { inbox: inboxParam, sort } = await searchParams
   const oldestFirst = sort === "oldest"
+  const { filter: inbox, key: activeInbox } = getInboxFilter(inboxParam)
 
-  const [playbooks, agent] = await Promise.all([
+  const [playbooks, agent, admins] = await Promise.all([
     getPlaybooksDashboardData(),
     getAgentProfile(),
+    listIntercomAdmins(),
   ])
-  const cases = await getOpenCasesQueue(playbooks.allRows, agent.intercomAdminId)
+  const cases = await getOpenCasesQueue(playbooks.allRows, agent.intercomAdminId, inbox)
+
+  const activeAdmin =
+    inbox.kind === "admin"
+      ? admins.find((admin) => admin.id === inbox.adminId) ?? {
+          id: inbox.adminId,
+          name: `Admin ${inbox.adminId}`,
+          email: null,
+        }
+      : null
+  const inboxLabel =
+    inbox.kind === "unassigned"
+      ? "Unassigned"
+      : inbox.kind === "admin"
+        ? activeAdmin?.name ?? "Teammate"
+        : "Mine"
 
   // Sort by last activity (newest first by default).
   const rows = [...cases.rows].sort((a, b) => {
@@ -60,16 +115,63 @@ export default async function CasesPage({
 
       <main className="p-4 lg:p-6">
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <InboxIcon className="size-4 text-muted-foreground" />
-              Open Intercom cases
-            </CardTitle>
-            <CardDescription>
-              {cases.mode === "live"
-                ? "Conversations currently assigned to you. Click a row to open the case with playbook guidance and draft responses."
-                : "Demo rows — add INTERCOM_ADMIN_ID to see your real queue."}
-            </CardDescription>
+          <CardHeader className="gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <InboxIcon className="size-4 text-muted-foreground" />
+                Open Intercom cases
+              </CardTitle>
+              <CardDescription>
+                {cases.mode === "live"
+                  ? `Showing ${inboxLabel.toLowerCase()} open conversations. Click a row to open the case with playbook guidance and draft responses.`
+                  : "Demo rows — add INTERCOM_ADMIN_ID to see your real queue."}
+              </CardDescription>
+            </div>
+            <nav
+              className="flex gap-1 overflow-x-auto pb-1"
+              aria-label="Intercom inboxes"
+            >
+              <Link
+                href={hrefForInbox("mine", sort)}
+                className={cn(
+                  "whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted",
+                  activeInbox === "mine"
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Mine
+              </Link>
+              <Link
+                href={hrefForInbox("unassigned", sort)}
+                className={cn(
+                  "whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted",
+                  activeInbox === "unassigned"
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Unassigned
+              </Link>
+              {admins.map((admin) => {
+                const inboxKey = `admin:${admin.id}`
+                return (
+                  <Link
+                    key={admin.id}
+                    href={hrefForInbox(inboxKey, sort)}
+                    className={cn(
+                      "whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted",
+                      activeInbox === inboxKey
+                        ? "bg-muted text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    title={admin.email ?? admin.name}
+                  >
+                    {admin.name}
+                  </Link>
+                )
+              })}
+            </nav>
           </CardHeader>
           <CardContent>
             {cases.error && (
@@ -82,7 +184,7 @@ export default async function CasesPage({
               <div className="flex flex-col items-center gap-2 py-12 text-center">
                 <InboxIcon className="size-8 text-muted-foreground/40" />
                 <p className="text-sm text-muted-foreground">
-                  No open cases assigned to you right now.
+                  No open cases in {inboxLabel.toLowerCase()} right now.
                 </p>
               </div>
             ) : (
@@ -98,7 +200,7 @@ export default async function CasesPage({
                         Last activity
                         <span className="flex items-center gap-1 text-xs font-normal">
                           <Link
-                            href="/cases?sort=newest"
+                            href={hrefForSort("newest", activeInbox)}
                             className={cn(
                               "hover:text-foreground",
                               !oldestFirst ? "text-foreground" : "text-muted-foreground",
@@ -108,7 +210,7 @@ export default async function CasesPage({
                             ↓
                           </Link>
                           <Link
-                            href="/cases?sort=oldest"
+                            href={hrefForSort("oldest", activeInbox)}
                             className={cn(
                               "hover:text-foreground",
                               oldestFirst ? "text-foreground" : "text-muted-foreground",

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { getAgentContext } from "@/lib/automation/rules"
 import { searchMetricsForAdmin } from "@/lib/intercom"
 import type { AgentMetrics } from "@/lib/intercom"
+import { getReplyQueueMetrics } from "@/lib/reply-queue-store"
 
 export const dynamic = "force-dynamic"
 
@@ -58,6 +59,11 @@ export async function GET(req: Request) {
   // Normalize to dates for cache key.
   const startDate = toDateStr(startTs)
   const endDate = toDateStr(endTs)
+  const replyQueue = await getReplyQueueMetrics({
+    agentId,
+    startIso: new Date(startTs * 1000).toISOString(),
+    endIso: new Date(endTs * 1000).toISOString(),
+  })
 
   // Check cache (fresh within TTL).
   const { data: cached } = await db
@@ -71,7 +77,7 @@ export async function GET(req: Request) {
   if (cached && !forceRefresh) {
     const age = now - new Date(cached.created_at as string).getTime()
     if (age < CACHE_TTL_MS) {
-      return NextResponse.json(cached.data as AgentMetrics)
+      return NextResponse.json({ ...(cached.data as AgentMetrics), replyQueue })
     }
   }
 
@@ -97,11 +103,11 @@ export async function GET(req: Request) {
       { onConflict: "agent_id,start_date,end_date", ignoreDuplicates: false }
     )
 
-    return NextResponse.json(result)
+    return NextResponse.json({ ...result, replyQueue })
   } catch (e) {
     // If Intercom fails but we have stale cache, serve it as fallback.
     if (cached) {
-      return NextResponse.json(cached.data as AgentMetrics)
+      return NextResponse.json({ ...(cached.data as AgentMetrics), replyQueue })
     }
     return NextResponse.json({ error: (e as Error).message }, { status: 502 })
   }

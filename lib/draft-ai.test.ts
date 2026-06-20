@@ -97,6 +97,11 @@ describe("buildMacroAdaptSystemPrompt", () => {
     const out = buildMacroAdaptSystemPrompt(macroText, "Vini")
     expect(out.toLowerCase()).toContain("output only the customer-facing message")
   })
+
+  it("mandates a non-empty reply (guards the empty-output bug)", () => {
+    const out = buildMacroAdaptSystemPrompt(macroText, "Vini")
+    expect(out.toLowerCase()).toContain("never return an empty message")
+  })
 })
 
 describe("buildMacroAdaptUserMessage", () => {
@@ -120,7 +125,7 @@ describe("buildMacroAdaptUserMessage", () => {
   it("anchors the task on the macro from the system message", () => {
     const out = buildMacroAdaptUserMessage(convo)
     expect(out).toContain("approved macro from the system message")
-    expect(out.toLowerCase()).toContain("must be built from the macro")
+    expect(out.toLowerCase()).toContain("always output a complete")
   })
 
   it("does NOT reuse the generic draft instruction (the bug that ignored the macro)", () => {

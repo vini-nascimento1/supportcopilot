@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { validTimezone } from "@/lib/timezones"
 
 const SESSION_KEY = "fv-dashboard-greeting-seen"
@@ -50,9 +50,18 @@ const EVENING_PHRASES = [
   "Late nights, big impact, {name}. Keep it up!",
 ]
 
-function pickPhrase(hour: number, name: string): string {
+function hashString(value: string): number {
+  let hash = 0
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0
+  }
+  return hash
+}
+
+function pickPhrase(hour: number, name: string, dateKey: string): string {
   const pool = hour < 12 ? MORNING_PHRASES : hour < 18 ? AFTERNOON_PHRASES : EVENING_PHRASES
-  return pool[Math.floor(Math.random() * pool.length)]!.replace("{name}", name)
+  const idx = hashString(`${name}:${dateKey}:${hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`) % pool.length
+  return pool[idx]!.replace("{name}", name)
 }
 
 function getShortGreeting(hour: number): string {
@@ -129,14 +138,21 @@ export function DashboardGreeting({
   nextMeetingMinutes,
   savedTimezone,
 }: DashboardGreetingProps) {
-  const [isFirstVisit] = useState(getStoredVisitState)
-  const [browserTz] = useState(getBrowserTz)
+  const [isFirstVisit, setIsFirstVisit] = useState(false)
+  const [browserTz, setBrowserTz] = useState<string | undefined>(undefined)
   const [displayMinutes, setDisplayMinutes] = useState(nextMeetingMinutes)
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setIsFirstVisit(getStoredVisitState())
+      setBrowserTz(getBrowserTz())
+    })
+  }, [])
 
   // Tick down the meeting countdown every 30 seconds
   useEffect(() => {
     if (nextMeetingMinutes === undefined) return
-    setDisplayMinutes(nextMeetingMinutes)
+    queueMicrotask(() => setDisplayMinutes(nextMeetingMinutes))
     const id = setInterval(() => {
       setDisplayMinutes((prev) => (prev !== undefined && prev > 0 ? prev - 1 : 0))
     }, 30000)
@@ -144,12 +160,9 @@ export function DashboardGreeting({
   }, [nextMeetingMinutes])
 
   // User's saved timezone from settings takes priority; fall back to browser auto-detect
-  const tz = validTimezone(savedTimezone ?? browserTz)
+  const tz = validTimezone(savedTimezone ?? browserTz ?? "Europe/London")
 
-  // Pick the time-appropriate phrase once per session mount
-  const phraseRef = useRef<string | null>(null)
-
-  const { shortGreeting, todayLabel, localTime, ukTime } = useMemo(() => {
+  const { firstVisitHeading, shortGreeting, todayLabel, localTime, ukTime } = useMemo(() => {
     const now = new Date()
     const hour = tz
       ? parseInt(
@@ -157,11 +170,9 @@ export function DashboardGreeting({
           10,
         )
       : now.getHours()
-    // Pick phrase on first memoization (one per mount / tz change)
-    if (!phraseRef.current) {
-      phraseRef.current = pickPhrase(hour, firstName)
-    }
+    const dateKey = now.toLocaleDateString("en-CA", { timeZone: tz })
     return {
+      firstVisitHeading: pickPhrase(hour, firstName, dateKey),
       shortGreeting: getShortGreeting(hour),
       todayLabel: formatToday(now, tz),
       localTime: formatLocalTime(now, tz),
@@ -170,7 +181,7 @@ export function DashboardGreeting({
   }, [tz, firstName])
 
   const heading = isFirstVisit
-    ? phraseRef.current ?? `${shortGreeting}, ${firstName}!`
+    ? firstVisitHeading
     : `${shortGreeting}, ${firstName}! · ${caseCount} case${caseCount === 1 ? "" : "s"} open${
         displayMinutes !== undefined
           ? ` · next meeting in ${formatMeeting(displayMinutes)}`

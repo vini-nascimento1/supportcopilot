@@ -167,6 +167,9 @@ export type ConversationDetail = {
   tags: string[]
   topic: string | null
   updatedAt: string | null
+  /** Intercom admin_assignee_id of the teammate this conversation is assigned to
+      (null/0 = unassigned). Drives the per-user Notion token in the reply queue. */
+  adminAssigneeId: string | null
 }
 
 type IntercomConversationFull = {
@@ -176,6 +179,7 @@ type IntercomConversationFull = {
   created_at?: number | null
   updated_at?: number | null
   title?: string | null
+  admin_assignee_id?: number | string | null
   source?: {
     body?: string | null
     subject?: string | null
@@ -263,6 +267,11 @@ export async function getConversationDetail(
     tags: (conv.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean),
     topic: conv.topics?.topics?.[0]?.name ?? null,
     updatedAt: toDate(conv.updated_at),
+    // Intercom encodes "unassigned" as admin_assignee_id = 0; normalize to null.
+    adminAssigneeId:
+      conv.admin_assignee_id != null && String(conv.admin_assignee_id) !== "0"
+        ? String(conv.admin_assignee_id)
+        : null,
   }
 }
 
@@ -668,6 +677,27 @@ export type AgentMetrics = {
   perDayCsat: number | null
   /** Number of working days in the period (0=Sun..6=Sat). Set by API route (not by searchMetricsForAdmin). */
   workingDays?: number | null
+  /** Human decisions on the autonomous non-read reply queue in the same period. */
+  replyQueue?: {
+    total: number
+    approved: number
+    edited: number
+    rejected: number
+    assigned: number
+    approvalRate: number | null
+    editRate: number | null
+    rejectRate: number | null
+    byRiskBand: Array<{
+      riskBand: "ready" | "needs_check" | "low_confidence"
+      total: number
+      approved: number
+      edited: number
+      rejected: number
+      assigned: number
+      approvalRate: number | null
+      editRate: number | null
+    }>
+  }
 }
 
 type MetricsWindowRaw = {

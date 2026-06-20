@@ -16,6 +16,11 @@ function fmtPct(v: number | null): string {
   return `${Math.round(v)}`
 }
 
+function fmtRate(v: number | null): string {
+  if (v == null) return "—"
+  return `${Math.round(v)}%`
+}
+
 function fmtSecToMin(sec: number | null): string {
   if (sec == null) return "—"
   if (sec < 60) return `<1m`
@@ -67,7 +72,7 @@ export default function MetricsClient() {
   }
 
   useEffect(() => {
-    loadData(startDate, endDate)
+    queueMicrotask(() => loadData(startDate, endDate))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -252,6 +257,81 @@ export default function MetricsClient() {
                   </CardContent>
                 </Card>
               </div>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-sm font-semibold text-muted-foreground">AI Reply Queue</h2>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">Approval Rate</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-3xl font-bold">{fmtRate(metrics.replyQueue?.approvalRate ?? null)}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {(metrics.replyQueue?.approved ?? 0) + (metrics.replyQueue?.edited ?? 0)} sent · {metrics.replyQueue?.total ?? 0} decisions
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">Edit Frequency</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-3xl font-bold">{fmtRate(metrics.replyQueue?.editRate ?? null)}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {metrics.replyQueue?.edited ?? 0} edited sends
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">Rejected</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-3xl font-bold">{metrics.replyQueue?.rejected ?? 0}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {fmtRate(metrics.replyQueue?.rejectRate ?? null)} reject rate
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">Assigned From Pool</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-3xl font-bold">{metrics.replyQueue?.assigned ?? 0}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">human-gated claims</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {metrics.replyQueue?.byRiskBand?.length ? (
+                <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                  {metrics.replyQueue.byRiskBand.map((band) => (
+                    <Card key={band.riskBand}>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium text-muted-foreground">
+                          {band.riskBand === "needs_check"
+                            ? "Needs your check"
+                            : band.riskBand === "low_confidence"
+                              ? "Low confidence"
+                              : "Ready"}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-1 text-sm">
+                        <p className="font-medium">{fmtRate(band.approvalRate)} approval</p>
+                        <p className="text-xs text-muted-foreground">
+                          {band.approved} approved · {band.edited} edited · {band.rejected} rejected · {band.assigned} assigned
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : null}
             </section>
           </>
         )}
