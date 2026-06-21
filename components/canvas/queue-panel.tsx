@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import {
@@ -8,8 +8,6 @@ import {
   InboxIcon,
   InfoIcon,
   Loader2Icon,
-  PanelLeftCloseIcon,
-  PanelLeftOpenIcon,
   PencilIcon,
   ShieldAlertIcon,
   UserPlusIcon,
@@ -22,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
 import { onCanvasRefresh } from "@/lib/canvas-refresh"
-import { cn, relativeTime } from "@/lib/utils"
+import { relativeTime } from "@/lib/utils"
 
 // Mirrors lib/reply-queue-store.ts QueueItem (defined locally — that module is
 // server-only, can't be imported into a client component).
@@ -45,46 +43,21 @@ type QueueItem = {
 const byOldest = (a: QueueItem, b: QueueItem) =>
   new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
 
-const COLLAPSE_KEY = "fv-canvas-queue-collapsed"
-const COLLAPSE_EVENT = "fv-canvas-queue-toggled"
-
-function subscribeCollapse(cb: () => void) {
-  window.addEventListener(COLLAPSE_EVENT, cb)
-  return () => window.removeEventListener(COLLAPSE_EVENT, cb)
-}
-
-function readCollapsed(): string {
-  try {
-    // Collapsed by default — the canvas already shows the app sidebar, so
-    // opening the queue too would eat ~a third of the window. Agents open it
-    // when they want to work the queue; the choice then persists.
-    return localStorage.getItem(COLLAPSE_KEY) ?? "1"
-  } catch {
-    return "1"
-  }
-}
-
-// The autonomous non-read AI reply queue as a fixed left sidebar on every canvas
-// (collapsible to a thin rail). It surfaces pre-computed suggestions in two
-// bands; the agent approves the send with one click (human-gated) without
-// leaving canvas mode. Draft-only: nothing leaves the system without that click.
-export function QueueSidebar() {
+// The autonomous non-read AI reply queue: pre-computed suggestions for the
+// conversations assigned to the signed-in agent, in two bands. The agent
+// approves the send with one click (human-gated). Draft-only: nothing leaves the
+// system without that click. Rendered as the "Queue" tab of the canvas left
+// sidebar (see canvas-left-sidebar.tsx).
+export function QueuePanel({
+  active,
+  onCount,
+}: {
+  active: boolean
+  onCount?: (n: number) => void
+}) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Collapse preference in localStorage (collapsed by default)
-  const collapsed =
-    useSyncExternalStore(subscribeCollapse, readCollapsed, () => "1") === "1"
-  const toggle = () => {
-    try {
-      localStorage.setItem(COLLAPSE_KEY, collapsed ? "0" : "1")
-    } catch {
-      // ignore
-    }
-    window.dispatchEvent(new Event(COLLAPSE_EVENT))
-  }
-
-  // Load the non-read reply queue; poll every 30s and on canvas refresh.
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/reply-queue")
@@ -97,9 +70,11 @@ export function QueueSidebar() {
     }
   }, [])
 
+  // Poll every 30s + on canvas refresh, but only while this tab is the active,
+  // visible one — no background polling when the agent is on the Inbox tab or
+  // the sidebar is collapsed.
   useEffect(() => {
-    // Defer the initial fetch off the synchronous effect body so the first
-    // setState doesn't cascade a render (react-hooks/set-state-in-effect).
+    if (!active) return
     queueMicrotask(() => void load())
     const id = setInterval(() => void load(), 30_000)
     const off = onCanvasRefresh(() => void load())
@@ -107,60 +82,22 @@ export function QueueSidebar() {
       clearInterval(id)
       off()
     }
-  }, [load])
+  }, [active, load])
+
+  useEffect(() => {
+    onCount?.(items?.length ?? 0)
+  }, [items, onCount])
 
   const remove = useCallback((id: string) => {
     setItems((prev) => (prev ? prev.filter((i) => i.id !== id) : prev))
   }, [])
 
   const count = items?.length ?? 0
-
-  if (collapsed) {
-    return (
-      <div
-        data-canvas-chrome="left"
-        className="absolute left-0 top-0 z-10 flex h-full w-9 flex-col items-center gap-2 border-r bg-card/95 py-3 backdrop-blur"
-      >
-        <button
-          onClick={toggle}
-          title="Open the reply queue"
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <PanelLeftOpenIcon className="size-4" />
-        </button>
-        <InboxIcon className="size-4 text-muted-foreground" />
-        {count > 0 && <Badge className="h-5 px-1.5 text-[10px]">{count}</Badge>}
-      </div>
-    )
-  }
-
-  const ready =
-    items?.filter((i) => i.riskBand !== "needs_check").sort(byOldest) ?? []
-  const needsCheck =
-    items?.filter((i) => i.riskBand === "needs_check").sort(byOldest) ?? []
+  const ready = items?.filter((i) => i.riskBand !== "needs_check").sort(byOldest) ?? []
+  const needsCheck = items?.filter((i) => i.riskBand === "needs_check").sort(byOldest) ?? []
 
   return (
-    <div
-      data-canvas-chrome="left"
-      className="absolute left-0 top-0 z-10 flex h-full w-80 flex-col border-r bg-card/95 backdrop-blur"
-    >
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
-        <InboxIcon className="size-4 text-muted-foreground" />
-        <span className="text-xs font-medium">Reply queue</span>
-        {items !== null && (
-          <Badge variant="secondary" className="h-5 px-1.5 font-normal">
-            {count}
-          </Badge>
-        )}
-        <button
-          onClick={toggle}
-          title="Collapse the queue"
-          className="ml-auto text-muted-foreground hover:text-foreground"
-        >
-          <PanelLeftCloseIcon className="size-4" />
-        </button>
-      </div>
-
+    <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
         {items === null && <QueueSkeleton />}
         {items !== null && count === 0 && <EmptyState error={error} />}
@@ -223,8 +160,7 @@ function Band({
 
 // A compact row by default: customer + waited time + 1-line subject. Clicking
 // the header expands it inline to reveal the suggested body, the "Why" popover,
-// inline quick-edit, and the approve actions. Reuses the lobby QueueCard logic
-// (approve → send → resolve, two-step confirm for locked rows) verbatim.
+// inline quick-edit, and the approve actions.
 function QueueRow({
   item,
   onDone,
@@ -548,10 +484,11 @@ function EmptyState({ error }: { error: string | null }) {
   return (
     <div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
       <div
-        className={cn(
-          "flex size-10 items-center justify-center rounded-full",
-          error ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"
-        )}
+        className={
+          error
+            ? "flex size-10 items-center justify-center rounded-full bg-destructive/10 text-destructive"
+            : "flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        }
       >
         <InboxIcon className="size-5" />
       </div>
@@ -561,7 +498,7 @@ function EmptyState({ error }: { error: string | null }) {
       <p className="text-[11px] leading-snug text-muted-foreground">
         {error
           ? "Retrying every 30 seconds. Open a case directly if you need it now."
-          : "New customer replies show up here as the AI drafts a suggestion — usually within a few seconds."}
+          : "Suggestions for conversations assigned to you show up here as the AI drafts them — usually within a few seconds."}
       </p>
     </div>
   )
