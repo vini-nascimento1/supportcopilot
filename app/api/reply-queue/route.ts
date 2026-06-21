@@ -66,7 +66,12 @@ export async function GET(request: Request) {
       .filter((p) => !nonRead.has(p.intercomConversationId))
       .map((p) => p.intercomConversationId)
     const missing = [...nonRead].filter((id) => !haveDraft.has(id))
-    const origin = new URL(request.url).origin
+    const url = new URL(request.url)
+    const origin = url.origin
+    // ?force=1 (the manual "Refresh" button) bypasses the recency guard so the
+    // agent can generate any still-missing drafts on demand instead of waiting
+    // for the next poll window.
+    const force = url.searchParams.get("force") === "1"
 
     after(async () => {
       try {
@@ -74,10 +79,13 @@ export async function GET(request: Request) {
           await markSuggestionsStaleByConversations(agentId, noLongerNonRead)
         }
         if (missing.length > 0) {
-          const sinceIso = new Date(Date.now() - BACKFILL_WINDOW_MS).toISOString()
-          const recent = await getRecentlyTouchedConversationIds(missing, sinceIso)
-          const toCompute = missing.filter((id) => !recent.has(id)).slice(0, BACKFILL_MAX)
-          for (const id of toCompute) {
+          let toCompute = missing
+          if (!force) {
+            const sinceIso = new Date(Date.now() - BACKFILL_WINDOW_MS).toISOString()
+            const recent = await getRecentlyTouchedConversationIds(missing, sinceIso)
+            toCompute = missing.filter((id) => !recent.has(id))
+          }
+          for (const id of toCompute.slice(0, BACKFILL_MAX)) {
             await computeAndPersistSuggestion(id, origin).catch(() => {})
           }
         }

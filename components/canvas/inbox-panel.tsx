@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ExternalLinkIcon, InboxIcon, Loader2Icon, UserPlusIcon } from "lucide-react"
+import {
+  ExternalLinkIcon,
+  InboxIcon,
+  Loader2Icon,
+  RefreshCwIcon,
+  UserPlusIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -18,8 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
-import { onCanvasRefresh } from "@/lib/canvas-refresh"
-import { relativeTime } from "@/lib/utils"
+import { broadcastCanvasRefresh, onCanvasRefresh } from "@/lib/canvas-refresh"
+import { cn, relativeTime } from "@/lib/utils"
 
 // Mirrors the server types (lib/intercom.ts SupportCase / IntercomAdmin and
 // lib/case-intelligence.ts CaseTip) — those modules are server-only and can't be
@@ -72,6 +78,7 @@ export function InboxPanel({
   const [admins, setAdmins] = useState<IntercomAdmin[]>([])
   const [data, setData] = useState<CasesData | null>(null)
   const [assigningId, setAssigningId] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   const selectInbox = (key: string) => {
     setData(null) // show the skeleton while the new box loads
@@ -137,6 +144,24 @@ export function InboxPanel({
 
   const showAssign = inbox !== "mine"
 
+  // Manual "Refresh" — runs the whole loop on demand instead of waiting for the
+  // poll: reload this inbox now AND force the AI to (re)generate drafts for any
+  // non-read conversations that are still missing one (?force=1 bypasses the
+  // backfill recency guard). broadcastCanvasRefresh nudges the Queue tab too.
+  const manualRefresh = async () => {
+    setRefreshing(true)
+    try {
+      await Promise.all([
+        load(),
+        fetch("/api/reply-queue?force=1").catch(() => {}),
+      ])
+      broadcastCanvasRefresh()
+      toast.success("Refreshed — AI drafts are generating; they'll land in the Queue tab.")
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   const assignToMe = async (id: string) => {
     setAssigningId(id)
     try {
@@ -191,6 +216,16 @@ export function InboxPanel({
             {rows.length}
           </Badge>
         )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 w-7 shrink-0 px-0 text-muted-foreground hover:text-foreground"
+          onClick={() => void manualRefresh()}
+          disabled={refreshing}
+          title="Refresh now — reloads this inbox and generates any missing AI drafts"
+        >
+          <RefreshCwIcon className={cn("size-3.5", refreshing && "animate-spin")} />
+        </Button>
       </div>
 
       <div className="flex-1 overflow-y-auto">
