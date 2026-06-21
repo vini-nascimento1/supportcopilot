@@ -70,7 +70,7 @@ import { NotesNode } from "@/components/canvas/notes-node"
 import { AiNode, type AiNodeData } from "@/components/canvas/ai-node"
 import { MacrosNode } from "@/components/canvas/macros-node"
 import { QueueNode } from "@/components/canvas/queue-node"
-import { QueueSidebar } from "@/components/canvas/queue-sidebar"
+import { CanvasLeftSidebar } from "@/components/canvas/canvas-left-sidebar"
 import {
   ConversationNode,
   type ConversationData,
@@ -703,7 +703,7 @@ function CanvasInner(props: CaseCanvasProps) {
         clipped to it (minus the docked chrome below) so they never overlay the
         sidebars or toolbox. See lib/canvas-bounds.ts. */}
     <div data-canvas-pane className="relative h-full w-full">
-      <QueueSidebar />
+      <CanvasLeftSidebar />
 
       {/* Toolbox — right-docked chrome; native tool views are clipped to its left edge */}
       <div
