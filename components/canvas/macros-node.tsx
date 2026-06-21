@@ -11,6 +11,7 @@ import {
   SearchIcon,
   SendIcon,
   SparklesIcon,
+  XIcon,
   ZapIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -92,11 +93,22 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
     setTimeout(() => setCopiedId((c) => (c === m.id ? null : c)), 1000)
   }, [])
 
+  // Send a macro as an admin reply. If an adapted draft exists for this macro we
+  // send THAT (the edited, AI-adapted text) — never silently the original. The
+  // original macro is HTML (send as-is); the adapted draft is markdown (the send
+  // endpoint converts it). This is what fixes the footgun where Send shipped the
+  // raw macro even though the agent had adapted it.
   const send = useCallback(
     async (m: MacroRow) => {
       if (!data.conversationId) return
-      const preview = (m.bodyText ?? htmlToText(m.body)).slice(0, 140)
-      if (!window.confirm(`Send macro "${m.name}" as an admin reply in Intercom?\n\n${preview}…`)) {
+      const adapted = adaptedDrafts[m.id]
+      const useAdapted = adapted !== undefined
+      const text = useAdapted ? adapted : m.body
+      if (!text.trim()) return
+
+      const previewSrc = useAdapted ? text : m.bodyText ?? htmlToText(m.body)
+      const label = useAdapted ? `the adapted reply for "${m.name}"` : `macro "${m.name}" as-is`
+      if (!window.confirm(`Send ${label} as an admin reply in Intercom?\n\n${previewSrc.slice(0, 160)}…`)) {
         return
       }
       setSendingId(m.id)
@@ -106,20 +118,30 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             conversationId: data.conversationId,
-            body: m.body,
-            html: true,
+            body: text,
+            html: !useAdapted, // original macro = HTML as-is; adapted = markdown
           }),
         })
         if (!res.ok) throw new Error(await res.text())
-        toast.success(`Sent "${m.name}" to the conversation`)
+        toast.success(
+          useAdapted ? `Sent the adapted reply for "${m.name}"` : `Sent "${m.name}" to the conversation`
+        )
       } catch (e) {
         toast.error(`Send failed: ${(e as Error).message}`)
       } finally {
         setSendingId(null)
       }
     },
-    [data.conversationId],
+    [data.conversationId, adaptedDrafts],
   )
+
+  const discardAdapted = useCallback((id: string) => {
+    setAdaptedDrafts((d) => {
+      const next = { ...d }
+      delete next[id]
+      return next
+    })
+  }, [])
 
   // Adapt a macro to THIS case via deepseek. Streams a draft into an inline,
   // editable preview under the row. Draft-only: nothing is ever sent here.
@@ -177,7 +199,7 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
         <span
           className="flex shrink-0 items-center text-muted-foreground"
           aria-label="About macros"
-          title="Approved canned replies synced from Intercom. Send inserts one as-is; ✨ Adapt rewrites one to fit this case (macro + conversation). No Notion."
+          title="Approved canned replies synced from Intercom. Send inserts the macro as-is; ✨ Adapt rewrites it to fit this case — then review/edit and send the adapted version (Send uses the adapted draft when one exists). No Notion."
         >
           <InfoIcon className="size-3" />
         </span>
@@ -267,14 +289,24 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
                       variant="ghost"
                       size="icon"
                       className="size-6"
-                      title="Send as admin reply in Intercom"
+                      title={
+                        adaptedDrafts[m.id] !== undefined
+                          ? "Send the adapted reply (not the original macro)"
+                          : "Send macro as-is in Intercom"
+                      }
                       onClick={() => send(m)}
-                      disabled={sendingId === m.id}
+                      disabled={sendingId === m.id || adaptingId === m.id}
                     >
                       {sendingId === m.id ? (
                         <Loader2Icon className="size-3 animate-spin" />
                       ) : (
-                        <SendIcon className="size-3" />
+                        <SendIcon
+                          className={
+                            adaptedDrafts[m.id] !== undefined
+                              ? "size-3 text-violet-500"
+                              : "size-3"
+                          }
+                        />
                       )}
                     </Button>
                   )}
@@ -288,22 +320,52 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
                   <div className="mb-1 flex items-center gap-1">
                     <SparklesIcon className="size-2.5 text-violet-500" />
                     <span className="text-[10px] font-medium text-violet-700 dark:text-violet-300">
-                      Adapted draft — review &amp; copy (not sent)
+                      Adapted draft — review &amp; edit, then send
                     </span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="ml-auto size-5"
-                      title="Copy adapted draft"
-                      disabled={!adaptedDrafts[m.id]}
-                      onClick={() => copyAdapted(m.id, adaptedDrafts[m.id])}
-                    >
-                      {adaptCopiedId === m.id ? (
-                        <CheckIcon className="size-2.5 text-emerald-500" />
-                      ) : (
-                        <CopyIcon className="size-2.5" />
-                      )}
-                    </Button>
+                    <div className="ml-auto flex items-center gap-0.5">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-5"
+                        title="Copy adapted draft"
+                        disabled={!adaptedDrafts[m.id]}
+                        onClick={() => copyAdapted(m.id, adaptedDrafts[m.id])}
+                      >
+                        {adaptCopiedId === m.id ? (
+                          <CheckIcon className="size-2.5 text-emerald-500" />
+                        ) : (
+                          <CopyIcon className="size-2.5" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-5"
+                        title="Send this adapted reply in Intercom"
+                        disabled={
+                          !adaptedDrafts[m.id]?.trim() ||
+                          adaptingId === m.id ||
+                          sendingId === m.id
+                        }
+                        onClick={() => send(m)}
+                      >
+                        {sendingId === m.id ? (
+                          <Loader2Icon className="size-2.5 animate-spin" />
+                        ) : (
+                          <SendIcon className="size-2.5 text-violet-600 dark:text-violet-400" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-5"
+                        title="Discard adapted draft (revert to sending the macro as-is)"
+                        disabled={adaptingId === m.id || sendingId === m.id}
+                        onClick={() => discardAdapted(m.id)}
+                      >
+                        <XIcon className="size-2.5" />
+                      </Button>
+                    </div>
                   </div>
                   <textarea
                     className="h-24 w-full resize-y rounded border bg-background p-1.5 text-[11px] leading-snug focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-violet-400"
