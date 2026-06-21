@@ -29,7 +29,9 @@ import {
 
 // The always-on reply-queue pipeline — runs off the Intercom webhook (in the
 // background via `after()`). Composes the existing brain: gate -> Notion
-// ai_search (assigned only) -> deepseek generation -> persist a suggestion.
+// ai_search -> deepseek generation -> persist a suggestion. ASSIGNED-ONLY: it
+// only drafts for conversations owned by one of our agents (the unassigned
+// workspace firehose is skipped — see the gate in computeAndPersistSuggestion).
 // DRAFT-ONLY: it ONLY writes a suggested_replies row. It never sends, never
 // assigns, never writes to Intercom. See
 // FanvueSupport/Engineering/Plan - Autonomous non-read reply queue.md.
@@ -134,6 +136,18 @@ export async function computeAndPersistSuggestion(
   // path this matches the incoming event; on the assign path it reflects the
   // assignment we just wrote, so the per-user Notion token kicks in.
   const owner = await resolveOwner(conversation.adminAssigneeId)
+
+  // ASSIGNED-ONLY GATE. Only draft for conversations owned by one of our agents.
+  // Previously every inbound customer message across the whole Intercom
+  // workspace produced an unassigned suggestion (owner_id = null) — a firehose
+  // that buried each agent's own work and burned an LLM generation per message.
+  // The queue is now a per-agent worklist (getPendingQueue is owner-scoped), so
+  // an ownerless suggestion would never be seen by anyone. Bail before the gate
+  // /Notion/generation work. The assign endpoint reaches here with the assignee
+  // already written, so its recompute still resolves an owner and proceeds.
+  if (!owner.id) {
+    return { handled: true, action: "skipped", reason: "unassigned (assigned-only gate)" }
+  }
 
   const capabilityGap = hasCapabilityGap(conversation.tags)
 

@@ -138,17 +138,29 @@ async function getAuthClient() {
   )
 }
 
-// The non-read queue the signed-in agent can see: their own pending suggestions
-// plus the unassigned pool (the RLS policies enforce exactly this scope). Newest
-// first; the UI splits into the two bands and orders by SLA within each.
+// The non-read queue is the signed-in agent's PERSONAL worklist: only the
+// conversations currently assigned to them in Intercom (owner_id = their agent
+// id). RLS alone is too broad here — its "unassigned pool" policy would also
+// surface every unassigned conversation in the whole workspace (hundreds of
+// rows, the firehose), which buries the agent's own work. So we resolve the
+// caller's agent id and filter to it explicitly. Newest first; the UI splits
+// into bands and orders by SLA within each.
 export async function getPendingQueue(): Promise<QueueItem[]> {
   const supabase = await getAuthClient()
+
+  // RLS on `agents` returns only the caller's own row, so this resolves the
+  // signed-in agent's id. No agent row (or no session) → empty queue.
+  const { data: agent } = await supabase.from("agents").select("id").maybeSingle()
+  const agentId = (agent?.id as string | undefined) ?? null
+  if (!agentId) return []
+
   const { data } = await supabase
     .from("suggested_replies")
     .select(
       "id, intercom_conversation_id, owner_id, customer_name, subject, body, justification, sources, confidence, risk_band, created_at"
     )
     .eq("status", "pending")
+    .eq("owner_id", agentId)
     .order("created_at", { ascending: false })
     .limit(200)
 
