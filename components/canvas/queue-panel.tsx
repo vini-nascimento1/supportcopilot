@@ -10,6 +10,7 @@ import {
   Loader2Icon,
   PencilIcon,
   ShieldAlertIcon,
+  SparklesIcon,
   UserPlusIcon,
 } from "lucide-react"
 
@@ -39,6 +40,13 @@ type QueueItem = {
   riskBand: RiskBand
   createdAt: string
 }
+// A non-read conversation whose AI draft is still being generated (no ready row
+// yet). Mirrors the `drafting` payload from /api/reply-queue.
+type DraftingItem = {
+  conversationId: string
+  customerName: string | null
+  subject: string | null
+}
 
 const byOldest = (a: QueueItem, b: QueueItem) =>
   new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
@@ -56,6 +64,7 @@ export function QueuePanel({
   onCount?: (n: number) => void
 }) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
+  const [drafting, setDrafting] = useState<DraftingItem[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -63,6 +72,7 @@ export function QueuePanel({
       const res = await fetch("/api/reply-queue")
       const data = await res.json()
       setItems(Array.isArray(data.items) ? data.items : [])
+      setDrafting(Array.isArray(data.drafting) ? data.drafting : [])
       setError(typeof data.error === "string" ? data.error : null)
     } catch {
       setError("Couldn't load the reply queue.")
@@ -87,25 +97,44 @@ export function QueuePanel({
   }, [active, load])
 
   useEffect(() => {
-    onCount?.(items?.length ?? 0)
-  }, [items, onCount])
+    onCount?.((items?.length ?? 0) + drafting.length)
+  }, [items, drafting, onCount])
 
   const remove = useCallback((id: string) => {
     setItems((prev) => (prev ? prev.filter((i) => i.id !== id) : prev))
   }, [])
 
-  const count = items?.length ?? 0
   const ready = items?.filter((i) => i.riskBand !== "needs_check").sort(byOldest) ?? []
   const needsCheck = items?.filter((i) => i.riskBand === "needs_check").sort(byOldest) ?? []
+  const total = (items?.length ?? 0) + drafting.length
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
         {items === null && <QueueSkeleton />}
-        {items !== null && count === 0 && <EmptyState error={error} />}
-        {items !== null && count > 0 && (
+        {items !== null && total === 0 && <EmptyState error={error} />}
+        {items !== null && total > 0 && (
           <div className="flex flex-col gap-4 p-2">
             {error && <p className="px-1 text-xs text-destructive">{error}</p>}
+            {drafting.length > 0 && (
+              <section className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5 px-1">
+                  <SparklesIcon className="size-3 text-primary" />
+                  <h2 className="text-xs font-medium">Drafting</h2>
+                  <Badge
+                    variant="secondary"
+                    className="h-4 px-1 text-[10px] font-normal tabular-nums"
+                  >
+                    {drafting.length}
+                  </Badge>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {drafting.map((d) => (
+                    <DraftingCard key={d.conversationId} item={d} />
+                  ))}
+                </div>
+              </section>
+            )}
             {ready.length > 0 && (
               <Band
                 title="Ready to send"
@@ -132,6 +161,45 @@ export function QueuePanel({
         )}
       </div>
     </div>
+  )
+}
+
+// Placeholder card shown while the AI is generating a draft for a non-read
+// conversation — an animated sparkle, who it's for, a typing-dots ellipsis, and
+// shimmering skeleton lines. Replaced by the real QueueRow on the next poll.
+function DraftingCard({ item }: { item: DraftingItem }) {
+  return (
+    <article className="overflow-hidden rounded-md border bg-card">
+      <div className="flex items-center gap-2 px-2.5 pt-2">
+        <SparklesIcon className="size-3.5 shrink-0 animate-pulse text-primary" />
+        <span className="truncate text-xs font-medium text-muted-foreground">
+          Drafting a reply for{" "}
+          <span className="text-foreground">{item.customerName ?? "the customer"}</span>
+        </span>
+        <TypingDots />
+      </div>
+      {item.subject && (
+        <p className="truncate px-2.5 pt-0.5 text-[11px] text-muted-foreground/70">
+          {item.subject}
+        </p>
+      )}
+      <div className="flex flex-col gap-1.5 px-2.5 pb-2.5 pt-2">
+        <Skeleton className="h-2.5 w-full" />
+        <Skeleton className="h-2.5 w-11/12" />
+        <Skeleton className="h-2.5 w-2/3" />
+      </div>
+    </article>
+  )
+}
+
+// Three softly-staggered pulsing dots — a lightweight "…thinking" affordance.
+function TypingDots() {
+  return (
+    <span className="ml-auto inline-flex shrink-0 gap-0.5 text-primary" aria-hidden>
+      <span className="animate-pulse">•</span>
+      <span className="animate-pulse [animation-delay:200ms]">•</span>
+      <span className="animate-pulse [animation-delay:400ms]">•</span>
+    </span>
   )
 }
 

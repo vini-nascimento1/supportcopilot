@@ -2,7 +2,7 @@ import { NextResponse, after } from "next/server"
 
 import { getSignedInEmail } from "@/lib/auth"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
-import { getNonReadAssignedConvIds } from "@/lib/intercom"
+import { getNonReadAssignedConversations } from "@/lib/intercom"
 import {
   getPendingSuggestionsForAgent,
   markSuggestionsStaleByConversations,
@@ -49,23 +49,30 @@ export async function GET(request: Request) {
   try {
     const [pending, nonRead] = await Promise.all([
       getPendingSuggestionsForAgent(agentId),
-      adminId ? getNonReadAssignedConvIds(adminId) : Promise.resolve(null),
+      adminId ? getNonReadAssignedConversations(adminId) : Promise.resolve(null),
     ])
 
     // Intercom unreachable / no admin id → show cached suggestions as-is rather
     // than emptying the queue on a transient outage.
     if (!nonRead) {
-      return NextResponse.json({ items: pending })
+      return NextResponse.json({ items: pending, drafting: [] })
     }
 
-    const items = pending.filter((p) => nonRead.has(p.intercomConversationId))
+    const nonReadIds = new Set(nonRead.map((c) => c.id))
+    const items = pending.filter((p) => nonReadIds.has(p.intercomConversationId))
+
+    // Non-read conversations with no ready draft yet — surfaced to the UI as
+    // "drafting…" placeholders and (re)generated in the background below.
+    const haveDraft = new Set(pending.map((p) => p.intercomConversationId))
+    const drafting = nonRead
+      .filter((c) => !haveDraft.has(c.id))
+      .map((c) => ({ conversationId: c.id, customerName: c.customer, subject: c.subject }))
 
     // Reconcile in the background — never block the response.
-    const haveDraft = new Set(pending.map((p) => p.intercomConversationId))
     const noLongerNonRead = pending
-      .filter((p) => !nonRead.has(p.intercomConversationId))
+      .filter((p) => !nonReadIds.has(p.intercomConversationId))
       .map((p) => p.intercomConversationId)
-    const missing = [...nonRead].filter((id) => !haveDraft.has(id))
+    const missing = drafting.map((d) => d.conversationId)
     const url = new URL(request.url)
     const origin = url.origin
     // ?force=1 (the manual "Refresh" button) bypasses the recency guard so the
@@ -94,8 +101,8 @@ export async function GET(request: Request) {
       }
     })
 
-    return NextResponse.json({ items })
+    return NextResponse.json({ items, drafting })
   } catch {
-    return NextResponse.json({ items: [], error: "Couldn't load the reply queue." })
+    return NextResponse.json({ items: [], drafting: [], error: "Couldn't load the reply queue." })
   }
 }

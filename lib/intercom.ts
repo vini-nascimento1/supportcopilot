@@ -398,16 +398,21 @@ export async function getOpenCasesQueue(
   }
 }
 
-// The set of conversation ids currently assigned to `adminId`, open, and
-// NON-READ (waiting on a teammate reply — `waiting_since` is set). This is the
-// live source of truth for the AI reply queue: a conversation the agent has
-// already answered (read) has `waiting_since` cleared and must drop out of the
-// fast-reply queue. Returns null on misconfig/error so callers can degrade
-// gracefully (fall back to the cached suggestions) rather than empty the queue.
-export async function getNonReadAssignedConvIds(adminId: string): Promise<Set<string> | null> {
+export type NonReadConversation = { id: string; customer: string; subject: string }
+
+// The conversations currently assigned to `adminId`, open, and NON-READ (waiting
+// on a teammate reply — `waiting_since` is set). The live source of truth for the
+// AI reply queue: a conversation the agent already answered (read) has
+// `waiting_since` cleared and drops out. Carries the customer label + a short
+// subject so the queue can render a "drafting…" placeholder before the AI draft
+// lands. Returns null on misconfig/error so callers can degrade gracefully (fall
+// back to the cached suggestions) rather than empty the queue.
+export async function getNonReadAssignedConversations(
+  adminId: string
+): Promise<NonReadConversation[] | null> {
   if (!intercomToken || !adminId) return null
 
-  const ids = new Set<string>()
+  const result: NonReadConversation[] = []
   let startingAfter: string | undefined
 
   try {
@@ -445,7 +450,9 @@ export async function getNonReadAssignedConvIds(adminId: string): Promise<Set<st
       }
       const conversations = payload.conversations ?? payload.data ?? []
       for (const c of conversations) {
-        if (c.waiting_since != null) ids.add(String(c.id))
+        if (c.waiting_since != null) {
+          result.push({ id: String(c.id), customer: getCustomerLabel(c), subject: getSnippet(c) })
+        }
       }
       startingAfter = payload.pages?.next?.starting_after
     } while (startingAfter)
@@ -453,7 +460,7 @@ export async function getNonReadAssignedConvIds(adminId: string): Promise<Set<st
     return null
   }
 
-  return ids
+  return result
 }
 
 // ── Live conversation feed for the automation engine ──────────────────────
