@@ -53,6 +53,7 @@ Playbooks cover only some cases — when the thread and the playbook disagree, t
 - No intro like "Here's a draft:", no markdown headers (no ##, no ###), no internal commentary.
 - Personalize to the customer's specific situation without using their real name.
 - If the playbook and articles don't cover the issue, acknowledge warmly and ask one focused clarifying question.
+- **Write in English only.** The customer conversation may be in any language, but your reply must always be in English.
 
 ## Closing the conversation
 - If the customer has already been answered per the knowledge base articles (policy, steps, or procedures already explained in the thread) and they keep insisting or asking the same thing: **be firm but polite, restate the policy one last time, and signal that the conversation is being closed**.
@@ -256,6 +257,7 @@ Your task: rewrite the internal Slack thread below into a clear, professional cu
 - Maintain a warm, professional first-person tone.
 - Output ONLY the customer-facing message — ready to copy-paste. No intro, no markdown headers, no internal commentary.
 - Never promise timelines, refunds, or exceptions not stated in the thread.
+- **Write in English only.** The Slack thread may be in any language, but your reply must always be in English.
 
 ## Internal Slack thread (from #${channelName})
 ${threadLines.join("\n")}
@@ -295,6 +297,7 @@ Your task: **rewrite the approved macro below** so it fits this specific convers
 ## Critical constraints
 - Output ONLY the customer-facing message text (markdown) — ready to copy-paste.
 - No preamble like "Here's the adapted macro:", no markdown headers (no ##, no ###), no internal commentary.
+- **Write in English only.** The conversation may be in any language, but your adapted reply must always be in English.
 
 ## Approved macro to adapt
 ${macroBodyText}`
