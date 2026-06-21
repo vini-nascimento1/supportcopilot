@@ -76,7 +76,9 @@ export function QueuePanel({
   useEffect(() => {
     if (!active) return
     queueMicrotask(() => void load())
-    const id = setInterval(() => void load(), 30_000)
+    // Each poll reconciles against live Intercom (server-side), so keep it a
+    // touch lighter than the inbox list.
+    const id = setInterval(() => void load(), 15_000)
     const off = onCanvasRefresh(() => void load())
     return () => {
       clearInterval(id)

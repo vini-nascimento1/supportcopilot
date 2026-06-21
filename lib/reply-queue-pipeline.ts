@@ -141,9 +141,9 @@ export async function computeAndPersistSuggestion(
   // Previously every inbound customer message across the whole Intercom
   // workspace produced an unassigned suggestion (owner_id = null) — a firehose
   // that buried each agent's own work and burned an LLM generation per message.
-  // The queue is now a per-agent worklist (getPendingQueue is owner-scoped), so
-  // an ownerless suggestion would never be seen by anyone. Bail before the gate
-  // /Notion/generation work. The assign endpoint reaches here with the assignee
+  // The queue is now a per-agent worklist (owner-scoped + reconciled against the
+  // agent's live non-read set), so an ownerless suggestion is never seen. Bail
+  // before the gate/Notion/generation work. The assign endpoint reaches here with the assignee
   // already written, so its recompute still resolves an owner and proceeds.
   if (!owner.id) {
     return { handled: true, action: "skipped", reason: "unassigned (assigned-only gate)" }
