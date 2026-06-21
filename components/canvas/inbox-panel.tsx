@@ -121,7 +121,8 @@ export function InboxPanel({
   useEffect(() => {
     if (!active) return
     queueMicrotask(() => void load())
-    const id = setInterval(() => void load(), 30_000)
+    // Snappy refresh — this is the live triage list the agent works from.
+    const id = setInterval(() => void load(), 10_000)
     const off = onCanvasRefresh(() => void load())
     return () => {
       clearInterval(id)

@@ -31,6 +31,10 @@ type IntercomConversation = {
   state?: string | null
   open?: boolean | null
   updated_at?: number | null
+  // Set to the timestamp the conversation has been waiting on a teammate reply;
+  // null once a teammate replies. This — not `read` (which tracks whether an
+  // admin opened it) — is the true "non-read / waiting on us" signal.
+  waiting_since?: number | null
   title?: string | null
   conversation_message?: {
     body?: string | null
@@ -392,6 +396,64 @@ export async function getOpenCasesQueue(
       }
     }),
   }
+}
+
+// The set of conversation ids currently assigned to `adminId`, open, and
+// NON-READ (waiting on a teammate reply — `waiting_since` is set). This is the
+// live source of truth for the AI reply queue: a conversation the agent has
+// already answered (read) has `waiting_since` cleared and must drop out of the
+// fast-reply queue. Returns null on misconfig/error so callers can degrade
+// gracefully (fall back to the cached suggestions) rather than empty the queue.
+export async function getNonReadAssignedConvIds(adminId: string): Promise<Set<string> | null> {
+  if (!intercomToken || !adminId) return null
+
+  const ids = new Set<string>()
+  let startingAfter: string | undefined
+
+  try {
+    do {
+      const body: Record<string, unknown> = {
+        query: {
+          operator: "AND",
+          value: [
+            { field: "admin_assignee_id", operator: "=", value: adminId },
+            { field: "open", operator: "=", value: true },
+          ],
+        },
+        pagination: { per_page: 150 },
+      }
+      if (startingAfter) {
+        (body.pagination as Record<string, unknown>).starting_after = startingAfter
+      }
+
+      const response = await fetchIntercom("https://api.intercom.io/conversations/search", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${intercomToken}`,
+          "Content-Type": "application/json",
+          "Intercom-Version": "2.11",
+        },
+        body: JSON.stringify(body),
+        cache: "no-store",
+      })
+      if (!response.ok) return null
+
+      const payload = (await response.json()) as {
+        conversations?: IntercomConversation[]
+        data?: IntercomConversation[]
+        pages?: { next?: { starting_after: string } | null }
+      }
+      const conversations = payload.conversations ?? payload.data ?? []
+      for (const c of conversations) {
+        if (c.waiting_since != null) ids.add(String(c.id))
+      }
+      startingAfter = payload.pages?.next?.starting_after
+    } while (startingAfter)
+  } catch {
+    return null
+  }
+
+  return ids
 }
 
 // ── Live conversation feed for the automation engine ──────────────────────

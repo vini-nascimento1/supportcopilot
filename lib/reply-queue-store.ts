@@ -1,16 +1,15 @@
 import "server-only"
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
 import type { RiskBand } from "@/lib/reply-queue"
 
 // Persistence for the autonomous non-read reply queue (table `suggested_replies`,
 // migration 0025/0026). The pipeline writes via the service role (no user session);
-// the queue UI reads via the RLS-respecting auth client (owner rows + unassigned
-// pool, per the table's policies). Draft-only: nothing is sent/assigned here
-// without a human click in the API routes that call these helpers.
-// See FanvueSupport/Engineering/Plan - Autonomous non-read reply queue.md.
+// the queue route reads via the service role too, filtered by owner. The route is
+// the authority on which rows to show — it reconciles these cached suggestions
+// against the live Intercom non-read set (see /api/reply-queue). Draft-only:
+// nothing is sent/assigned here without a human click in the API routes that call
+// these helpers. See FanvueSupport/Engineering/Plan - Autonomous non-read reply queue.md.
 
 export type SuggestionSource = { title?: string; url?: string; kind?: string }
 
@@ -122,39 +121,15 @@ export type QueueItem = {
   createdAt: string
 }
 
-async function getAuthClient() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll() {
-          /* read-only */
-        },
-      },
-    }
-  )
-}
+// The signed-in agent's pending suggestions (owner-scoped). This is the cached
+// draft layer; the route filters these against the live Intercom non-read set
+// before showing them, so a conversation the agent has already answered drops
+// out even if its row wasn't resolved by a webhook. Newest first.
+export async function getPendingSuggestionsForAgent(agentId: string): Promise<QueueItem[]> {
+  const db = getSupabaseAdminClient()
+  if (!db) return []
 
-// The non-read queue is the signed-in agent's PERSONAL worklist: only the
-// conversations currently assigned to them in Intercom (owner_id = their agent
-// id). RLS alone is too broad here — its "unassigned pool" policy would also
-// surface every unassigned conversation in the whole workspace (hundreds of
-// rows, the firehose), which buries the agent's own work. So we resolve the
-// caller's agent id and filter to it explicitly. Newest first; the UI splits
-// into bands and orders by SLA within each.
-export async function getPendingQueue(): Promise<QueueItem[]> {
-  const supabase = await getAuthClient()
-
-  // RLS on `agents` returns only the caller's own row, so this resolves the
-  // signed-in agent's id. No agent row (or no session) → empty queue.
-  const { data: agent } = await supabase.from("agents").select("id").maybeSingle()
-  const agentId = (agent?.id as string | undefined) ?? null
-  if (!agentId) return []
-
-  const { data } = await supabase
+  const { data } = await db
     .from("suggested_replies")
     .select(
       "id, intercom_conversation_id, owner_id, customer_name, subject, body, justification, sources, confidence, risk_band, created_at"
@@ -177,6 +152,43 @@ export async function getPendingQueue(): Promise<QueueItem[]> {
     riskBand: r.risk_band as RiskBand,
     createdAt: r.created_at as string,
   }))
+}
+
+// Resolve the agent's pending suggestions for conversations that are no longer
+// non-read (the agent replied / it closed): flip them to 'stale' so they leave
+// the queue and the table stays honest. Idempotent; owner-scoped. Service role.
+export async function markSuggestionsStaleByConversations(
+  agentId: string,
+  conversationIds: string[]
+): Promise<void> {
+  if (conversationIds.length === 0) return
+  const db = getSupabaseAdminClient()
+  if (!db) return
+  await db
+    .from("suggested_replies")
+    .update({ status: "stale" })
+    .eq("status", "pending")
+    .eq("owner_id", agentId)
+    .in("intercom_conversation_id", conversationIds)
+}
+
+// Conversation ids (from the given set) that already have ANY suggestion row
+// created at/after `sinceIso`, regardless of status. The backfill uses this to
+// avoid recomputing a draft for a conversation we attempted recently — bounding
+// repeated LLM work to once per window even if generation keeps yielding nothing.
+export async function getRecentlyTouchedConversationIds(
+  conversationIds: string[],
+  sinceIso: string
+): Promise<Set<string>> {
+  if (conversationIds.length === 0) return new Set()
+  const db = getSupabaseAdminClient()
+  if (!db) return new Set()
+  const { data } = await db
+    .from("suggested_replies")
+    .select("intercom_conversation_id")
+    .in("intercom_conversation_id", conversationIds)
+    .gte("created_at", sinceIso)
+  return new Set((data ?? []).map((r) => r.intercom_conversation_id as string))
 }
 
 export type ReplyQueueAction = "approve" | "reject" | "edit"
