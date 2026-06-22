@@ -7,7 +7,7 @@ import { CheckIcon, MessageSquareIcon } from "lucide-react"
 import { PinButton } from "@/components/canvas/pin-button"
 
 export interface ConversationMessageData {
-  role: "customer" | "admin"
+  role: "customer" | "admin" | "ai"
   author: string
   body: string
   createdAt: string | null

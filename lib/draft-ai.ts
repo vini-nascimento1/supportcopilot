@@ -201,7 +201,12 @@ export function buildUserMessage(
 
   for (const msg of conversation.messages) {
     if (!msg.body.trim()) continue
-    const label = msg.role === "admin" ? "Agent" : "Customer"
+    const label =
+      msg.role === "admin"
+        ? "Agent"
+        : msg.role === "ai"
+          ? "AI helper"
+          : "Customer"
     parts.push(`${label}: ${msg.body}`)
   }
 
@@ -212,7 +217,7 @@ export function buildUserMessage(
   }
 
   parts.push(
-    `\nThe LAST message above is what you are replying to. Write the next message in this conversation, anchored on that latest message and the context already exchanged. Follow the tone and context rules above. Do not greet again if an agent has already replied, and do not repeat anything already said earlier in the thread.`
+    `\nThe latest Customer message above is what you are replying to. Agent and AI helper messages are context about what has already been said or suggested; do not treat them as customer requests. Write the next message in this conversation, anchored on the latest customer message and the context already exchanged. Follow the tone and context rules above. Do not greet again if an agent has already replied, and do not repeat anything already said earlier in the thread.`
   )
   const text = parts.join("\n")
 
@@ -245,12 +250,17 @@ export function buildMacroAdaptUserMessage(conversation: {
 
   for (const msg of conversation.messages) {
     if (!msg.body.trim()) continue
-    const label = msg.role === "admin" ? "Agent" : "Customer"
+    const label =
+      msg.role === "admin"
+        ? "Agent"
+        : msg.role === "ai"
+          ? "AI helper"
+          : "Customer"
     parts.push(`${label}: ${msg.body}`)
   }
 
   parts.push(
-    `\nNow take the **approved macro from the system message** and rewrite it so it fits this conversation, anchored on the customer's LAST message. Your reply MUST be built from the macro's content — keep its facts, policy, steps and links, and tailor the wording to this case. Do NOT write a fresh, unrelated reply, and do NOT add anything the macro and thread don't support. Output only the customer-facing message.`
+    `\nNow take the **approved macro from the system message** and rewrite it so it fits this conversation, anchored on the latest Customer message. Agent and AI helper messages are context only; do not treat them as customer requests. Always output a complete customer-facing message. Your reply MUST be built from the macro's content — keep its facts, policy, steps and links, and tailor the wording to this case. Do NOT write a fresh, unrelated reply, and do NOT add anything the macro and thread don't support. Output only the customer-facing message.`
   )
   return parts.join("\n")
 }
@@ -319,6 +329,7 @@ Your task: **rewrite the approved macro below** so it fits this specific convers
 
 ## Critical constraints
 - Output ONLY the customer-facing message text (markdown) — ready to copy-paste.
+- Never return an empty message. If the macro is thin, still produce a complete customer-facing reply grounded in the macro.
 - No preamble like "Here's the adapted macro:", no markdown headers (no ##, no ###), no internal commentary.
 - **Write in English only.** The conversation may be in any language, but your adapted reply must always be in English.
 

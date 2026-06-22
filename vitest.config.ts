@@ -7,10 +7,12 @@ import { fileURLToPath } from "node:url"
 // `import "server-only"`) at runtime would fail test collection. Alias them to
 // an empty stub so server-only modules can be unit-tested directly.
 const emptyStub = fileURLToPath(new URL("./test-stubs/empty-module.ts", import.meta.url))
+const root = fileURLToPath(new URL("./", import.meta.url))
 
 export default defineConfig({
   resolve: {
     alias: {
+      "@": root,
       "server-only": emptyStub,
       "client-only": emptyStub,
     },

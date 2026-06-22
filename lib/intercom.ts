@@ -160,7 +160,7 @@ export type ConversationAttachment = {
 }
 
 export type ConversationMessage = {
-  role: "customer" | "admin"
+  role: "customer" | "admin" | "ai"
   author: string
   body: string
   createdAt: string
@@ -223,6 +223,24 @@ type IntercomConversationFull = {
   topics?: { topics?: Array<{ name?: string | null }> } | null
 }
 
+export function classifyIntercomAuthor(
+  author: { type?: string | null; name?: string | null } | null | undefined
+): ConversationMessage["role"] {
+  const type = author?.type?.toLowerCase()
+  const name = author?.name?.trim().toLowerCase()
+
+  if (type === "bot" || name === "fin" || name?.startsWith("fin ")) {
+    return "ai"
+  }
+  if (type === "admin" || type === "team") {
+    return "admin"
+  }
+  if (type === "user" || type === "lead" || type === "contact") {
+    return "customer"
+  }
+  return "customer"
+}
+
 export async function getConversationDetail(
   id: string
 ): Promise<ConversationDetail | null> {
@@ -270,15 +288,20 @@ export async function getConversationDetail(
   // Keep the opening message when it has text OR at least one attachment:
   // customers often open with an image-only message (e.g. a screenshot) and no
   // body — gating on sourceBody alone would silently drop that image.
+  const sourceRole = classifyIntercomAuthor(conv.source?.author)
   const initialMessage: ConversationMessage[] =
     sourceBody || sourceAttachments.length > 0
       ? [
           {
-            role: conv.source?.author?.type === "admin" ? "admin" : "customer",
+            role: sourceRole,
             author:
               conv.source?.author?.name ??
               conv.source?.author?.email ??
-              (conv.source?.author?.type === "admin" ? "Agent" : "Customer"),
+              (sourceRole === "customer"
+                ? "Customer"
+                : sourceRole === "ai"
+                  ? "Fin"
+                  : "Agent"),
             body: sourceBody,
             createdAt: toDate(conv.created_at) ?? "",
             attachments: sourceAttachments,
@@ -296,13 +319,18 @@ export async function getConversationDetail(
   // body and fall out once we strip HTML.
   const partMessages: ConversationMessage[] = parts
     .filter((p) => p.part_type !== "note")
-    .map((p) => ({
-      role: (p.author?.type === "admin" ? "admin" : "customer") as "admin" | "customer",
-      author: p.author?.name ?? (p.author?.type === "admin" ? "Agent" : "Customer"),
-      body: stripHtml(p.body),
-      createdAt: toDate(p.created_at) ?? "",
-      attachments: mapAttachments(p.attachments),
-    }))
+    .map((p) => {
+      const role = classifyIntercomAuthor(p.author)
+      return {
+        role,
+        author:
+          p.author?.name ??
+          (role === "customer" ? "Customer" : role === "ai" ? "Fin" : "Agent"),
+        body: stripHtml(p.body),
+        createdAt: toDate(p.created_at) ?? "",
+        attachments: mapAttachments(p.attachments),
+      }
+    })
     // Keep a part when it has text OR at least one attachment: an image-only
     // customer reply (a screenshot with no body) would otherwise be dropped.
     .filter((m) => m.body || m.attachments.length > 0)
@@ -317,7 +345,7 @@ export async function getConversationDetail(
     email: conv.source?.author?.email ?? null,
     state: conv.state ?? (conv.open ? "open" : "closed"),
     subject: strippedSubject || null,
-    firstMessage: stripHtml(conv.source?.body),
+    firstMessage: sourceRole === "customer" ? sourceBody : "",
     messages,
     intercomUrl: getIntercomUrl(String(conv.id)),
     tags: (conv.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean),

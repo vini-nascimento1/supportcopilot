@@ -180,15 +180,34 @@ describe("selectModel", () => {
 
 describe("buildUserMessage", () => {
   const ATTACHED_NOTICE = "The customer attached"
-  const LAST_MESSAGE_INSTRUCTION = "The LAST message above"
+  const LATEST_CUSTOMER_INSTRUCTION = "The latest Customer message above"
 
   it("with no images arg returns a string with thread + final instruction and no attached notice", () => {
     const result = buildUserMessage(multimodalConvo)
     expect(typeof result).toBe("string")
     const text = result as string
     expect(text).toContain("Customer:")
-    expect(text).toContain(LAST_MESSAGE_INSTRUCTION)
+    expect(text).toContain(LATEST_CUSTOMER_INSTRUCTION)
     expect(text).not.toContain(ATTACHED_NOTICE)
+  })
+
+  it("labels AI helper messages separately from customer messages", () => {
+    const result = buildUserMessage({
+      customer: "Jane",
+      firstMessage: "I need help",
+      messages: [
+        { role: "customer", body: "I need help" },
+        { role: "ai", body: "Fin suggested this answer." },
+        { role: "admin", body: "Let me check." },
+      ],
+    })
+    expect(typeof result).toBe("string")
+    const text = result as string
+    expect(text).toContain("Customer: I need help")
+    expect(text).toContain("AI helper: Fin suggested this answer.")
+    expect(text).toContain("Agent: Let me check.")
+    expect(text).not.toContain("Customer: Fin suggested this answer.")
+    expect(text).toContain("do not treat them as customer requests")
   })
 
   it("with an empty images array returns the identical string as the no-arg case", () => {

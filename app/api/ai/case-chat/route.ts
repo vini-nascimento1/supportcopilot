@@ -62,7 +62,7 @@ export async function POST(request: Request) {
   let thread = conversation.messages
     .map(
       (m) =>
-        `[${m.role === "customer" ? "CUSTOMER" : "AGENT"}] ${m.author}: ${m.body}`,
+        `[${m.role === "customer" ? "CUSTOMER" : m.role === "ai" ? "AI HELPER" : "AGENT"}] ${m.author}: ${m.body}`,
     )
     .join("\n")
   if (thread.length > MAX_THREAD_CHARS) {
