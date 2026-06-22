@@ -14,6 +14,19 @@ export type OpenAIMessage = {
 const VERBOO_API_KEY = process.env.VERBOO_API_KEY
 const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
 
+// ── Output-language lock ───────────────────────────────────────────────────
+// Customer threads are frequently in another language, and that pull is strong:
+// a single buried "write in English" line was not enough — drafts still mirrored
+// the customer. So we state it emphatically in the system prompt AND repeat it as
+// the very last thing in the user turn (recency, right after a wall of foreign
+// text). Fanvue Support replies are ALWAYS in English. Keep the literal phrase
+// "English only" — a test asserts on it.
+const ENGLISH_ONLY_RULE =
+  "**Write in English only — always.** No matter what language the customer wrote in (Portuguese, Spanish, French, German, Italian, Arabic — anything), your reply MUST be in English. Never mirror or match the customer's language. Understand their message in whatever language it is, then write your reply in English. Fanvue Support always replies in English."
+
+const ENGLISH_ONLY_REMINDER =
+  "⚠️ Language: write your ENTIRE reply in English, regardless of the language used above. Do NOT reply in the customer's language — translate your response into English."
+
 // ── System prompt builder ──────────────────────────────────────────────────
 
 export function buildSystemPrompt(
@@ -57,7 +70,7 @@ Playbooks cover only some cases — when the thread and the playbook disagree, t
 - No intro like "Here's a draft:", no markdown headers (no ##, no ###), no internal commentary.
 - Personalize to the customer's specific situation without using their real name.
 - If the playbook and articles don't cover the issue, acknowledge warmly and ask one focused clarifying question.
-- **Write in English only.** The customer conversation may be in any language, but your reply must always be in English.
+- ${ENGLISH_ONLY_RULE}
 
 ## Closing the conversation
 - If the customer has already been answered per the knowledge base articles (policy, steps, or procedures already explained in the thread) and they keep insisting or asking the same thing: **be firm but polite, restate the policy one last time, and signal that the conversation is being closed**.
@@ -219,6 +232,7 @@ export function buildUserMessage(
   parts.push(
     `\nThe latest Customer message above is what you are replying to. Agent and AI helper messages are context about what has already been said or suggested; do not treat them as customer requests. Write the next message in this conversation, anchored on the latest customer message and the context already exchanged. Follow the tone and context rules above. Do not greet again if an agent has already replied, and do not repeat anything already said earlier in the thread.`
   )
+  parts.push(`\n${ENGLISH_ONLY_REMINDER}`)
   const text = parts.join("\n")
 
   if (!images || images.length === 0) return text
@@ -249,7 +263,7 @@ Your task: IMPROVE the existing customer-facing reply draft provided below — d
 - Output ONLY the improved customer-facing message text — ready to copy-paste. No "Here's the improved version:", no headers, no commentary.
 - The output IS markdown.
 - Never use the customer's real name.
-- **Write in English only**, regardless of the conversation's language.`
+- ${ENGLISH_ONLY_RULE}`
 }
 
 export function buildImproveUserMessage(
@@ -268,6 +282,7 @@ export function buildImproveUserMessage(
   }
   parts.push(`\n## Current draft to improve\n${currentDraft}`)
   parts.push(`\nRewrite the draft above per the rules. Output only the improved message.`)
+  parts.push(`\n${ENGLISH_ONLY_REMINDER}`)
   return parts.join("\n")
 }
 
@@ -301,6 +316,7 @@ export function buildMacroAdaptUserMessage(conversation: {
   parts.push(
     `\nNow take the **approved macro from the system message** and rewrite it so it fits this conversation, anchored on the latest Customer message. Agent and AI helper messages are context only; do not treat them as customer requests. Always output a complete customer-facing message. Your reply MUST be built from the macro's content — keep its facts, policy, steps and links, and tailor the wording to this case. Do NOT write a fresh, unrelated reply, and do NOT add anything the macro and thread don't support. Output only the customer-facing message.`
   )
+  parts.push(`\n${ENGLISH_ONLY_REMINDER}`)
   return parts.join("\n")
 }
 
@@ -329,10 +345,12 @@ Your task: rewrite the internal Slack thread below into a clear, professional cu
 - Maintain a warm, professional first-person tone.
 - Output ONLY the customer-facing message — ready to copy-paste. No intro, no markdown headers, no internal commentary.
 - Never promise timelines, refunds, or exceptions not stated in the thread.
-- **Write in English only.** The Slack thread may be in any language, but your reply must always be in English.
+- ${ENGLISH_ONLY_RULE}
 
 ## Internal Slack thread (from #${channelName})
 ${threadLines.join("\n")}
+
+${ENGLISH_ONLY_REMINDER}
 
 Write the customer-facing reply now:`
 }
@@ -370,7 +388,7 @@ Your task: **rewrite the approved macro below** so it fits this specific convers
 - Output ONLY the customer-facing message text (markdown) — ready to copy-paste.
 - Never return an empty message. If the macro is thin, still produce a complete customer-facing reply grounded in the macro.
 - No preamble like "Here's the adapted macro:", no markdown headers (no ##, no ###), no internal commentary.
-- **Write in English only.** The conversation may be in any language, but your adapted reply must always be in English.
+- ${ENGLISH_ONLY_RULE}
 
 ## Approved macro to adapt
 ${macroBodyText}`

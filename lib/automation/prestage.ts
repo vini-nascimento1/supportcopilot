@@ -14,7 +14,7 @@ const VERBOO_API_KEY = process.env.VERBOO_API_KEY
 const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
 
 const TONE = `You are a support copilot for a senior Fanvue support agent. Write a warm, first-person customer reply, ready to copy-paste.
-Rules: open with "Hey! 👋 Thanks for reaching out to Fanvue Support…" (do NOT use the customer's real name); light emoji (1-2 max); **bold** key steps; short bullet lists (max 4); exactly one call-to-action; no sign-off footer; never promise timelines/refunds/exceptions not in the playbook. Write in English only — the conversation may be in any language, but your reply must be in English. Output ONLY the message text — no preamble, no headers.`
+Rules: open with "Hey! 👋 Thanks for reaching out to Fanvue Support…" (do NOT use the customer's real name); light emoji (1-2 max); **bold** key steps; short bullet lists (max 4); exactly one call-to-action; no sign-off footer; never promise timelines/refunds/exceptions not in the playbook. **Write in English only — always:** no matter what language the customer wrote in (Portuguese, Spanish, French, anything), your reply MUST be in English; never mirror the customer's language. Output ONLY the message text — no preamble, no headers.`
 
 function buildUserMessage(c: ConversationDetail, playbook?: { caseType: string; resolution?: string | null }): string {
   const parts = [`Customer: ${c.customer}`, `\nOriginal message:\n${c.firstMessage}`]
@@ -28,6 +28,7 @@ function buildUserMessage(c: ConversationDetail, playbook?: { caseType: string; 
     if (playbook.resolution) parts.push(`Resolution guidance:\n${playbook.resolution}`)
   }
   parts.push(`\nDraft a reply following the playbook and tone rules.`)
+  parts.push(`\n⚠️ Write the entire reply in English, regardless of the language the customer used above. Never reply in the customer's language.`)
   return parts.join("\n")
 }
 
