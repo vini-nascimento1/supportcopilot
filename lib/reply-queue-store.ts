@@ -154,6 +154,44 @@ export async function getPendingSuggestionsForAgent(agentId: string): Promise<Qu
   }))
 }
 
+export type PendingSuggestionForConversation = {
+  id: string
+  body: string
+  justification: string
+  sources: SuggestionSource[]
+  riskBand: RiskBand
+}
+
+// The pending suggestion for a single conversation, owner-scoped to the signed-in
+// agent (same scoping as getPendingSuggestionsForAgent). Used by the unified
+// conversation card to prefill the composer from the queued draft. Returns null
+// when there is no pending row for this agent + conversation. Service role.
+export async function getPendingSuggestionForConversation(
+  conversationId: string,
+  agentId: string
+): Promise<PendingSuggestionForConversation | null> {
+  const db = getSupabaseAdminClient()
+  if (!db) return null
+
+  const { data } = await db
+    .from("suggested_replies")
+    .select("id, body, justification, sources, risk_band")
+    .eq("intercom_conversation_id", conversationId)
+    .eq("status", "pending")
+    .eq("owner_id", agentId)
+    .maybeSingle()
+
+  if (!data) return null
+
+  return {
+    id: data.id as string,
+    body: (data.body as string) ?? "",
+    justification: (data.justification as string) ?? "",
+    sources: (data.sources as SuggestionSource[] | null) ?? [],
+    riskBand: data.risk_band as RiskBand,
+  }
+}
+
 // Resolve the agent's pending suggestions for conversations that are no longer
 // non-read (the agent replied / it closed): flip them to 'stale' so they leave
 // the queue and the table stays honest. Idempotent; owner-scoped. Service role.

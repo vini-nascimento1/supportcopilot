@@ -6,13 +6,13 @@ import { AlertCircleIcon, Loader2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CaseCanvas } from "@/components/canvas/case-canvas"
 import { type CaseInfoData } from "@/components/canvas/case-info-node"
-import { type ConversationData } from "@/components/canvas/conversation-node"
+import { type ConversationReplyData } from "@/components/canvas/conversation-reply-node"
 import { isAdhoc, type CanvasTab } from "@/lib/canvas-tabs-store"
 import { type CanvasTool } from "@/lib/canvas-tools"
 
 type Bootstrap = {
   caseInfo: CaseInfoData
-  conversation: ConversationData
+  conversation: Pick<ConversationReplyData, "subject" | "messages">
   playbookId?: string
   playbookName?: string
   ticketText: string
@@ -30,7 +30,13 @@ interface Props {
 // One keep-alive canvas. Ad-hoc canvases need no server data; case canvases
 // fetch the same payload the route-per-canvas page computes (via
 // /api/canvas/bootstrap) exactly once, then stay mounted for the session.
-export function CanvasPane({ tab, active, tools, downloadUrl, onResolveTitle }: Props) {
+export function CanvasPane({
+  tab,
+  active,
+  tools,
+  downloadUrl,
+  onResolveTitle,
+}: Props) {
   const adhoc = isAdhoc(tab.id)
   const [data, setData] = useState<Bootstrap | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -55,7 +61,8 @@ export function CanvasPane({ tab, active, tools, downloadUrl, onResolveTitle }: 
         }
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Network error")
+        if (!cancelled)
+          setError(e instanceof Error ? e.message : "Network error")
       })
     return () => {
       cancelled = true

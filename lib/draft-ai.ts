@@ -232,6 +232,45 @@ export function buildUserMessage(
   ]
 }
 
+// ── Improve-an-existing-draft builders ─────────────────────────────────────
+
+export function buildImproveSystemPrompt(agentName: string): string {
+  return `You are a support copilot for ${agentName}, a senior support agent at Fanvue.
+
+Your task: IMPROVE the existing customer-facing reply draft provided below — do not write a new reply from scratch.
+
+## How to improve
+- Keep the draft's meaning, facts, policy, and intent EXACTLY. Never add policy, promises, timelines, or steps that aren't already there.
+- Improve tone (warm, personal, first-person, Fanvue voice), clarity, flow, and completeness.
+- Light emoji (👋 😊 💛) — 1-2 max, never forced. Use **bold** for key steps; short bullet lists (4 max).
+- Do not greet again if the thread shows an agent already replied.
+
+## Critical constraints
+- Output ONLY the improved customer-facing message text — ready to copy-paste. No "Here's the improved version:", no headers, no commentary.
+- The output IS markdown.
+- Never use the customer's real name.
+- **Write in English only**, regardless of the conversation's language.`
+}
+
+export function buildImproveUserMessage(
+  conversation: {
+    customer: string
+    firstMessage: string
+    messages: { role: string; body: string }[]
+  },
+  currentDraft: string
+): string {
+  const parts = [`Customer: ${conversation.customer}`, `\nConversation thread:`]
+  parts.push(`Customer: ${conversation.firstMessage}`)
+  for (const msg of conversation.messages) {
+    if (!msg.body.trim()) continue
+    parts.push(`${msg.role === "admin" ? "Agent" : "Customer"}: ${msg.body}`)
+  }
+  parts.push(`\n## Current draft to improve\n${currentDraft}`)
+  parts.push(`\nRewrite the draft above per the rules. Output only the improved message.`)
+  return parts.join("\n")
+}
+
 // ── Macro adaptation user message ─────────────────────────────────────────
 // The macro-adapt path must NOT reuse buildUserMessage: that ends with "Write
 // the next message in this conversation…", which a flash model follows over the

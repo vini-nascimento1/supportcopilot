@@ -5,6 +5,7 @@ import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
 import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
+import { selectModel, type OpenAIMessage, type OpenAIContentPart } from "@/lib/draft-ai"
 
 export const dynamic = "force-dynamic"
 
@@ -32,6 +33,9 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
   const conversationId: string | undefined = body?.conversationId
   const messages: ChatMessage[] = Array.isArray(body?.messages) ? body.messages : []
+  const images: { name: string; dataUri: string }[] = Array.isArray(body?.images)
+    ? body.images
+    : []
   if (!conversationId || messages.length === 0) {
     return NextResponse.json(
       { error: "conversationId and messages are required" },
@@ -121,6 +125,29 @@ ${playbookSection}${notionSection}
 - Plain text or light markdown (bold, short bullets); no headers.
 - When asked for a customer-facing reply, follow Fanvue's tone: warm, first-person, "Hey! 👋 thanks for reaching out…", bold key steps, one clear call-to-action.`
 
+  // When the latest user turn carries pasted images, build it as multimodal
+  // content (text + image_url parts) and route to the vision model. Text-only
+  // turns keep the existing deepseek-v4-flash path untouched.
+  const hasImages = images.length > 0
+  const windowed = messages.slice(-12)
+  const outgoing: OpenAIMessage[] = windowed.map((m, i) => {
+    const isLastUser = i === windowed.length - 1 && m.role === "user"
+    if (isLastUser && hasImages) {
+      const parts: OpenAIContentPart[] = [
+        {
+          type: "text",
+          text: m.content || "What does the attached image show, in this case's context?",
+        },
+        ...images.map((img) => ({
+          type: "image_url" as const,
+          image_url: { url: img.dataUri },
+        })),
+      ]
+      return { role: "user", content: parts }
+    }
+    return { role: m.role, content: m.content }
+  })
+
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
@@ -131,10 +158,10 @@ ${playbookSection}${notionSection}
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "deepseek-v4-flash",
+        model: hasImages ? selectModel(outgoing) : "deepseek-v4-flash",
         messages: [
           { role: "system", content: systemPrompt },
-          ...messages.slice(-12),
+          ...outgoing,
         ],
         stream: false,
       }),

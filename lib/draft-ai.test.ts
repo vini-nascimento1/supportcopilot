@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest"
 
 import {
+  buildImproveSystemPrompt,
+  buildImproveUserMessage,
   buildMacroAdaptSystemPrompt,
   buildMacroAdaptUserMessage,
   buildNotionAwareSystemPrompt,
@@ -240,5 +242,25 @@ describe("buildUserMessage", () => {
       type: "image_url",
       image_url: { url: "data:image/png;base64,BBB" },
     })
+  })
+})
+
+describe("buildImproveSystemPrompt", () => {
+  it("instructs to improve an existing draft and keep English + policy", () => {
+    const out = buildImproveSystemPrompt("Vini").toLowerCase()
+    expect(out).toContain("improve")
+    expect(out).toContain("english only")
+    expect(out).toContain("do not")
+    expect(out).toContain("only the")
+  })
+})
+
+describe("buildImproveUserMessage", () => {
+  const convo = { customer: "Jane", firstMessage: "payout failed", messages: [{ role: "customer", body: "still stuck" }] }
+  it("embeds the current draft and the thread", () => {
+    const out = buildImproveUserMessage(convo, "hey we cant change payout now")
+    expect(out).toContain("hey we cant change payout now")
+    expect(out).toContain("Current draft to improve")
+    expect(out).toContain("still stuck")
   })
 })

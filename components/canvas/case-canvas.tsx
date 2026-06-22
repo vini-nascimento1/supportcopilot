@@ -25,7 +25,7 @@ import {
 } from "@xyflow/react"
 import { useRouter } from "next/navigation"
 import {
-  BotIcon,
+  ClipboardListIcon,
   DownloadIcon,
   GlobeIcon,
   MonitorIcon,
@@ -64,23 +64,24 @@ import {
 } from "@/lib/canvas-tools"
 import { CanvasActiveContext } from "@/components/canvas/active-context"
 import { ToolNode } from "@/components/canvas/tool-node"
-import { CaseInfoNode, type CaseInfoData } from "@/components/canvas/case-info-node"
-import { DraftNode } from "@/components/canvas/draft-node"
+import {
+  CaseInfoNode,
+  type CaseInfoData,
+} from "@/components/canvas/case-info-node"
 import { NotesNode } from "@/components/canvas/notes-node"
-import { AiNode, type AiNodeData } from "@/components/canvas/ai-node"
 import { MacrosNode } from "@/components/canvas/macros-node"
 import { QueueNode } from "@/components/canvas/queue-node"
 import { CanvasLeftSidebar } from "@/components/canvas/canvas-left-sidebar"
 import {
-  ConversationNode,
-  type ConversationData,
-} from "@/components/canvas/conversation-node"
+  ConversationReplyNode,
+  type ConversationReplyData,
+} from "@/components/canvas/conversation-reply-node"
 
 export interface CaseCanvasProps {
   /** Absent on the ad-hoc canvas (/canvas) */
   caseInfo?: CaseInfoData
   /** Intercom thread, rendered as a Conversation card on case canvases */
-  conversation?: ConversationData
+  conversation?: Pick<ConversationReplyData, "subject" | "messages">
   playbookId?: string
   playbookName?: string
   /** Subject + customer messages — drives keyword-based tool suggestions */
@@ -107,7 +108,7 @@ function useMounted() {
   return useSyncExternalStore(
     () => () => {},
     () => true,
-    () => false,
+    () => false
   )
 }
 
@@ -115,12 +116,10 @@ const STORAGE_PREFIX = "fv-canvas-layout-v1:"
 const nodeTypes = {
   tool: ToolNode,
   "case-info": CaseInfoNode,
-  draft: DraftNode,
   notes: NotesNode,
-  ai: AiNode,
   macros: MacrosNode,
   queue: QueueNode,
-  conversation: ConversationNode,
+  conversation: ConversationReplyNode,
 }
 
 // Graph overlay (link wires) visibility — global preference
@@ -162,7 +161,9 @@ function groupTools(tools: CanvasTool[]): Array<[string, CanvasTool[]]> {
 }
 
 type SavedLayout = {
-  nodes: Array<Pick<Node, "id" | "type" | "position" | "width" | "height" | "data">>
+  nodes: Array<
+    Pick<Node, "id" | "type" | "position" | "width" | "height" | "data">
+  >
   edges: Edge[]
 }
 
@@ -170,7 +171,7 @@ function toolNode(
   tool: CanvasTool,
   url: string,
   position: { x: number; y: number },
-  ghost = false,
+  ghost = false
 ): Node {
   return {
     id: `tool:${tool.id}`,
@@ -209,9 +210,14 @@ function buildDefaultLayout(props: CaseCanvasProps): SavedLayout {
         id: "conversation",
         type: "conversation",
         position: { x: -480, y: 0 },
-        width: 420,
-        height: 560,
-        data: props.conversation,
+        width: 460,
+        height: 640,
+        data: {
+          ...props.conversation,
+          conversationId: props.caseInfo.conversationId,
+          playbookId: props.playbookId,
+          playbookName: props.playbookName,
+        },
       })
     }
     nodes.push({
@@ -223,21 +229,9 @@ function buildDefaultLayout(props: CaseCanvasProps): SavedLayout {
       data: props.caseInfo,
     })
     nodes.push({
-      id: "draft",
-      type: "draft",
-      position: { x: 0, y: 280 },
-      width: 380,
-      height: 420,
-      data: {
-        conversationId: props.caseInfo.conversationId,
-        playbookId: props.playbookId,
-        playbookName: props.playbookName,
-      },
-    })
-    nodes.push({
       id: "notes",
       type: "notes",
-      position: { x: 0, y: 750 },
+      position: { x: 0, y: 500 },
       width: 380,
       height: 180,
       data: { text: "" },
@@ -245,29 +239,22 @@ function buildDefaultLayout(props: CaseCanvasProps): SavedLayout {
     nodes.push({
       id: "macros",
       type: "macros",
-      position: { x: 0, y: 960 },
+      position: { x: 0, y: 710 },
       width: 380,
       height: 320,
       data: { conversationId: props.caseInfo.conversationId },
     })
-    // Case copilot — open by default, knows the full ticket + playbooks
-    nodes.push({
-      id: "ai",
-      type: "ai",
-      position: { x: -480, y: 620 },
-      width: 420,
-      height: 380,
-      data: { conversationId: props.caseInfo.conversationId },
-    })
     // Suggested tools by Intercom tag OR ticket keywords (Fadmin always) —
     // ghost cards: nothing loads until the agent confirms.
-    suggestedTools(tools, props.caseInfo.tags, props.ticketText).forEach((tool, i) => {
-      const url = resolveToolUrl(tool.urlTemplate, ctx)
-      if (!url) return
-      const node = toolNode(tool, url, { x: 460, y: i * 580 }, true)
-      nodes.push(node)
-      edges.push(caseToolEdge(node.id))
-    })
+    suggestedTools(tools, props.caseInfo.tags, props.ticketText).forEach(
+      (tool, i) => {
+        const url = resolveToolUrl(tool.urlTemplate, ctx)
+        if (!url) return
+        const node = toolNode(tool, url, { x: 460, y: i * 580 }, true)
+        nodes.push(node)
+        edges.push(caseToolEdge(node.id))
+      }
+    )
   }
   // Ad-hoc canvases start empty — everything is added from the toolbox.
   return { nodes, edges }
@@ -279,7 +266,7 @@ function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
     if (raw) {
       const saved = JSON.parse(raw) as SavedLayout
       if (Array.isArray(saved.nodes) && saved.nodes.length > 0) {
-        // Live data (case info, draft context) must never come from storage —
+        // Live data (case info, reply context) must never come from storage —
         // refresh it from the server-provided props, keep saved geometry.
         const nodes = saved.nodes.map((n) => {
           if (n.type === "case-info" && props.caseInfo) {
@@ -287,17 +274,20 @@ function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
             const overrides = (n.data as Partial<CaseInfoData>)?.overrides
             return { ...n, data: { ...props.caseInfo, overrides } }
           }
-          if (n.type === "conversation" && props.conversation) {
-            return { ...n, data: props.conversation }
-          }
-          if (n.type === "ai" && props.caseInfo) {
-            // Refresh the live conversationId, but keep the saved transcript so
-            // the copilot chat survives reloads.
+          if (
+            n.type === "conversation" &&
+            props.conversation &&
+            props.caseInfo
+          ) {
             return {
               ...n,
               data: {
+                ...props.conversation,
                 conversationId: props.caseInfo.conversationId,
-                messages: (n.data as AiNodeData).messages,
+                playbookId: props.playbookId,
+                playbookName: props.playbookName,
+                copilotTranscript: (n.data as Partial<ConversationReplyData>)
+                  .copilotTranscript,
               },
             }
           }
@@ -307,35 +297,37 @@ function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
               data: { conversationId: props.caseInfo.conversationId },
             }
           }
-          if (n.type === "draft" && props.caseInfo) {
-            return {
-              ...n,
-              data: {
-                conversationId: props.caseInfo.conversationId,
-                playbookId: props.playbookId,
-                playbookName: props.playbookName,
-              },
-            }
-          }
           return n
         })
+        const nodesWithoutRetired = nodes.filter(
+          (n) => n.type !== "draft" && n.type !== "ai"
+        )
         // Layouts saved before the Conversation card existed: inject it
         if (
           props.conversation &&
-          !nodes.some((n) => n.type === "conversation")
+          props.caseInfo &&
+          !nodesWithoutRetired.some((n) => n.type === "conversation")
         ) {
-          nodes.unshift({
+          nodesWithoutRetired.unshift({
             id: "conversation",
             type: "conversation",
             position: { x: -480, y: 0 },
-            width: 420,
-            height: 560,
-            data: props.conversation,
+            width: 460,
+            height: 640,
+            data: {
+              ...props.conversation,
+              conversationId: props.caseInfo.conversationId,
+              playbookId: props.playbookId,
+              playbookName: props.playbookName,
+            },
           })
         }
         // Layouts saved before the Macros card existed: inject it
-        if (props.caseInfo && !nodes.some((n) => n.type === "macros")) {
-          nodes.push({
+        if (
+          props.caseInfo &&
+          !nodesWithoutRetired.some((n) => n.type === "macros")
+        ) {
+          nodesWithoutRetired.push({
             id: "macros",
             type: "macros",
             position: { x: 0, y: 960 },
@@ -344,7 +336,10 @@ function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
             data: { conversationId: props.caseInfo.conversationId },
           })
         }
-        return { nodes: nodes as Node[], edges: saved.edges ?? [] }
+        return {
+          nodes: nodesWithoutRetired as Node[],
+          edges: saved.edges ?? [],
+        }
       }
     }
   } catch {
@@ -386,7 +381,7 @@ function CanvasInner(props: CaseCanvasProps) {
   const initial = useMemo(
     () => applyPins(loadLayout(storageKey, props)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [storageKey],
+    [storageKey]
   )
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges)
@@ -457,10 +452,10 @@ function CanvasInner(props: CaseCanvasProps) {
       setEdges((eds) =>
         addEdge(
           { ...connection, markerEnd: { type: MarkerType.ArrowClosed } },
-          eds,
-        ),
+          eds
+        )
       ),
-    [setEdges],
+    [setEdges]
   )
 
   const addTool = useCallback(
@@ -483,7 +478,10 @@ function CanvasInner(props: CaseCanvasProps) {
       if (!url) return
       setNodes((nds) => {
         if (nds.some((n) => n.id === `tool:${tool.id}`)) return nds
-        const maxX = Math.max(0, ...nds.map((n) => n.position.x + (n.width ?? 0)))
+        const maxX = Math.max(
+          0,
+          ...nds.map((n) => n.position.x + (n.width ?? 0))
+        )
         // Explicitly added by the agent → loads immediately (not a ghost)
         return [...nds, toolNode(tool, url, { x: maxX + 60, y: 0 })]
       })
@@ -491,11 +489,11 @@ function CanvasInner(props: CaseCanvasProps) {
         setEdges((eds) =>
           eds.some((e) => e.id === `e:case:tool:${tool.id}`)
             ? eds
-            : [...eds, caseToolEdge(`tool:${tool.id}`)],
+            : [...eds, caseToolEdge(`tool:${tool.id}`)]
         )
       }
     },
-    [nodes, props.caseInfo, setNodes, setEdges],
+    [nodes, props.caseInfo, setNodes, setEdges]
   )
 
   // Command palette → "Open <tool> on canvas"
@@ -527,37 +525,40 @@ function CanvasInner(props: CaseCanvasProps) {
     ])
   }, [setNodes])
 
-  // Singleton cards (one AI assistant / one queue per canvas)
+  // Singleton cards (one queue per canvas)
   const addSingleton = useCallback(
-    (type: "ai" | "queue") => {
+    (type: "queue") => {
       setNodes((nds) => {
         if (nds.some((n) => n.id === type)) return nds
-        const maxX = Math.max(0, ...nds.map((n) => n.position.x + (n.width ?? 0)))
+        const maxX = Math.max(
+          0,
+          ...nds.map((n) => n.position.x + (n.width ?? 0))
+        )
         return [
           ...nds,
           {
             id: type,
             type,
             position: { x: maxX + 60, y: 0 },
-            width: type === "ai" ? 340 : 300,
+            width: 300,
             height: 420,
-            data:
-              type === "ai" && props.caseInfo
-                ? { conversationId: props.caseInfo.conversationId }
-                : {},
+            data: {},
           },
         ]
       })
     },
-    [setNodes, props.caseInfo],
+    [setNodes]
   )
 
   const router = useRouter()
 
   const deletePersonalLink = useCallback(
     async (tool: CanvasTool) => {
-      if (!window.confirm(`Delete "${tool.name}" from your Personal tools?`)) return
-      const res = await fetch(`/api/case-tools/${tool.id}`, { method: "DELETE" })
+      if (!window.confirm(`Delete "${tool.name}" from your Personal tools?`))
+        return
+      const res = await fetch(`/api/case-tools/${tool.id}`, {
+        method: "DELETE",
+      })
       if (!res.ok) {
         toast.error("Couldn't delete the link")
         return
@@ -566,7 +567,7 @@ function CanvasInner(props: CaseCanvasProps) {
       router.refresh()
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    []
   )
 
   // "Personal" custom links — saved to case_tools so they survive everywhere
@@ -589,7 +590,9 @@ function CanvasInner(props: CaseCanvasProps) {
     })
     setCustomBusy(false)
     if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: res.statusText }))
+      const { error } = await res
+        .json()
+        .catch(() => ({ error: res.statusText }))
       toast.error(`Couldn't save the link: ${error}`)
       return
     }
@@ -617,24 +620,36 @@ function CanvasInner(props: CaseCanvasProps) {
   const refreshConversation = useCallback(async () => {
     if (!conversationId) return
     const res = await fetch(
-      `/api/canvas/conversation?id=${encodeURIComponent(conversationId)}`,
+      `/api/canvas/conversation?id=${encodeURIComponent(conversationId)}`
     )
     if (!res.ok) throw new Error(`Refresh failed (${res.status})`)
     const fresh = (await res.json()) as {
       caseInfo: CaseInfoData
-      conversation: ConversationData
+      conversation: Pick<ConversationReplyData, "subject" | "messages">
     }
     setNodes((nds) =>
       nds.map((n) => {
-        if (n.id === "conversation") return { ...n, data: fresh.conversation }
+        if (n.id === "conversation") {
+          return {
+            ...n,
+            data: {
+              ...fresh.conversation,
+              conversationId,
+              playbookId: props.playbookId,
+              playbookName: props.playbookName,
+              copilotTranscript: (n.data as Partial<ConversationReplyData>)
+                .copilotTranscript,
+            },
+          }
+        }
         if (n.id === "case-info") {
           const overrides = (n.data as Partial<CaseInfoData>)?.overrides
           return { ...n, data: { ...fresh.caseInfo, overrides } }
         }
         return n
-      }),
+      })
     )
-  }, [conversationId, setNodes])
+  }, [conversationId, props.playbookId, props.playbookName, setNodes])
 
   const manualRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -655,10 +670,14 @@ function CanvasInner(props: CaseCanvasProps) {
   const prevActive = useRef(active)
   useEffect(() => {
     if (!conversationId) return
-    if (active && !prevActive.current) void refreshConversation().catch(() => {})
+    if (active && !prevActive.current)
+      void refreshConversation().catch(() => {})
     prevActive.current = active
     if (!active) return
-    const t = setInterval(() => void refreshConversation().catch(() => {}), 30_000)
+    const t = setInterval(
+      () => void refreshConversation().catch(() => {}),
+      30_000
+    )
     return () => clearInterval(t)
   }, [active, conversationId, refreshConversation])
 
@@ -699,201 +718,208 @@ function CanvasInner(props: CaseCanvasProps) {
 
   return (
     <CanvasActiveContext.Provider value={active}>
-    {/* data-canvas-pane marks the safe region for native tool views — they're
+      {/* data-canvas-pane marks the safe region for native tool views — they're
         clipped to it (minus the docked chrome below) so they never overlay the
         sidebars or toolbox. See lib/canvas-bounds.ts. */}
-    <div data-canvas-pane className="relative h-full w-full">
-      <CanvasLeftSidebar />
+      <div data-canvas-pane className="relative h-full w-full">
+        <CanvasLeftSidebar />
 
-      {/* Toolbox — right-docked chrome; native tool views are clipped to its left edge */}
-      <div
-        data-canvas-chrome="right"
-        className="absolute right-4 top-4 z-10 flex max-h-[calc(100%-6rem)] flex-col items-end gap-1.5"
-      >
-        <div className="flex items-center gap-1.5">
-          {conversationId && (
-            <button
-              onClick={() => void manualRefresh()}
-              disabled={refreshing}
-              title="Refresh conversation & queue"
-              className="flex size-6 items-center justify-center rounded-md border bg-card/95 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground disabled:opacity-50"
-            >
-              <RefreshCwIcon className={cn("size-3.5", refreshing && "animate-spin")} />
-            </button>
-          )}
-          <button
-            onClick={toggleEdges}
-            title={edgesVisible ? "Hide link wires" : "Show link wires"}
-            className={cn(
-              "flex size-6 items-center justify-center rounded-md border bg-card/95 shadow-sm backdrop-blur transition-colors",
-              edgesVisible
-                ? "text-primary"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <NetworkIcon className="size-3.5" />
-          </button>
-          <Badge variant="secondary" className="gap-1.5 font-normal">
-            {host ? (
-              <>
-                <MonitorIcon className="size-3" /> Desktop — embedded tools
-              </>
-            ) : (
-              <>
-                <GlobeIcon className="size-3" /> Web — tools open in new tabs
-              </>
-            )}
-          </Badge>
-        </div>
-        <div className="flex flex-col gap-1 overflow-y-auto rounded-xl border bg-card/95 p-2 shadow-md backdrop-blur">
-          <span className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Cards
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 justify-start gap-2 text-xs"
-            onClick={() => addSingleton("ai")}
-          >
-            <BotIcon className="size-3" />
-            AI Assistant
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 justify-start gap-2 text-xs"
-            onClick={addNote}
-          >
-            <StickyNoteIcon className="size-3" />
-            Note
-          </Button>
-
-          {groupTools(props.tools ?? FALLBACK_TOOLS).map(([group, tools]) => (
-            <div key={group} className="flex flex-col gap-1">
-              <Separator className="my-1" />
-              <span className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                {group}
-              </span>
-              {tools.map((tool) => (
-                <div key={tool.id} className="group/tool flex items-center">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 flex-1 justify-start gap-2 text-xs"
-                    onClick={() => addTool(tool)}
-                  >
-                    <ToolIcon name={tool.icon} className="size-3" />
-                    {tool.name}
-                  </Button>
-                  {group === "Personal" && (
-                    <button
-                      className="shrink-0 px-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/tool:opacity-100"
-                      title={`Delete "${tool.name}"`}
-                      onClick={() => void deletePersonalLink(tool)}
-                    >
-                      <Trash2Icon className="size-3" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          ))}
-
-          <Separator className="my-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 justify-start gap-2 text-xs"
-            onClick={() => setCustomOpen(true)}
-          >
-            <PlusIcon className="size-3" />
-            Custom link…
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 justify-start gap-2 text-xs text-muted-foreground"
-            onClick={resetLayout}
-          >
-            Reset layout
-          </Button>
-        </div>
-      </div>
-
-      <Dialog open={customOpen} onOpenChange={setCustomOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add a personal link</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="custom-name">Name</Label>
-              <Input
-                id="custom-name"
-                value={customForm.name}
-                onChange={(e) =>
-                  setCustomForm({ ...customForm, name: e.target.value })
-                }
-                placeholder="My dashboard"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="custom-url">URL</Label>
-              <Input
-                id="custom-url"
-                value={customForm.url}
-                onChange={(e) =>
-                  setCustomForm({ ...customForm, url: e.target.value })
-                }
-                placeholder="https://…  ({{email}} is supported)"
-                className="font-mono text-xs"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Saved under <strong>Personal</strong> in the toolbox — available on
-              every canvas and editable in Settings.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setCustomOpen(false)}
-              disabled={customBusy}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => void saveCustomLink()}
-              disabled={
-                customBusy ||
-                !customForm.name.trim() ||
-                !/^https?:\/\//.test(customForm.url.trim())
-              }
-            >
-              {customBusy ? "Saving…" : "Save link"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <div className={cn("h-full w-full", !edgesVisible && "canvas-edges-hidden")}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          fitView
-          minZoom={0.15}
-          maxZoom={2}
+        {/* Toolbox — right-docked chrome; native tool views are clipped to its left edge */}
+        <div
+          data-canvas-chrome="right"
+          className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-6rem)] flex-col items-end gap-1.5"
         >
-          <Background gap={24} />
-          <Controls />
-          <MiniMap pannable zoomable className="!bg-muted" />
-        </ReactFlow>
+          <div className="flex items-center gap-1.5">
+            {conversationId && (
+              <button
+                onClick={() => void manualRefresh()}
+                disabled={refreshing}
+                title="Refresh conversation & queue"
+                className="flex size-6 items-center justify-center rounded-md border bg-card/95 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground disabled:opacity-50"
+              >
+                <RefreshCwIcon
+                  className={cn("size-3.5", refreshing && "animate-spin")}
+                />
+              </button>
+            )}
+            <button
+              onClick={toggleEdges}
+              title={edgesVisible ? "Hide link wires" : "Show link wires"}
+              className={cn(
+                "flex size-6 items-center justify-center rounded-md border bg-card/95 shadow-sm backdrop-blur transition-colors",
+                edgesVisible
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <NetworkIcon className="size-3.5" />
+            </button>
+            <Badge variant="secondary" className="gap-1.5 font-normal">
+              {host ? (
+                <>
+                  <MonitorIcon className="size-3" /> Desktop — embedded tools
+                </>
+              ) : (
+                <>
+                  <GlobeIcon className="size-3" /> Web — tools open in new tabs
+                </>
+              )}
+            </Badge>
+          </div>
+          <div className="flex flex-col gap-1 overflow-y-auto rounded-xl border bg-card/95 p-2 shadow-md backdrop-blur">
+            <span className="px-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              Cards
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 justify-start gap-2 text-xs"
+              onClick={addNote}
+            >
+              <StickyNoteIcon className="size-3" />
+              Note
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 justify-start gap-2 text-xs"
+              onClick={() => addSingleton("queue")}
+            >
+              <ClipboardListIcon className="size-3" />
+              Queue
+            </Button>
+
+            {groupTools(props.tools ?? FALLBACK_TOOLS).map(([group, tools]) => (
+              <div key={group} className="flex flex-col gap-1">
+                <Separator className="my-1" />
+                <span className="px-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                  {group}
+                </span>
+                {tools.map((tool) => (
+                  <div key={tool.id} className="group/tool flex items-center">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 flex-1 justify-start gap-2 text-xs"
+                      onClick={() => addTool(tool)}
+                    >
+                      <ToolIcon name={tool.icon} className="size-3" />
+                      {tool.name}
+                    </Button>
+                    {group === "Personal" && (
+                      <button
+                        className="shrink-0 px-1 text-muted-foreground opacity-0 transition-opacity group-hover/tool:opacity-100 hover:text-destructive"
+                        title={`Delete "${tool.name}"`}
+                        onClick={() => void deletePersonalLink(tool)}
+                      >
+                        <Trash2Icon className="size-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
+
+            <Separator className="my-1" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 justify-start gap-2 text-xs"
+              onClick={() => setCustomOpen(true)}
+            >
+              <PlusIcon className="size-3" />
+              Custom link…
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 justify-start gap-2 text-xs text-muted-foreground"
+              onClick={resetLayout}
+            >
+              Reset layout
+            </Button>
+          </div>
+        </div>
+
+        <Dialog open={customOpen} onOpenChange={setCustomOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add a personal link</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="custom-name">Name</Label>
+                <Input
+                  id="custom-name"
+                  value={customForm.name}
+                  onChange={(e) =>
+                    setCustomForm({ ...customForm, name: e.target.value })
+                  }
+                  placeholder="My dashboard"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="custom-url">URL</Label>
+                <Input
+                  id="custom-url"
+                  value={customForm.url}
+                  onChange={(e) =>
+                    setCustomForm({ ...customForm, url: e.target.value })
+                  }
+                  placeholder="https://…  ({{email}} is supported)"
+                  className="font-mono text-xs"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Saved under <strong>Personal</strong> in the toolbox — available
+                on every canvas and editable in Settings.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setCustomOpen(false)}
+                disabled={customBusy}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void saveCustomLink()}
+                disabled={
+                  customBusy ||
+                  !customForm.name.trim() ||
+                  !/^https?:\/\//.test(customForm.url.trim())
+                }
+              >
+                {customBusy ? "Saving…" : "Save link"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <div
+          className={cn(
+            "h-full w-full",
+            !edgesVisible && "canvas-edges-hidden"
+          )}
+        >
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={nodeTypes}
+            fitView
+            minZoom={0.15}
+            maxZoom={2}
+          >
+            <Background gap={24} />
+            <Controls />
+            <MiniMap pannable zoomable className="!bg-muted" />
+          </ReactFlow>
+        </div>
       </div>
-    </div>
     </CanvasActiveContext.Provider>
   )
 }

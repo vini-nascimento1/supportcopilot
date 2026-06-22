@@ -1,17 +1,10 @@
 "use client"
 
-import { useState, useCallback } from "react"
 import { ExternalLinkIcon, UserIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { DraftPanel } from "@/components/draft-panel"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { SlackThreadFinder } from "@/components/slack-thread-finder"
 
 interface Props {
@@ -29,8 +22,6 @@ interface Props {
 
 export function CaseSidebar({
   conversationId,
-  playbookId,
-  playbookName,
   customerEmail,
   customerName,
   conversationState,
@@ -39,31 +30,11 @@ export function CaseSidebar({
   conversationUpdatedAt,
   intercomUrl,
 }: Props) {
-  // Shared draft state: SlackThreadFinder can push drafts into DraftPanel
-  const [slackDraft, setSlackDraft] = useState<string | null>(null)
-
-  const handleSlackDraft = useCallback((body: string) => {
-    setSlackDraft(body)
-  }, [])
-
-  const handleDraftConsumed = useCallback(() => {
-    setSlackDraft(null)
-  }, [])
-
   return (
     <div className="flex flex-col gap-4">
       <SlackThreadFinder
         conversationId={conversationId}
         customerEmail={customerEmail}
-        onGenerateDraft={handleSlackDraft}
-      />
-
-      <DraftPanel
-        conversationId={conversationId}
-        playbookId={playbookId}
-        playbookName={playbookName}
-        externalDraft={slackDraft}
-        onDraftConsumed={handleDraftConsumed}
       />
 
       <Card>
@@ -116,9 +87,13 @@ export function CaseSidebar({
 
           {conversationUpdatedAt && (
             <div className="flex flex-col gap-0.5">
-              <span className="text-xs text-muted-foreground">Last updated</span>
+              <span className="text-xs text-muted-foreground">
+                Last updated
+              </span>
               <span className="text-xs">
-                {new Date(conversationUpdatedAt).toLocaleString("en-GB", { timeZone: "Europe/London" })}
+                {new Date(conversationUpdatedAt).toLocaleString("en-GB", {
+                  timeZone: "Europe/London",
+                })}
               </span>
             </div>
           )}
@@ -134,11 +109,7 @@ export function CaseSidebar({
 
       {intercomUrl && (
         <Button asChild className="w-full">
-          <a
-            href={intercomUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
+          <a href={intercomUrl} target="_blank" rel="noopener noreferrer">
             <ExternalLinkIcon className="size-4" />
             Open in Intercom
           </a>

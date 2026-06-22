@@ -11,12 +11,7 @@ import {
   ChevronRightIcon,
 } from "lucide-react"
 
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -80,7 +75,7 @@ type FetchState =
 interface Props {
   conversationId: string
   customerEmail: string | null
-  onGenerateDraft: (body: string) => void
+  onGenerateDraft?: (body: string) => void
 }
 
 export function SlackThreadFinder({
@@ -88,7 +83,9 @@ export function SlackThreadFinder({
   customerEmail,
   onGenerateDraft,
 }: Props) {
-  const [fetchState, setFetchState] = useState<FetchState>({ status: "loading" })
+  const [fetchState, setFetchState] = useState<FetchState>({
+    status: "loading",
+  })
   const [generating, setGenerating] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [threadReplies, setThreadReplies] = useState<ThreadReply[] | null>(null)
@@ -101,8 +98,10 @@ export function SlackThreadFinder({
     }
 
     try {
-      const res = await fetch(`/api/slack/case-threads?conversationId=${encodeURIComponent(conversationId)}`)
-      const data = await res.json() as {
+      const res = await fetch(
+        `/api/slack/case-threads?conversationId=${encodeURIComponent(conversationId)}`
+      )
+      const data = (await res.json()) as {
         ok: boolean
         threads?: ThreadInfo[]
         error?: string
@@ -117,7 +116,10 @@ export function SlackThreadFinder({
         } else if (data.error === "auth_required") {
           setFetchState({ status: "auth_required" })
         } else {
-          setFetchState({ status: "error", message: humanizeSlackError(data.detail ?? data.error) })
+          setFetchState({
+            status: "error",
+            message: humanizeSlackError(data.detail ?? data.error),
+          })
         }
         return
       }
@@ -138,9 +140,12 @@ export function SlackThreadFinder({
 
   // Poll on mount and every POLL_INTERVAL_MS
   useEffect(() => {
-    fetchThreads()
+    const first = setTimeout(() => void fetchThreads(), 0)
     const id = setInterval(fetchThreads, POLL_INTERVAL_MS)
-    return () => clearInterval(id)
+    return () => {
+      clearTimeout(first)
+      clearInterval(id)
+    }
   }, [fetchThreads])
 
   async function handleExpand(channelId: string, threadTs: string) {
@@ -154,8 +159,10 @@ export function SlackThreadFinder({
 
     setLoadingThread(true)
     try {
-      const res = await fetch(`/api/slack/thread?channel=${encodeURIComponent(channelId)}&ts=${encodeURIComponent(threadTs)}`)
-      const data = await res.json() as {
+      const res = await fetch(
+        `/api/slack/thread?channel=${encodeURIComponent(channelId)}&ts=${encodeURIComponent(threadTs)}`
+      )
+      const data = (await res.json()) as {
         ok: boolean
         replies?: ThreadReply[]
       }
@@ -171,7 +178,12 @@ export function SlackThreadFinder({
     }
   }
 
-  async function handleGenerate(channelId: string, threadTs: string, chName: string) {
+  async function handleGenerate(
+    channelId: string,
+    threadTs: string,
+    chName: string
+  ) {
+    if (!onGenerateDraft) return
     setGenerating(true)
 
     try {
@@ -208,7 +220,9 @@ export function SlackThreadFinder({
 
       onGenerateDraft(body)
     } catch (e) {
-      onGenerateDraft(`[Error: ${e instanceof Error ? e.message : "Network error"}]`)
+      onGenerateDraft(
+        `[Error: ${e instanceof Error ? e.message : "Network error"}]`
+      )
     } finally {
       setGenerating(false)
     }
@@ -228,7 +242,8 @@ export function SlackThreadFinder({
     })
   }
 
-  const latestThread = fetchState.status === "loaded" ? fetchState.threads[0] : null
+  const latestThread =
+    fetchState.status === "loaded" ? fetchState.threads[0] : null
 
   return (
     <Card>
@@ -239,12 +254,20 @@ export function SlackThreadFinder({
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
+                <button
+                  type="button"
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                >
                   <InfoIcon className="size-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top" className="max-w-64 text-xs leading-relaxed">
-                Searches internal Slack channels for the most recent workflow/fraud/moderation thread mentioning this customer's email. Expand to read the full thread and use "Generate response" to translate it into a customer-facing draft.
+              <TooltipContent
+                side="top"
+                className="max-w-64 text-xs leading-relaxed"
+              >
+                {onGenerateDraft
+                  ? "Searches internal Slack channels for the most recent workflow/fraud/moderation thread mentioning this customer's email. Expand to read the full thread or generate a customer-facing draft."
+                  : "Searches internal Slack channels for the most recent workflow/fraud/moderation thread mentioning this customer's email. Expand to read the full thread."}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -264,7 +287,8 @@ export function SlackThreadFinder({
 
         {fetchState.status === "no_email" && (
           <p className="text-xs text-muted-foreground">
-            No customer email available. Slack thread search requires the customer's email address.
+            No customer email available. Slack thread search requires the
+            customer&apos;s email address.
           </p>
         )}
 
@@ -272,7 +296,8 @@ export function SlackThreadFinder({
           <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <AlertCircleIcon className="mt-0.5 size-3 shrink-0" />
             <span>
-              Slack search scope is not available. The <code>search:read</code> scope needs to be added to your Slack app.
+              Slack search scope is not available. The <code>search:read</code>{" "}
+              scope needs to be added to your Slack app.
             </span>
           </div>
         )}
@@ -280,7 +305,10 @@ export function SlackThreadFinder({
         {fetchState.status === "auth_required" && (
           <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <AlertCircleIcon className="mt-0.5 size-3 shrink-0" />
-            <span>Connect your Slack account in Settings to search for workflow threads.</span>
+            <span>
+              Connect your Slack account in Settings to search for workflow
+              threads.
+            </span>
           </div>
         )}
 
@@ -293,7 +321,7 @@ export function SlackThreadFinder({
 
         {fetchState.status === "empty" && (
           <p className="text-xs text-muted-foreground">
-            No Slack threads found for this customer's email.
+            No Slack threads found for this customer&apos;s email.
           </p>
         )}
 
@@ -306,14 +334,17 @@ export function SlackThreadFinder({
                   #{latestThread.channelName}
                 </Badge>
                 <span className="text-xs text-muted-foreground">
-                  {latestThread.participantCount} participant{latestThread.participantCount !== 1 ? "s" : ""}
+                  {latestThread.participantCount} participant
+                  {latestThread.participantCount !== 1 ? "s" : ""}
                 </span>
               </div>
 
               {/* Expandable thread content */}
               <button
                 type="button"
-                onClick={() => handleExpand(latestThread.channelId, latestThread.ts)}
+                onClick={() =>
+                  handleExpand(latestThread.channelId, latestThread.ts)
+                }
                 className="flex w-full items-start gap-1.5 text-left"
               >
                 <div className="mt-0.5 shrink-0">
@@ -329,9 +360,14 @@ export function SlackThreadFinder({
                   {expanded && threadReplies ? (
                     <div className="flex flex-col gap-1.5">
                       {threadReplies.map((reply, i) => (
-                        <div key={reply.ts ?? i} className="rounded bg-muted/30 px-2 py-1">
-                          <span className="text-xs font-medium text-foreground">{reply.userName}</span>
-                          <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                        <div
+                          key={reply.ts ?? i}
+                          className="rounded bg-muted/30 px-2 py-1"
+                        >
+                          <span className="text-xs font-medium text-foreground">
+                            {reply.userName}
+                          </span>
+                          <p className="text-xs break-words whitespace-pre-wrap text-muted-foreground">
                             {reply.text}
                           </p>
                         </div>
@@ -361,22 +397,30 @@ export function SlackThreadFinder({
                       Open
                     </a>
                   )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs"
-                    disabled={generating}
-                    onClick={() => handleGenerate(latestThread.channelId, latestThread.ts, latestThread.channelName)}
-                  >
-                    {generating ? (
-                      <>
-                        <Loader2Icon className="size-3 animate-spin" />
-                        Generating…
-                      </>
-                    ) : (
-                      "Generate response"
-                    )}
-                  </Button>
+                  {onGenerateDraft && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      disabled={generating}
+                      onClick={() =>
+                        handleGenerate(
+                          latestThread.channelId,
+                          latestThread.ts,
+                          latestThread.channelName
+                        )
+                      }
+                    >
+                      {generating ? (
+                        <>
+                          <Loader2Icon className="size-3 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        "Generate response"
+                      )}
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>

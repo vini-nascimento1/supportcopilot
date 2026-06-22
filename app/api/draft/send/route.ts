@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getSignedInEmail } from "@/lib/auth"
 import { mdToHtml } from "@/lib/md-to-html"
+import { buildIntercomReplyPayload } from "./payload"
 
 const INTERCOM_TOKEN = process.env.INTERCOM_ACCESS_TOKEN
 const INTERCOM_API = "https://api.intercom.io"
@@ -12,15 +13,16 @@ export async function POST(req: NextRequest) {
     return new Response("Unauthorized", { status: 401 })
   }
 
-  const { conversationId, body, html } = (await req.json()) as {
+  const { conversationId, body, html, attachmentFiles } = (await req.json()) as {
     conversationId: string
     body: string
     /** When true, body is already HTML (e.g. an Intercom macro) — send as-is
         instead of converting markdown. */
     html?: boolean
+    attachmentFiles?: { name: string; contentType: string; data: string }[]
   }
 
-  if (!conversationId || !body) {
+  if (!conversationId || (!body && !(attachmentFiles && attachmentFiles.length))) {
     return new Response("Missing conversationId or body", { status: 400 })
   }
 
@@ -52,12 +54,9 @@ export async function POST(req: NextRequest) {
       "Content-Type": "application/json",
       "Intercom-Version": "2.11",
     },
-    body: JSON.stringify({
-      type: "admin",
-      message_type: "comment",
-      admin_id: adminId,
-      body: htmlBody,
-    }),
+    body: JSON.stringify(
+      buildIntercomReplyPayload({ adminId: String(adminId), htmlBody, attachmentFiles })
+    ),
   })
 
   if (!response.ok) {

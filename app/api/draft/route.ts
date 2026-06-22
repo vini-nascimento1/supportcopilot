@@ -7,6 +7,8 @@ import {
   buildSystemPrompt,
   buildNotionAwareSystemPrompt,
   buildUserMessage,
+  buildImproveSystemPrompt,
+  buildImproveUserMessage,
   streamChatCompletion,
 } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
@@ -31,16 +33,24 @@ export async function POST(req: NextRequest) {
     return new Response("VERBOO_API_KEY is not configured", { status: 503 })
   }
 
-  let body: { conversationId?: string; playbookId?: string }
+  let body: {
+    conversationId?: string
+    playbookId?: string
+    mode?: "generate" | "improve"
+    currentDraft?: string
+  }
   try {
-    body = (await req.json()) as { conversationId?: string; playbookId?: string }
+    body = (await req.json()) as typeof body
   } catch {
     return new Response("Invalid JSON body", { status: 400 })
   }
 
-  const { conversationId, playbookId } = body
+  const { conversationId, playbookId, mode, currentDraft } = body
   if (!conversationId) {
     return new Response("conversationId is required", { status: 400 })
+  }
+  if (mode === "improve" && !currentDraft?.trim()) {
+    return new Response("currentDraft is required to improve", { status: 400 })
   }
 
   // Require authenticated session
@@ -66,31 +76,38 @@ export async function POST(req: NextRequest) {
     ? ((await getResponsesForPlaybookIds([playbookId])).get(playbookId) ?? [])
     : []
 
-  // Fetch relevant Intercom Help Center articles for extra context
-  const searchQuery = [conversation.subject, conversation.firstMessage]
-    .filter(Boolean)
-    .join(" ")
-  const articles = await searchArticles(searchQuery)
-
   const agentName = await getAgentName(email)
 
-  // Always ground in live Notion (best-effort), for BOTH the head (a playbook
-  // matched) and the tail (none) — the playbook gives the procedure, Notion adds
-  // fresh KB/connector context, with internal sources firewalled out of the
-  // customer text. Falls back to the base prompt when retrieval yields nothing
-  // (not connected, needs re-consent, or no hits).
-  const { origin } = new URL(req.url)
-  const snippets = await retrieveNotionSnippets(email, origin, searchQuery)
-  const systemPrompt =
-    snippets.length > 0
-      ? buildNotionAwareSystemPrompt(playbook, responseTemplates, agentName, articles, snippets)
-      : buildSystemPrompt(playbook, responseTemplates, agentName, articles)
+  let systemPrompt: string
+  let userMessage: Awaited<ReturnType<typeof buildUserMessage>> | string
 
-  const images = await encodeImageAttachments(conversation.messages)
-  const userMessage = buildUserMessage(conversation, images)
+  if (mode === "improve") {
+    systemPrompt = buildImproveSystemPrompt(agentName)
+    userMessage = buildImproveUserMessage(conversation, currentDraft as string)
+  } else {
+    // Fetch relevant Intercom Help Center articles for extra context.
+    const searchQuery = [conversation.subject, conversation.firstMessage]
+      .filter(Boolean)
+      .join(" ")
+    const articles = await searchArticles(searchQuery)
+
+    // Always ground in live Notion (best-effort), for BOTH the head (a playbook
+    // matched) and the tail (none) — the playbook gives the procedure, Notion adds
+    // fresh KB/connector context, with internal sources firewalled out of the
+    // customer text. Falls back to the base prompt when retrieval yields nothing
+    // (not connected, needs re-consent, or no hits).
+    const { origin } = new URL(req.url)
+    const snippets = await retrieveNotionSnippets(email, origin, searchQuery)
+    systemPrompt =
+      snippets.length > 0
+        ? buildNotionAwareSystemPrompt(playbook, responseTemplates, agentName, articles, snippets)
+        : buildSystemPrompt(playbook, responseTemplates, agentName, articles)
+
+    const images = await encodeImageAttachments(conversation.messages)
+    userMessage = buildUserMessage(conversation, images)
+  }
 
   const encoder = new TextEncoder()
-  let fullText = ""
 
   const readable = new ReadableStream({
     async start(controller) {
@@ -101,7 +118,6 @@ export async function POST(req: NextRequest) {
         ]
 
         for await (const chunk of streamChatCompletion(messages)) {
-          fullText += chunk
           controller.enqueue(encoder.encode(chunk))
         }
       } catch (err) {
