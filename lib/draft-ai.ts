@@ -2,9 +2,13 @@ import type { IntercomArticle } from "@/lib/intercom"
 import type { PlaybookListItem, ResponseItem } from "@/lib/playbooks"
 import type { NotionSnippet } from "@/lib/notion-retrieval"
 
+export type OpenAIContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+
 export type OpenAIMessage = {
   role: "system" | "user" | "assistant"
-  content: string
+  content: string | OpenAIContentPart[]
 }
 
 const VERBOO_API_KEY = process.env.VERBOO_API_KEY
@@ -181,11 +185,14 @@ export function buildNotionAwareSystemPrompt(
 
 // ── User message builder ───────────────────────────────────────────────────
 
-export function buildUserMessage(conversation: {
-  customer: string
-  firstMessage: string
-  messages: { role: string; body: string }[]
-}): string {
+export function buildUserMessage(
+  conversation: {
+    customer: string
+    firstMessage: string
+    messages: { role: string; body: string }[]
+  },
+  images?: { name: string; dataUri: string }[]
+): string | OpenAIContentPart[] {
   const parts = [`Customer: ${conversation.customer}`]
 
   // Include the full conversation thread so the AI has complete context
@@ -198,10 +205,26 @@ export function buildUserMessage(conversation: {
     parts.push(`${label}: ${msg.body}`)
   }
 
+  if (images && images.length > 0) {
+    parts.push(
+      `\nThe customer attached ${images.length} image(s) below. Use them as factual evidence — read any error codes, amounts, IDs, or document details shown — but never infer policy from an image; cite playbooks as usual.`
+    )
+  }
+
   parts.push(
     `\nThe LAST message above is what you are replying to. Write the next message in this conversation, anchored on that latest message and the context already exchanged. Follow the tone and context rules above. Do not greet again if an agent has already replied, and do not repeat anything already said earlier in the thread.`
   )
-  return parts.join("\n")
+  const text = parts.join("\n")
+
+  if (!images || images.length === 0) return text
+
+  return [
+    { type: "text", text },
+    ...images.map((img) => ({
+      type: "image_url" as const,
+      image_url: { url: img.dataUri },
+    })),
+  ]
 }
 
 // ── Macro adaptation user message ─────────────────────────────────────────
@@ -303,6 +326,15 @@ Your task: **rewrite the approved macro below** so it fits this specific convers
 ${macroBodyText}`
 }
 
+export function selectModel(messages: OpenAIMessage[]): string {
+  const hasImage = messages.some(
+    (m) =>
+      Array.isArray(m.content) &&
+      m.content.some((part) => part.type === "image_url")
+  )
+  return hasImage ? "qwen3.6-27b" : "deepseek-v4-flash"
+}
+
 export async function* streamChatCompletion(
   messages: OpenAIMessage[]
 ): AsyncGenerator<string> {
@@ -313,8 +345,8 @@ export async function* streamChatCompletion(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "deepseek-v4-flash",
-      max_tokens: 1024,
+      model: selectModel(messages),
+      max_tokens: 4096,
       stream: true,
       messages,
     }),

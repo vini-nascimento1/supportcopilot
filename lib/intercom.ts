@@ -152,11 +152,19 @@ function demoCases(playbooks: PlaybookListItem[]): CasesQueueData {
   }
 }
 
+export type ConversationAttachment = {
+  name: string
+  url: string
+  contentType: string // e.g. "image/png"; "" if Intercom didn't provide it
+  filesize: number    // bytes; 0 if unknown
+}
+
 export type ConversationMessage = {
   role: "customer" | "admin"
   author: string
   body: string
   createdAt: string
+  attachments: ConversationAttachment[]
 }
 
 export type ConversationDetail = {
@@ -188,6 +196,13 @@ type IntercomConversationFull = {
     body?: string | null
     subject?: string | null
     author?: { name?: string | null; email?: string | null; type?: string | null } | null
+    attachments?: Array<{
+      type?: string | null
+      name?: string | null
+      url?: string | null
+      content_type?: string | null
+      filesize?: number | null
+    }> | null
   } | null
   conversation_parts?: {
     conversation_parts?: Array<{
@@ -195,6 +210,13 @@ type IntercomConversationFull = {
       body?: string | null
       created_at?: number | null
       author?: { name?: string | null; type?: string | null } | null
+      attachments?: Array<{
+        type?: string | null
+        name?: string | null
+        url?: string | null
+        content_type?: string | null
+        filesize?: number | null
+      }> | null
     }>
   } | null
   tags?: { tags?: Array<{ name?: string | null }> } | null
@@ -219,23 +241,50 @@ export async function getConversationDetail(
   const conv = (await response.json()) as IntercomConversationFull
   const parts = conv.conversation_parts?.conversation_parts ?? []
 
+  // Raw Intercom attachment entries ride on both `source` and each part with
+  // the same shape; reuse it so the mapper has one consistent signature.
+  type RawAttachment = NonNullable<
+    NonNullable<IntercomConversationFull["source"]>["attachments"]
+  >[number]
+
+  // Map raw Intercom attachments to our metadata-only shape, dropping any
+  // entry without a `url` (nothing downstream can fetch a urlless attachment).
+  // Metadata only — we never download the bytes here.
+  const mapAttachments = (
+    raw: RawAttachment[] | null | undefined
+  ): ConversationAttachment[] =>
+    (raw ?? [])
+      .filter((a) => a?.url)
+      .map((a) => ({
+        name: a.name ?? "attachment",
+        url: a.url as string,
+        contentType: a.content_type ?? "",
+        filesize: a.filesize ?? 0,
+      }))
+
   // The conversation's opening message lives on `source`, NOT in
   // conversation_parts — so the thread must start with it, otherwise the
   // card begins mid-conversation and the first customer contact is lost.
   const sourceBody = stripHtml(conv.source?.body)
-  const initialMessage: ConversationMessage[] = sourceBody
-    ? [
-        {
-          role: conv.source?.author?.type === "admin" ? "admin" : "customer",
-          author:
-            conv.source?.author?.name ??
-            conv.source?.author?.email ??
-            (conv.source?.author?.type === "admin" ? "Agent" : "Customer"),
-          body: sourceBody,
-          createdAt: toDate(conv.created_at) ?? "",
-        },
-      ]
-    : []
+  const sourceAttachments = mapAttachments(conv.source?.attachments)
+  // Keep the opening message when it has text OR at least one attachment:
+  // customers often open with an image-only message (e.g. a screenshot) and no
+  // body — gating on sourceBody alone would silently drop that image.
+  const initialMessage: ConversationMessage[] =
+    sourceBody || sourceAttachments.length > 0
+      ? [
+          {
+            role: conv.source?.author?.type === "admin" ? "admin" : "customer",
+            author:
+              conv.source?.author?.name ??
+              conv.source?.author?.email ??
+              (conv.source?.author?.type === "admin" ? "Agent" : "Customer"),
+            body: sourceBody,
+            createdAt: toDate(conv.created_at) ?? "",
+            attachments: sourceAttachments,
+          },
+        ]
+      : []
 
   // A customer-visible message rides on more part types than just `comment`:
   // when a customer replies to a *closed* conversation the reply arrives as an
@@ -252,8 +301,11 @@ export async function getConversationDetail(
       author: p.author?.name ?? (p.author?.type === "admin" ? "Agent" : "Customer"),
       body: stripHtml(p.body),
       createdAt: toDate(p.created_at) ?? "",
+      attachments: mapAttachments(p.attachments),
     }))
-    .filter((m) => m.body)
+    // Keep a part when it has text OR at least one attachment: an image-only
+    // customer reply (a screenshot with no body) would otherwise be dropped.
+    .filter((m) => m.body || m.attachments.length > 0)
 
   const messages: ConversationMessage[] = [...initialMessage, ...partMessages]
 

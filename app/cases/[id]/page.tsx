@@ -173,9 +173,16 @@ export default async function CasePage({
                               : ""}
                           </span>
                         </span>
-                        <p className="whitespace-pre-wrap text-sm leading-snug">
-                          {msg.body}
-                        </p>
+                        {msg.body?.trim() && (
+                          <p className="whitespace-pre-wrap text-sm leading-snug">
+                            {msg.body}
+                          </p>
+                        )}
+                        {msg.attachments.length > 0 && (
+                          <span className="text-xs text-muted-foreground">
+                            <span aria-hidden="true">📎</span> {msg.attachments.length} attachment(s)
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>

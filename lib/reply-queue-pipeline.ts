@@ -15,6 +15,7 @@ import {
   streamChatCompletion,
   type OpenAIMessage,
 } from "@/lib/draft-ai"
+import { encodeImageAttachments } from "@/lib/attachments"
 import {
   classifyWebhookTopic,
   hasCapabilityGap,
@@ -132,6 +133,10 @@ export async function computeAndPersistSuggestion(
   ])
   if (!conversation) return { handled: false, action: "skipped", reason: "no conversation detail" }
 
+  // Download + base64-encode any image attachments so the draft brain can see
+  // them (multimodal). Never throws; returns [] when there are none.
+  const images = await encodeImageAttachments(conversation.messages)
+
   // Resolve the owner from the conversation's CURRENT assignee. On the webhook
   // path this matches the incoming event; on the assign path it reflects the
   // assignment we just wrote, so the per-user Notion token kicks in.
@@ -194,7 +199,7 @@ export async function computeAndPersistSuggestion(
     : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles)
   const messages: OpenAIMessage[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: buildUserMessage(conversation) },
+    { role: "user", content: buildUserMessage(conversation, images) },
   ]
 
   let body = ""

@@ -5,7 +5,10 @@ import {
   buildMacroAdaptUserMessage,
   buildNotionAwareSystemPrompt,
   buildSystemPrompt,
+  buildUserMessage,
+  selectModel,
 } from "./draft-ai"
+import type { OpenAIMessage } from "./draft-ai"
 import type { NotionSnippet } from "./notion-retrieval"
 
 const snippet = (over: Partial<NotionSnippet>): NotionSnippet => ({
@@ -131,5 +134,92 @@ describe("buildMacroAdaptUserMessage", () => {
   it("does NOT reuse the generic draft instruction (the bug that ignored the macro)", () => {
     const out = buildMacroAdaptUserMessage(convo)
     expect(out).not.toContain("Write the next message in this conversation")
+  })
+})
+
+// Minimal conversation fixture shared across the multimodal-draft tests below.
+const multimodalConvo = {
+  customer: "Jane",
+  firstMessage: "hi",
+  messages: [{ role: "customer", body: "help" }],
+}
+
+describe("selectModel", () => {
+  it("returns the flash model when every message has string content", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "you are a copilot" },
+      { role: "user", content: "Customer: Jane\nhelp" },
+    ]
+    expect(selectModel(messages)).toBe("deepseek-v4-flash")
+  })
+
+  it("returns the vision model when a user message has an image_url part", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "you are a copilot" },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Customer: Jane\nhelp" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } },
+        ],
+      },
+    ]
+    expect(selectModel(messages)).toBe("qwen3.6-27b")
+  })
+
+  it("returns the flash model for array content with only text parts (no image)", () => {
+    const messages: OpenAIMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "Customer: Jane\nhelp" }],
+      },
+    ]
+    expect(selectModel(messages)).toBe("deepseek-v4-flash")
+  })
+})
+
+describe("buildUserMessage", () => {
+  const ATTACHED_NOTICE = "The customer attached"
+  const LAST_MESSAGE_INSTRUCTION = "The LAST message above"
+
+  it("with no images arg returns a string with thread + final instruction and no attached notice", () => {
+    const result = buildUserMessage(multimodalConvo)
+    expect(typeof result).toBe("string")
+    const text = result as string
+    expect(text).toContain("Customer:")
+    expect(text).toContain(LAST_MESSAGE_INSTRUCTION)
+    expect(text).not.toContain(ATTACHED_NOTICE)
+  })
+
+  it("with an empty images array returns the identical string as the no-arg case", () => {
+    const withArg = buildUserMessage(multimodalConvo, [])
+    const withoutArg = buildUserMessage(multimodalConvo)
+    expect(typeof withArg).toBe("string")
+    expect(withArg).toBe(withoutArg)
+  })
+
+  it("with images returns an array: text part first, then ordered image_url parts", () => {
+    const images = [
+      { name: "a.png", dataUri: "data:image/png;base64,AAA" },
+      { name: "b.png", dataUri: "data:image/png;base64,BBB" },
+    ]
+    const result = buildUserMessage(multimodalConvo, images)
+    expect(Array.isArray(result)).toBe(true)
+    const parts = result as Exclude<ReturnType<typeof buildUserMessage>, string>
+
+    expect(parts).toHaveLength(3)
+
+    expect(parts[0].type).toBe("text")
+    const textPart = parts[0] as { type: "text"; text: string }
+    expect(textPart.text).toContain("The customer attached 2 image(s)")
+
+    expect(parts[1]).toEqual({
+      type: "image_url",
+      image_url: { url: "data:image/png;base64,AAA" },
+    })
+    expect(parts[2]).toEqual({
+      type: "image_url",
+      image_url: { url: "data:image/png;base64,BBB" },
+    })
   })
 })

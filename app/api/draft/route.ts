@@ -10,6 +10,7 @@ import {
   streamChatCompletion,
 } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
+import { encodeImageAttachments } from "@/lib/attachments"
 import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
 
 async function getAgentName(email: string): Promise<string> {
@@ -85,7 +86,8 @@ export async function POST(req: NextRequest) {
       ? buildNotionAwareSystemPrompt(playbook, responseTemplates, agentName, articles, snippets)
       : buildSystemPrompt(playbook, responseTemplates, agentName, articles)
 
-  const userMessage = buildUserMessage(conversation)
+  const images = await encodeImageAttachments(conversation.messages)
+  const userMessage = buildUserMessage(conversation, images)
 
   const encoder = new TextEncoder()
   let fullText = ""
