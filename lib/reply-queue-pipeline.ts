@@ -125,7 +125,8 @@ export type PipelineOutcome = {
 // DRAFT-ONLY: only writes a suggested_replies row — never sends, never assigns.
 export async function computeAndPersistSuggestion(
   conversationId: string,
-  origin: string
+  origin: string,
+  opts?: { onRequest?: boolean }
 ): Promise<PipelineOutcome> {
   const [conversation, playbooksData] = await Promise.all([
     getConversationDetail(conversationId),
@@ -231,6 +232,7 @@ export async function computeAndPersistSuggestion(
     confidence: gate.reason === "error" ? null : gate.confidence,
     gateReason: gate.reason,
     riskBand: band,
+    onRequest: opts?.onRequest ?? false,
   })
 
   return { handled: true, action: "suggested", suggestionId: res?.id, band }

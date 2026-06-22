@@ -4,10 +4,12 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import {
+  CheckIcon,
   ExternalLinkIcon,
   InboxIcon,
   Loader2Icon,
   RefreshCwIcon,
+  SparklesIcon,
   UserPlusIcon,
 } from "lucide-react"
 
@@ -79,6 +81,10 @@ export function InboxPanel({
   const [data, setData] = useState<CasesData | null>(null)
   const [assigningId, setAssigningId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  // On-demand AI generation: ids with a /api/reply-queue/generate POST in flight,
+  // and ids we've already requested this session (so the card shows "Queued").
+  const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set())
+  const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set())
 
   const selectInbox = (key: string) => {
     setData(null) // show the skeleton while the new box loads
@@ -181,6 +187,46 @@ export function InboxPanel({
     }
   }
 
+  // Generate AI reply draft(s) on demand for one or more tickets. Persists into
+  // the queue (on_request) so they land in the Queue tab's "On request" group —
+  // even for already-read tickets the always-on pipeline skips. Generation runs
+  // in the background server-side; we just kick it off and nudge the Queue.
+  const generate = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return
+    setGeneratingIds((prev) => new Set([...prev, ...ids]))
+    try {
+      const res = await fetch("/api/reply-queue/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationIds: ids }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const json = (await res.json().catch(() => ({}))) as {
+        started?: number
+        dropped?: number
+      }
+      const started = typeof json.started === "number" ? json.started : ids.length
+      const dropped = typeof json.dropped === "number" ? json.dropped : 0
+      setRequestedIds((prev) => new Set([...prev, ...ids]))
+      broadcastCanvasRefresh()
+      toast.success(
+        started === 1
+          ? "Drafting a reply — it'll appear in the Queue tab."
+          : `Drafting ${started} replies — they'll appear in the Queue tab.${
+              dropped > 0 ? ` (${dropped} skipped — too many at once.)` : ""
+            }`
+      )
+    } catch {
+      toast.error("Couldn't start generation. Try again.")
+    } finally {
+      setGeneratingIds((prev) => {
+        const next = new Set(prev)
+        ids.forEach((id) => next.delete(id))
+        return next
+      })
+    }
+  }, [])
+
   const activeLabel =
     inbox === "mine"
       ? "Mine"
@@ -228,6 +274,29 @@ export function InboxPanel({
         </Button>
       </div>
 
+      {/* Bulk generate — Mine box only (owner-scoped). Drafts every ticket in the
+          box at once (incl. already-read ones the queue skips) into the Queue's
+          "On request" group, so the agent stops opening each ticket to generate. */}
+      {!showAssign && rows !== null && rows.length > 0 && (
+        <div className="shrink-0 border-b px-2 py-1.5">
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-7 w-full gap-1.5 text-[11px]"
+            onClick={() => void generate(rows.map((r) => r.id))}
+            disabled={generatingIds.size > 0}
+            title="Generate AI reply drafts for every ticket in this inbox — they appear in the Queue tab"
+          >
+            {generatingIds.size > 0 ? (
+              <Loader2Icon className="size-3.5 animate-spin" />
+            ) : (
+              <SparklesIcon className="size-3.5" />
+            )}
+            Generate AI replies for all {rows.length}
+          </Button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto">
         {data === null && <ListSkeleton />}
         {data !== null && rows !== null && rows.length === 0 && (
@@ -248,6 +317,10 @@ export function InboxPanel({
                 showAssign={showAssign}
                 assigning={assigningId === row.id}
                 onAssign={() => void assignToMe(row.id)}
+                canGenerate={!showAssign}
+                generating={generatingIds.has(row.id)}
+                requested={requestedIds.has(row.id)}
+                onGenerate={() => void generate([row.id])}
               />
             ))}
           </div>
@@ -262,11 +335,19 @@ function ConversationRow({
   showAssign,
   assigning,
   onAssign,
+  canGenerate,
+  generating,
+  requested,
+  onGenerate,
 }: {
   row: SupportCase
   showAssign: boolean
   assigning: boolean
   onAssign: () => void
+  canGenerate: boolean
+  generating: boolean
+  requested: boolean
+  onGenerate: () => void
 }) {
   const nav = useCanvasNav()
   const open = () => {
@@ -326,6 +407,32 @@ function ConversationRow({
               <UserPlusIcon className="size-3" />
             )}
             Assign to me
+          </Button>
+        )}
+        {canGenerate && (
+          <Button
+            size="sm"
+            variant={requested ? "outline" : "secondary"}
+            className="ml-auto h-6 px-2 text-[10px]"
+            onClick={(e) => {
+              e.stopPropagation()
+              onGenerate()
+            }}
+            disabled={generating}
+            title={
+              requested
+                ? "Draft requested — regenerate this ticket's AI reply"
+                : "Generate an AI reply draft for this ticket — it appears in the Queue tab"
+            }
+          >
+            {generating ? (
+              <Loader2Icon className="size-3 animate-spin" />
+            ) : requested ? (
+              <CheckIcon className="size-3" />
+            ) : (
+              <SparklesIcon className="size-3" />
+            )}
+            {generating ? "Generating" : requested ? "Queued" : "Generate"}
           </Button>
         )}
       </div>

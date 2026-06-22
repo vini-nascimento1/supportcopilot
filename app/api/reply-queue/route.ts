@@ -55,11 +55,20 @@ export async function GET(request: Request) {
     // Intercom unreachable / no admin id → show cached suggestions as-is rather
     // than emptying the queue on a transient outage.
     if (!nonRead) {
-      return NextResponse.json({ items: pending, drafting: [] })
+      return NextResponse.json({ items: pending, drafting: [], onRequest: [] })
     }
 
     const nonReadIds = new Set(nonRead.map((c) => c.id))
     const items = pending.filter((p) => nonReadIds.has(p.intercomConversationId))
+
+    // On-request drafts the agent generated from the Inbox for conversations that
+    // are NOT non-read — i.e. already-read tickets they deliberately drafted.
+    // These never auto-stale; the Queue shows them in their own "On request"
+    // group. (On-request drafts for a still-non-read conversation just live in the
+    // normal bands above, like any other.)
+    const onRequest = pending.filter(
+      (p) => p.onRequest && !nonReadIds.has(p.intercomConversationId)
+    )
 
     // Non-read conversations with no ready draft yet — surfaced to the UI as
     // "drafting…" placeholders and (re)generated in the background below.
@@ -68,9 +77,12 @@ export async function GET(request: Request) {
       .filter((c) => !haveDraft.has(c.id))
       .map((c) => ({ conversationId: c.id, customerName: c.customer, subject: c.subject }))
 
-    // Reconcile in the background — never block the response.
+    // Reconcile in the background — never block the response. Stale ONLY auto
+    // drafts whose conversation left the non-read set; on-request drafts are
+    // durable (the agent asked for them) and keep living in the "On request"
+    // group even once the ticket is read.
     const noLongerNonRead = pending
-      .filter((p) => !nonReadIds.has(p.intercomConversationId))
+      .filter((p) => !nonReadIds.has(p.intercomConversationId) && !p.onRequest)
       .map((p) => p.intercomConversationId)
     const missing = drafting.map((d) => d.conversationId)
     const url = new URL(request.url)
@@ -101,8 +113,13 @@ export async function GET(request: Request) {
       }
     })
 
-    return NextResponse.json({ items, drafting })
+    return NextResponse.json({ items, drafting, onRequest })
   } catch {
-    return NextResponse.json({ items: [], drafting: [], error: "Couldn't load the reply queue." })
+    return NextResponse.json({
+      items: [],
+      drafting: [],
+      onRequest: [],
+      error: "Couldn't load the reply queue.",
+    })
   }
 }

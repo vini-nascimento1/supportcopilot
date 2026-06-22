@@ -24,6 +24,10 @@ export type PersistSuggestionInput = {
   confidence: number | null
   gateReason: string | null
   riskBand: RiskBand
+  // True = generated on demand by the agent from the Inbox ("Generate" /
+  // "Generate all"). On-request drafts are durable — the non-read reconciliation
+  // never stales them. Defaults to false (the always-on pipeline path).
+  onRequest?: boolean
 }
 
 // Replace the live suggestion for a conversation: supersede any existing pending
@@ -61,6 +65,7 @@ export async function upsertPendingSuggestion(
       confidence: input.confidence,
       gate_reason: input.gateReason,
       risk_band: input.riskBand,
+      on_request: input.onRequest ?? false,
       status: "pending",
       supersedes: existing?.id ?? null,
     })
@@ -118,6 +123,7 @@ export type QueueItem = {
   sources: SuggestionSource[]
   confidence: number | null
   riskBand: RiskBand
+  onRequest: boolean
   createdAt: string
 }
 
@@ -132,7 +138,7 @@ export async function getPendingSuggestionsForAgent(agentId: string): Promise<Qu
   const { data } = await db
     .from("suggested_replies")
     .select(
-      "id, intercom_conversation_id, owner_id, customer_name, subject, body, justification, sources, confidence, risk_band, created_at"
+      "id, intercom_conversation_id, owner_id, customer_name, subject, body, justification, sources, confidence, risk_band, on_request, created_at"
     )
     .eq("status", "pending")
     .eq("owner_id", agentId)
@@ -150,6 +156,7 @@ export async function getPendingSuggestionsForAgent(agentId: string): Promise<Qu
     sources: (r.sources as SuggestionSource[] | null) ?? [],
     confidence: (r.confidence as number | null) ?? null,
     riskBand: r.risk_band as RiskBand,
+    onRequest: (r.on_request as boolean | null) ?? false,
     createdAt: r.created_at as string,
   }))
 }

@@ -65,6 +65,9 @@ export function QueuePanel({
 }) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
   const [drafting, setDrafting] = useState<DraftingItem[]>([])
+  // Drafts the agent generated on demand from the Inbox for tickets that are no
+  // longer non-read (already replied). Durable — never staled by reconciliation.
+  const [onRequest, setOnRequest] = useState<QueueItem[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -73,6 +76,7 @@ export function QueuePanel({
       const data = await res.json()
       setItems(Array.isArray(data.items) ? data.items : [])
       setDrafting(Array.isArray(data.drafting) ? data.drafting : [])
+      setOnRequest(Array.isArray(data.onRequest) ? data.onRequest : [])
       setError(typeof data.error === "string" ? data.error : null)
     } catch {
       setError("Couldn't load the reply queue.")
@@ -97,16 +101,18 @@ export function QueuePanel({
   }, [active, load])
 
   useEffect(() => {
-    onCount?.((items?.length ?? 0) + drafting.length)
-  }, [items, drafting, onCount])
+    onCount?.((items?.length ?? 0) + drafting.length + onRequest.length)
+  }, [items, drafting, onRequest, onCount])
 
   const remove = useCallback((id: string) => {
     setItems((prev) => (prev ? prev.filter((i) => i.id !== id) : prev))
+    setOnRequest((prev) => prev.filter((i) => i.id !== id))
   }, [])
 
   const ready = items?.filter((i) => i.riskBand !== "needs_check").sort(byOldest) ?? []
   const needsCheck = items?.filter((i) => i.riskBand === "needs_check").sort(byOldest) ?? []
-  const total = (items?.length ?? 0) + drafting.length
+  const onRequestSorted = [...onRequest].sort(byOldest)
+  const total = (items?.length ?? 0) + drafting.length + onRequest.length
 
   return (
     <div className="flex h-full flex-col">
@@ -156,6 +162,29 @@ export function QueuePanel({
                   <QueueRow key={i.id} item={i} onDone={remove} onRefresh={load} />
                 ))}
               </Band>
+            )}
+            {onRequestSorted.length > 0 && (
+              <section className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5 px-1">
+                  <SparklesIcon className="size-3 text-primary" />
+                  <h2 className="text-xs font-medium">On request</h2>
+                  <Badge
+                    variant="secondary"
+                    className="h-4 px-1 text-[10px] font-normal tabular-nums"
+                  >
+                    {onRequestSorted.length}
+                  </Badge>
+                </div>
+                <p className="px-1 text-[11px] leading-snug text-muted-foreground">
+                  Drafts you generated from the Inbox — including tickets you&apos;ve already
+                  replied to. Send or dismiss right here.
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {onRequestSorted.map((i) => (
+                    <QueueRow key={i.id} item={i} onDone={remove} onRefresh={load} />
+                  ))}
+                </div>
+              </section>
             )}
           </div>
         )}
