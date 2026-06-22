@@ -1,10 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import {
-  CheckIcon,
   ExternalLinkIcon,
   InboxIcon,
   Loader2Icon,
@@ -63,11 +68,13 @@ function readInbox(): string {
   }
 }
 
-// The "Inbox" tab of the canvas left sidebar: a live view of Intercom
-// conversations for one inbox at a time — Mine / Unassigned / a teammate —
-// so the agent can triage and pick up work without leaving the app. Selecting an
-// inbox loads only that box (one Intercom search per refresh, not all at once).
-// "Assign to me" reuses the human-gated assignment write (/api/reply-queue/assign).
+// The "Inbox" tab of the canvas left sidebar: a live, minimal triage list of
+// Intercom conversations for one box at a time — Mine / Unassigned / a teammate.
+// Every conversation shown is already open (the default filter), so cards stay
+// lean: just who + when + a one-line snippet. Work happens through checkbox
+// SELECTION + one contextual bulk action at the bottom — "Generate AI replies"
+// in Mine, "Assign to me" in the other boxes (a human-gated Intercom write,
+// /api/reply-queue/assign). Opening a card switches to it in the workspace.
 export function InboxPanel({
   active,
   onCount,
@@ -75,19 +82,17 @@ export function InboxPanel({
   active: boolean
   onCount?: (n: number) => void
 }) {
-  const nav = useCanvasNav()
   const inbox = useSyncExternalStore(subscribeInbox, readInbox, () => "mine")
   const [admins, setAdmins] = useState<IntercomAdmin[]>([])
   const [data, setData] = useState<CasesData | null>(null)
-  const [assigningId, setAssigningId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-  // On-demand AI generation: ids with a /api/reply-queue/generate POST in flight,
-  // and ids we've already requested this session (so the card shows "Queued").
-  const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set())
-  const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [acting, setActing] = useState(false)
+  const masterRef = useRef<HTMLInputElement>(null)
 
   const selectInbox = (key: string) => {
     setData(null) // show the skeleton while the new box loads
+    setSelectedIds(new Set()) // selection doesn't carry across boxes
     try {
       localStorage.setItem(INBOX_KEY, key)
     } catch {
@@ -118,17 +123,27 @@ export function InboxPanel({
     try {
       const res = await fetch(`/api/cases?inbox=${encodeURIComponent(inbox)}`)
       const json = await res.json()
+      const nextRows: SupportCase[] = Array.isArray(json.rows) ? json.rows : []
       setData({
         mode: json.mode ?? "error",
         error: typeof json.error === "string" ? json.error : null,
-        rows: Array.isArray(json.rows) ? json.rows : [],
+        rows: nextRows,
+      })
+      // Drop any selected ids that polled away (replied/closed), so the bulk
+      // action only ever acts on conversations still in the list.
+      const present = new Set(nextRows.map((r) => r.id))
+      setSelectedIds((prev) => {
+        let changed = false
+        const next = new Set<string>()
+        prev.forEach((id) => (present.has(id) ? next.add(id) : (changed = true)))
+        return changed ? next : prev
       })
     } catch {
       setData((prev) => prev ?? { mode: "error", error: "Couldn't load cases.", rows: [] })
     }
   }, [inbox])
 
-  // Poll every 30s + on canvas refresh, only while this tab is the active,
+  // Poll every 10s + on canvas refresh, only while this tab is the active,
   // visible one. Reloads immediately when the selected inbox changes (load
   // depends on `inbox`).
   useEffect(() => {
@@ -149,6 +164,27 @@ export function InboxPanel({
   }, [rows, onCount])
 
   const showAssign = inbox !== "mine"
+  const allSelected = (rows?.length ?? 0) > 0 && selectedIds.size === rows!.length
+  const someSelected = selectedIds.size > 0 && !allSelected
+  // Native checkbox indeterminate can only be set imperatively, in an effect.
+  useEffect(() => {
+    if (masterRef.current) masterRef.current.indeterminate = someSelected
+  }, [someSelected])
+
+  const toggle = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const toggleAll = useCallback(() => {
+    setSelectedIds((prev) =>
+      prev.size === (rows?.length ?? 0) ? new Set() : new Set((rows ?? []).map((r) => r.id))
+    )
+  }, [rows])
 
   // Manual "Refresh" — runs the whole loop on demand instead of waiting for the
   // poll: reload this inbox now AND force the AI to (re)generate drafts for any
@@ -168,32 +204,14 @@ export function InboxPanel({
     }
   }
 
-  const assignToMe = async (id: string) => {
-    setAssigningId(id)
-    try {
-      const res = await fetch("/api/reply-queue/assign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: id }),
-      })
-      if (!res.ok) throw new Error(await res.text())
-      toast.success("Assigned to you.")
-      if (nav) nav.open(id)
-      await load()
-    } catch {
-      toast.error("Couldn't assign this case.")
-    } finally {
-      setAssigningId(null)
-    }
-  }
-
-  // Generate AI reply draft(s) on demand for one or more tickets. Persists into
-  // the queue (on_request) so they land in the Queue tab's "On request" group —
-  // even for already-read tickets the always-on pipeline skips. Generation runs
-  // in the background server-side; we just kick it off and nudge the Queue.
-  const generate = useCallback(async (ids: string[]) => {
+  // Bulk: generate AI reply drafts for the selected tickets (Mine box). Persists
+  // on-request drafts that land in the Queue tab's "On request" group — including
+  // already-read tickets the always-on pipeline skips. Generation runs in the
+  // background server-side; we kick it off and nudge the Queue.
+  const bulkGenerate = async () => {
+    const ids = Array.from(selectedIds)
     if (ids.length === 0) return
-    setGeneratingIds((prev) => new Set([...prev, ...ids]))
+    setActing(true)
     try {
       const res = await fetch("/api/reply-queue/generate", {
         method: "POST",
@@ -201,13 +219,10 @@ export function InboxPanel({
         body: JSON.stringify({ conversationIds: ids }),
       })
       if (!res.ok) throw new Error(await res.text())
-      const json = (await res.json().catch(() => ({}))) as {
-        started?: number
-        dropped?: number
-      }
+      const json = (await res.json().catch(() => ({}))) as { started?: number; dropped?: number }
       const started = typeof json.started === "number" ? json.started : ids.length
       const dropped = typeof json.dropped === "number" ? json.dropped : 0
-      setRequestedIds((prev) => new Set([...prev, ...ids]))
+      setSelectedIds(new Set())
       broadcastCanvasRefresh()
       toast.success(
         started === 1
@@ -219,13 +234,45 @@ export function InboxPanel({
     } catch {
       toast.error("Couldn't start generation. Try again.")
     } finally {
-      setGeneratingIds((prev) => {
-        const next = new Set(prev)
-        ids.forEach((id) => next.delete(id))
-        return next
-      })
+      setActing(false)
     }
-  }, [])
+  }
+
+  // Bulk: assign the selected tickets to me (Unassigned / teammate boxes). Each
+  // is a human-gated Intercom write (/api/reply-queue/assign), fired from this
+  // explicit click; the draft then (re)generates with my Notion context.
+  const bulkAssign = async () => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    setActing(true)
+    try {
+      const results = await Promise.allSettled(
+        ids.map((id) =>
+          fetch("/api/reply-queue/assign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversationId: id }),
+          }).then((r) => {
+            if (!r.ok) throw new Error()
+          })
+        )
+      )
+      const ok = results.filter((r) => r.status === "fulfilled").length
+      const failed = ids.length - ok
+      setSelectedIds(new Set())
+      if (ok > 0) {
+        toast.success(
+          `Assigned ${ok} to you${failed > 0 ? `, ${failed} failed` : ""}. Drafts are regenerating.`
+        )
+      } else {
+        toast.error("Couldn't assign — try again.")
+      }
+      await load()
+      broadcastCanvasRefresh()
+    } finally {
+      setActing(false)
+    }
+  }
 
   const activeLabel =
     inbox === "mine"
@@ -236,8 +283,19 @@ export function InboxPanel({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Inbox picker — pinned to the top of the panel. */}
+      {/* Inbox picker + select-all — pinned to the top of the panel. */}
       <div className="flex shrink-0 items-center gap-2 border-b px-2 py-2">
+        {rows !== null && rows.length > 0 && (
+          <input
+            ref={masterRef}
+            type="checkbox"
+            checked={allSelected}
+            onChange={toggleAll}
+            aria-label="Select all"
+            title="Select all"
+            className="size-3.5 shrink-0 cursor-pointer rounded border-muted-foreground/40 accent-primary"
+          />
+        )}
         <Select value={inbox} onValueChange={selectInbox}>
           <SelectTrigger className="h-7 flex-1 text-xs">
             <SelectValue />
@@ -274,29 +332,6 @@ export function InboxPanel({
         </Button>
       </div>
 
-      {/* Bulk generate — Mine box only (owner-scoped). Drafts every ticket in the
-          box at once (incl. already-read ones the queue skips) into the Queue's
-          "On request" group, so the agent stops opening each ticket to generate. */}
-      {!showAssign && rows !== null && rows.length > 0 && (
-        <div className="shrink-0 border-b px-2 py-1.5">
-          <Button
-            variant="secondary"
-            size="sm"
-            className="h-7 w-full gap-1.5 text-[11px]"
-            onClick={() => void generate(rows.map((r) => r.id))}
-            disabled={generatingIds.size > 0}
-            title="Generate AI reply drafts for every ticket in this inbox — they appear in the Queue tab"
-          >
-            {generatingIds.size > 0 ? (
-              <Loader2Icon className="size-3.5 animate-spin" />
-            ) : (
-              <SparklesIcon className="size-3.5" />
-            )}
-            Generate AI replies for all {rows.length}
-          </Button>
-        </div>
-      )}
-
       <div className="flex-1 overflow-y-auto">
         {data === null && <ListSkeleton />}
         {data !== null && rows !== null && rows.length === 0 && (
@@ -314,40 +349,69 @@ export function InboxPanel({
               <ConversationRow
                 key={row.id}
                 row={row}
-                showAssign={showAssign}
-                assigning={assigningId === row.id}
-                onAssign={() => void assignToMe(row.id)}
-                canGenerate={!showAssign}
-                generating={generatingIds.has(row.id)}
-                requested={requestedIds.has(row.id)}
-                onGenerate={() => void generate([row.id])}
+                selected={selectedIds.has(row.id)}
+                onToggle={() => toggle(row.id)}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* One contextual bulk action — appears only with a selection. */}
+      {selectedIds.size > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-t bg-muted/40 px-2 py-2">
+          <span className="text-xs font-medium tabular-nums">{selectedIds.size} selected</span>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Clear
+          </button>
+          <div className="flex-1" />
+          {showAssign ? (
+            <Button
+              size="sm"
+              className="h-7 gap-1.5 px-2.5 text-[11px]"
+              onClick={() => void bulkAssign()}
+              disabled={acting}
+            >
+              {acting ? (
+                <Loader2Icon className="size-3.5 animate-spin" />
+              ) : (
+                <UserPlusIcon className="size-3.5" />
+              )}
+              Assign to me
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="h-7 gap-1.5 px-2.5 text-[11px]"
+              onClick={() => void bulkGenerate()}
+              disabled={acting}
+            >
+              {acting ? (
+                <Loader2Icon className="size-3.5 animate-spin" />
+              ) : (
+                <SparklesIcon className="size-3.5" />
+              )}
+              Generate AI replies
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
 function ConversationRow({
   row,
-  showAssign,
-  assigning,
-  onAssign,
-  canGenerate,
-  generating,
-  requested,
-  onGenerate,
+  selected,
+  onToggle,
 }: {
   row: SupportCase
-  showAssign: boolean
-  assigning: boolean
-  onAssign: () => void
-  canGenerate: boolean
-  generating: boolean
-  requested: boolean
-  onGenerate: () => void
+  selected: boolean
+  onToggle: () => void
 }) {
   const nav = useCanvasNav()
   const open = () => {
@@ -355,87 +419,50 @@ function ConversationRow({
   }
 
   return (
-    <article className="rounded-md border bg-card transition-colors hover:border-foreground/20">
+    <article
+      className={cn(
+        "group flex items-start gap-2 rounded-md border bg-card px-2.5 py-2 transition-colors",
+        selected ? "border-foreground/30 bg-accent/40" : "hover:border-foreground/20"
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onToggle}
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`Select ${row.customer}`}
+        className="mt-0.5 size-3.5 shrink-0 cursor-pointer rounded border-muted-foreground/40 accent-primary"
+      />
+
       {nav ? (
         <button
           type="button"
           onClick={open}
-          className="flex w-full flex-col gap-0.5 px-2.5 pt-2 text-left"
+          className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
         >
           <RowHeader row={row} />
         </button>
       ) : (
         <Link
           href={`/cases/${row.id}/canvas`}
-          className="flex w-full flex-col gap-0.5 px-2.5 pt-2 text-left"
+          className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
         >
           <RowHeader row={row} />
         </Link>
       )}
 
-      <div className="flex items-center gap-1.5 px-2.5 pb-2 pt-1.5">
-        <Badge variant="outline" className="h-4 px-1 text-[10px] font-normal">
-          {row.state}
-        </Badge>
-        {row.tip && (
-          <span className="truncate text-[10px] text-muted-foreground" title={row.tip.playbook}>
-            {row.tip.playbook}
-          </span>
-        )}
-        {row.intercomUrl && (
-          <a
-            href={row.intercomUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open directly in Intercom"
-            className="text-muted-foreground hover:text-foreground"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ExternalLinkIcon className="size-3" />
-          </a>
-        )}
-        {showAssign && (
-          <Button
-            size="sm"
-            className="ml-auto h-6 px-2 text-[10px]"
-            onClick={onAssign}
-            disabled={assigning}
-          >
-            {assigning ? (
-              <Loader2Icon className="size-3 animate-spin" />
-            ) : (
-              <UserPlusIcon className="size-3" />
-            )}
-            Assign to me
-          </Button>
-        )}
-        {canGenerate && (
-          <Button
-            size="sm"
-            variant={requested ? "outline" : "secondary"}
-            className="ml-auto h-6 px-2 text-[10px]"
-            onClick={(e) => {
-              e.stopPropagation()
-              onGenerate()
-            }}
-            disabled={generating}
-            title={
-              requested
-                ? "Draft requested — regenerate this ticket's AI reply"
-                : "Generate an AI reply draft for this ticket — it appears in the Queue tab"
-            }
-          >
-            {generating ? (
-              <Loader2Icon className="size-3 animate-spin" />
-            ) : requested ? (
-              <CheckIcon className="size-3" />
-            ) : (
-              <SparklesIcon className="size-3" />
-            )}
-            {generating ? "Generating" : requested ? "Queued" : "Generate"}
-          </Button>
-        )}
-      </div>
+      {row.intercomUrl && (
+        <a
+          href={row.intercomUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open directly in Intercom"
+          onClick={(e) => e.stopPropagation()}
+          className="mt-0.5 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        >
+          <ExternalLinkIcon className="size-3.5" />
+        </a>
+      )}
     </article>
   )
 }
