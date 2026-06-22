@@ -1,19 +1,22 @@
-import { NextResponse } from "next/server"
-
 import { getSignedInEmail } from "@/lib/auth"
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
 import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
-import { selectModel, type OpenAIMessage, type OpenAIContentPart } from "@/lib/draft-ai"
+import {
+  streamChatCompletion,
+  type OpenAIMessage,
+  type OpenAIContentPart,
+} from "@/lib/draft-ai"
 
 export const dynamic = "force-dynamic"
 
-const VERBOO_API_KEY = process.env.VERBOO_API_KEY
-const VERBOO_BASE_URL =
-  process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
-const AI_TIMEOUT_MS = 20_000
 const MAX_THREAD_CHARS = 6_000
+// Generous ceiling — the agent would rather wait for a complete answer than see
+// it cut off. We stream the reply (see below), so even a long vision answer
+// renders progressively and never trips a hard server-side timeout the way the
+// old non-streaming + 20s-abort path did.
+const MAX_TOKENS = 8_192
 
 type ChatMessage = { role: "user" | "assistant"; content: string }
 
@@ -24,10 +27,10 @@ type ChatMessage = { role: "user" | "assistant"; content: string }
 export async function POST(request: Request) {
   const email = await getSignedInEmail()
   if (!email) {
-    return NextResponse.json({ error: "Authentication required" }, { status: 401 })
+    return new Response("Authentication required", { status: 401 })
   }
-  if (!VERBOO_API_KEY) {
-    return NextResponse.json({ error: "AI is not configured (missing key)" }, { status: 500 })
+  if (!process.env.VERBOO_API_KEY) {
+    return new Response("AI is not configured (missing key)", { status: 500 })
   }
 
   const body = await request.json().catch(() => null)
@@ -37,10 +40,7 @@ export async function POST(request: Request) {
     ? body.images
     : []
   if (!conversationId || messages.length === 0) {
-    return NextResponse.json(
-      { error: "conversationId and messages are required" },
-      { status: 400 },
-    )
+    return new Response("conversationId and messages are required", { status: 400 })
   }
 
   const [conversation, playbooksData] = await Promise.all([
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     getPlaybooksDashboardData(),
   ])
   if (!conversation) {
-    return NextResponse.json({ error: "Conversation not found" }, { status: 404 })
+    return new Response("Conversation not found", { status: 404 })
   }
 
   const searchText = [
@@ -126,8 +126,9 @@ ${playbookSection}${notionSection}
 - When asked for a customer-facing reply, follow Fanvue's tone: warm, first-person, "Hey! 👋 thanks for reaching out…", bold key steps, one clear call-to-action.`
 
   // When the latest user turn carries pasted images, build it as multimodal
-  // content (text + image_url parts) and route to the vision model. Text-only
-  // turns keep the existing deepseek-v4-flash path untouched.
+  // content (text + image_url parts). selectModel (inside streamChatCompletion)
+  // then routes image turns to the vision model and text-only turns to the
+  // fast deepseek-v4-flash path.
   const hasImages = images.length > 0
   const windowed = messages.slice(-12)
   const outgoing: OpenAIMessage[] = windowed.map((m, i) => {
@@ -148,45 +149,38 @@ ${playbookSection}${notionSection}
     return { role: m.role, content: m.content }
   })
 
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
-    const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${VERBOO_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: hasImages ? selectModel(outgoing) : "deepseek-v4-flash",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...outgoing,
-        ],
-        stream: false,
-      }),
-      signal: controller.signal,
-    })
-    clearTimeout(timer)
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: `AI provider error (${res.status})` },
-        { status: 502 },
-      )
-    }
-    const data = await res.json()
-    const message = data?.choices?.[0]?.message?.content
-    if (!message) {
-      return NextResponse.json({ error: "Empty AI response" }, { status: 502 })
-    }
-    return NextResponse.json({ message })
-  } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
-      return NextResponse.json(
-        { error: "The AI took too long — try again" },
-        { status: 504 },
-      )
-    }
-    return NextResponse.json({ error: "AI request failed" }, { status: 500 })
-  }
+  const aiMessages: OpenAIMessage[] = [
+    { role: "system", content: systemPrompt },
+    ...outgoing,
+  ]
+
+  // Stream the answer back as plain text (same contract as /api/draft). The
+  // vision model is slow, so streaming lets a long answer render progressively
+  // instead of racing a hard timeout — which is what produced the recurring
+  // "The AI took too long" failure when reading pasted images.
+  const encoder = new TextEncoder()
+  const readable = new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of streamChatCompletion(aiMessages, {
+          maxTokens: MAX_TOKENS,
+        })) {
+          controller.enqueue(encoder.encode(chunk))
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "AI request failed"
+        controller.enqueue(encoder.encode(`[Error: ${msg}]`))
+      } finally {
+        controller.close()
+      }
+    },
+  })
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache, no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  })
 }

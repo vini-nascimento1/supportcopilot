@@ -82,17 +82,41 @@ export function CopilotPanel({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ messages: updated, conversationId, images }),
         })
-        const payload = await res.json()
-        if (!res.ok) {
-          setError(payload.error ?? "Something went wrong")
+        if (!res.ok || !res.body) {
+          const text = await res.text().catch(() => "")
+          setError(text || "Something went wrong")
           return
         }
-        const next: CopilotMessage[] = [
-          ...updated,
-          { role: "assistant", content: payload.message },
-        ]
-        onTranscript(next)
-        transcriptRef.current = next
+
+        // Stream the answer in: each chunk fills the assistant bubble as it
+        // arrives, so a slow vision reply renders progressively instead of
+        // racing a timeout.
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let answer = ""
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          answer += decoder.decode(value, { stream: true })
+          if (answer.startsWith("[Error:")) continue
+          const next: CopilotMessage[] = [
+            ...updated,
+            { role: "assistant", content: answer },
+          ]
+          onTranscript(next)
+          transcriptRef.current = next
+          scrollToBottom()
+        }
+
+        if (answer.startsWith("[Error:")) {
+          setError(answer.replace(/^\[Error:\s*/, "").replace(/\]$/, ""))
+          onTranscript(updated)
+          transcriptRef.current = updated
+        } else if (!answer.trim()) {
+          setError("Empty AI response")
+          onTranscript(updated)
+          transcriptRef.current = updated
+        }
       } catch {
         setError("Network error. Check your connection.")
       } finally {

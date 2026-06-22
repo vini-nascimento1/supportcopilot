@@ -386,7 +386,8 @@ export function selectModel(messages: OpenAIMessage[]): string {
 }
 
 export async function* streamChatCompletion(
-  messages: OpenAIMessage[]
+  messages: OpenAIMessage[],
+  options?: { maxTokens?: number; model?: string }
 ): AsyncGenerator<string> {
   const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
     method: "POST",
@@ -395,8 +396,8 @@ export async function* streamChatCompletion(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: selectModel(messages),
-      max_tokens: 4096,
+      model: options?.model ?? selectModel(messages),
+      max_tokens: options?.maxTokens ?? 4096,
       stream: true,
       messages,
     }),
