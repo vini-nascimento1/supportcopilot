@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   const userMessage = `The customer's name is ${conversation.customer}.
 
 Draft a warm, professional reply to the customer based on the internal thread above.
-Use first-person ("I've reviewed your account", "I can confirm", etc.).
+Use first-person ("I've reviewed your account", "I can confirm", etc.) when the Slack thread supports that a real review, check, or decision happened. Do not claim that you checked/reviewed the customer's account, profile, payout, KYC, or media unless the Slack thread explicitly says that a real tool check happened and what it found.
 Open warmly without using the customer's real name. End with a clear call-to-action.`
 
   const encoder = new TextEncoder()

@@ -23,12 +23,75 @@ export type RetrievalResult = {
   error: string | null
 }
 
+export type NotionSnippetUse = "customerSafe" | "internalOnly" | "transientExpired"
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
+const OUTAGE_MAX_AGE_MS = ONE_DAY_MS
+const BUG_MAX_AGE_MS = 14 * ONE_DAY_MS
+
+const OUTAGE_TERMS = [
+  "outage",
+  "incident",
+  "downtime",
+  "degraded",
+  "service disruption",
+  "system disruption",
+  "temporarily unavailable",
+  "currently unavailable",
+  "not operational",
+  "não está operante",
+  "nao esta operante",
+]
+
+const BUG_TERMS = [
+  "known issue",
+  "known bug",
+  "bug",
+  "regression",
+  "workaround",
+]
+
 // A Notion "page" is first-class support knowledge we can paraphrase from.
 // Everything else (google-drive, slack, linear, github, jira, teams,
 // sharepoint, onedrive...) is connector/external content — flagged internal so
 // the draft layer never quotes it to the customer (firewall, spec D10).
 export function isInternalSource(type: string): boolean {
   return type !== "page"
+}
+
+function includesAny(value: string, terms: string[]): boolean {
+  const lower = value.toLowerCase()
+  return terms.some((term) => lower.includes(term))
+}
+
+function parseSnippetTimestampMs(timestamp: string | null): number | null {
+  if (!timestamp) return null
+
+  const isoDate = timestamp.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0]
+  const parsed = Date.parse(isoDate ?? timestamp)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function transientMaxAgeMs(snippet: NotionSnippet): number | null {
+  const searchable = `${snippet.title}\n${snippet.text}`
+  if (includesAny(searchable, OUTAGE_TERMS)) return OUTAGE_MAX_AGE_MS
+  if (includesAny(searchable, BUG_TERMS)) return BUG_MAX_AGE_MS
+  return null
+}
+
+export function classifyNotionSnippetUse(
+  snippet: NotionSnippet,
+  nowMs: number = Date.now()
+): NotionSnippetUse {
+  const maxAgeMs = transientMaxAgeMs(snippet)
+  if (maxAgeMs != null) {
+    const timestampMs = parseSnippetTimestampMs(snippet.timestamp)
+    if (timestampMs == null || nowMs - timestampMs > maxAgeMs) {
+      return "transientExpired"
+    }
+  }
+
+  return snippet.isInternalSource ? "internalOnly" : "customerSafe"
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

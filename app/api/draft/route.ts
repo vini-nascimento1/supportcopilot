@@ -6,7 +6,7 @@ import { getPlaybooksDashboardData, getResponsesForPlaybookIds } from "@/lib/pla
 import {
   buildSystemPrompt,
   buildNotionAwareSystemPrompt,
-  buildUserMessage,
+  buildGroundedDraftUserMessage,
   buildImproveSystemPrompt,
   buildImproveUserMessage,
   streamChatCompletion,
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
   const agentName = await getAgentName(email)
 
   let systemPrompt: string
-  let userMessage: Awaited<ReturnType<typeof buildUserMessage>> | string
+  let userMessage: OpenAIMessage["content"]
 
   if (mode === "improve") {
     systemPrompt = buildImproveSystemPrompt(agentName)
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
         : buildSystemPrompt(playbook, responseTemplates, agentName, articles)
 
     const images = await encodeImageAttachments(conversation.messages)
-    userMessage = buildUserMessage(conversation, images)
+    userMessage = await buildGroundedDraftUserMessage(conversation, images)
   }
 
   const encoder = new TextEncoder()

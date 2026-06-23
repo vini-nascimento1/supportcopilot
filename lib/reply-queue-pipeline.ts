@@ -7,11 +7,15 @@ import type { PlaybookListItem } from "@/lib/playbooks"
 import { classifyPlaybookMatch, GATE_CONFIDENCE_THRESHOLD } from "@/lib/playbook-gate"
 import { getTopMatches } from "@/lib/case-intelligence"
 import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
-import type { NotionSnippet } from "@/lib/notion-retrieval"
+import {
+  classifyNotionSnippetUse,
+  type NotionSnippet,
+} from "@/lib/notion-retrieval"
 import {
   buildSystemPrompt,
   buildNotionAwareSystemPrompt,
-  buildUserMessage,
+  buildGroundedDraftUserMessage,
+  buildDraftVerifierMessages,
   streamChatCompletion,
   type OpenAIMessage,
 } from "@/lib/draft-ai"
@@ -90,13 +94,17 @@ function buildJustification(args: {
   } else {
     lines.push("No confident playbook match — drafted from live knowledge.")
   }
-  const citable = args.snippets.filter((s) => !s.isInternalSource)
+  const citable = args.snippets.filter((s) => classifyNotionSnippetUse(s) === "customerSafe")
+  const transientExpired = args.snippets.filter((s) => classifyNotionSnippetUse(s) === "transientExpired")
   if (citable.length > 0) {
     lines.push(`Grounded in ${citable.length} Notion source(s): ${citable.map((s) => s.title).join("; ")}.`)
   } else if (args.snippets.length > 0) {
     lines.push(
       `${args.snippets.length} internal source(s) informed the reasoning (not quoted to the customer).`
     )
+  }
+  if (transientExpired.length > 0) {
+    lines.push("Old or unverified transient Notion context found — verify current status before sending.")
   }
   if (args.band === "low_confidence") {
     lines.push("Low confidence — review carefully before sending.")
@@ -198,9 +206,10 @@ export async function computeAndPersistSuggestion(
   const systemPrompt = notionHadHits
     ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets)
     : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles)
+  const userMessage = await buildGroundedDraftUserMessage(conversation, images)
   const messages: OpenAIMessage[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: buildUserMessage(conversation, images) },
+    { role: "user", content: userMessage },
   ]
 
   let body = ""
@@ -211,8 +220,22 @@ export async function computeAndPersistSuggestion(
   }
   if (!body.trim()) return { handled: false, action: "skipped", reason: "empty generation" }
 
+  let verifiedBody = ""
+  try {
+    for await (const chunk of streamChatCompletion(buildDraftVerifierMessages(messages, body), {
+      maxTokens: 4096,
+      temperature: 0,
+    })) {
+      verifiedBody += chunk
+    }
+    if (verifiedBody.trim()) body = verifiedBody
+  } catch {
+    // Keep the original draft if the verifier is unavailable; generation still
+    // remains draft-only and reviewable before send.
+  }
+
   const sources: SuggestionSource[] = snippets
-    .filter((s) => !s.isInternalSource)
+    .filter((s) => classifyNotionSnippetUse(s) === "customerSafe")
     .map((s) => ({ title: s.title, url: s.url, kind: s.source }))
 
   const res = await upsertPendingSuggestion({

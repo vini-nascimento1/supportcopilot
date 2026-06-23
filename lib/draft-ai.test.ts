@@ -5,9 +5,12 @@ import {
   buildImproveUserMessage,
   buildMacroAdaptSystemPrompt,
   buildMacroAdaptUserMessage,
+  buildDraftVerifierMessages,
   buildNotionAwareSystemPrompt,
+  buildSlackTranslationPrompt,
   buildSystemPrompt,
   buildUserMessage,
+  buildVisionEvidenceMessages,
   selectModel,
 } from "./draft-ai"
 import type { OpenAIMessage } from "./draft-ai"
@@ -64,12 +67,55 @@ describe("buildNotionAwareSystemPrompt", () => {
     expect(out).toContain("Firewall rules for the Notion knowledge above")
     expect(out).toContain("paraphrase")
     expect(out).toContain("never repeat them to the customer")
+    expect(out).toContain("Notion snippets are knowledge/search context, not live account data")
+  })
+
+  it("moves expired transient Notion pages out of customer-facing support knowledge", () => {
+    const expiredOutage = snippet({
+      title: "Chats outage incident",
+      text: "Our system is in outage and chats are temporarily unavailable.",
+      source: "page",
+      isInternalSource: false,
+      timestamp: "2025-10-23",
+    })
+    const out = buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [expiredOutage])
+    expect(out).toContain("Expired or unverified transient context")
+    expect(out).not.toContain("Support knowledge — you MAY ground your reply")
+    expect(out).toContain("Never tell a customer that Fanvue is currently in an outage")
   })
 
   it("builds on top of the base prompt (keeps tone + constraints)", () => {
     const out = buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])
     expect(out).toContain("support copilot for Vini")
     expect(out.length).toBeGreaterThan(buildSystemPrompt(undefined, [], "Vini", []).length)
+  })
+})
+
+describe("grounding and capability boundaries", () => {
+  it("tells draft models not to pretend they checked live account systems", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    expect(out).toContain("Capability boundaries")
+    expect(out).toContain("You do NOT have live access to Fadmin")
+    expect(out).toContain("Never claim or imply that you checked")
+  })
+
+  it("allows Slack drafts to use reviewed-account language when the thread supports it", () => {
+    const out = buildSlackTranslationPrompt("support", [
+      { userName: "Agent", text: "I checked Fadmin and confirmed the account is active.", ts: "1" },
+    ])
+    expect(out).toContain("use first-person customer-facing wording such as \"I've reviewed your account\"")
+    expect(out).not.toContain("Instead use: \"following a review,\"")
+  })
+
+  it("builds a verifier prompt that removes unsupported account-check claims", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Use the KB only." },
+      { role: "user", content: "Customer says payouts are missing." },
+    ]
+    const out = buildDraftVerifierMessages(messages, "I've checked your account and confirmed your payout is blocked.")
+    expect(out[0].content).toContain("strict grounding verifier")
+    expect(out[0].content).toContain("Remove or soften any claim")
+    expect(out[1].content).toContain("I've checked your account")
   })
 })
 
@@ -242,6 +288,33 @@ describe("buildUserMessage", () => {
       type: "image_url",
       image_url: { url: "data:image/png;base64,BBB" },
     })
+  })
+
+  it("with image evidence returns text-only context for the final draft model", () => {
+    const result = buildUserMessage(multimodalConvo, [], "- The screenshot shows an expired ID error.")
+    expect(typeof result).toBe("string")
+    const text = result as string
+    expect(text).toContain("Customer image evidence")
+    expect(text).toContain("expired ID error")
+
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "you are a copilot" },
+      { role: "user", content: result },
+    ]
+    expect(selectModel(messages)).toBe("deepseek-v4-flash")
+  })
+})
+
+describe("buildVisionEvidenceMessages", () => {
+  it("builds a vision-only evidence extraction turn for image analysis", () => {
+    const messages = buildVisionEvidenceMessages(multimodalConvo, [
+      { name: "screen.png", dataUri: "data:image/png;base64,AAA" },
+    ])
+
+    expect(messages).toHaveLength(2)
+    expect(messages[1].role).toBe("user")
+    expect(Array.isArray(messages[1].content)).toBe(true)
+    expect(selectModel(messages)).toBe("qwen3.6-27b")
   })
 })
 

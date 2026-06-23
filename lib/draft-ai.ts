@@ -1,6 +1,9 @@
 import type { IntercomArticle } from "@/lib/intercom"
 import type { PlaybookListItem, ResponseItem } from "@/lib/playbooks"
-import type { NotionSnippet } from "@/lib/notion-retrieval"
+import {
+  classifyNotionSnippetUse,
+  type NotionSnippet,
+} from "@/lib/notion-retrieval"
 
 export type OpenAIContentPart =
   | { type: "text"; text: string }
@@ -13,6 +16,32 @@ export type OpenAIMessage = {
 
 const VERBOO_API_KEY = process.env.VERBOO_API_KEY
 const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
+const DEFAULT_TEXT_MODEL = "deepseek-v4-flash"
+const DEFAULT_VISION_MODEL = "qwen3.6-27b"
+const DEFAULT_DRAFT_TEMPERATURE = 0.2
+
+type DraftConversation = {
+  customer: string
+  firstMessage: string
+  messages: { role: string; body: string }[]
+}
+
+type DraftImage = { name: string; dataUri: string }
+
+function numberFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+export function getTextDraftModel(): string {
+  return process.env.VERBOO_TEXT_MODEL ?? DEFAULT_TEXT_MODEL
+}
+
+export function getVisionDraftModel(): string {
+  return process.env.VERBOO_VISION_MODEL ?? DEFAULT_VISION_MODEL
+}
 
 // ── Output-language lock ───────────────────────────────────────────────────
 // Customer threads are frequently in another language, and that pull is strong:
@@ -26,6 +55,13 @@ const ENGLISH_ONLY_RULE =
 
 const ENGLISH_ONLY_REMINDER =
   "⚠️ Language: write your ENTIRE reply in English, regardless of the language used above. Do NOT reply in the customer's language — translate your response into English."
+
+const CAPABILITY_BOUNDARY_RULES = `## Capability boundaries — do not fake checks
+- You only know what is in the conversation thread, playbook, Internal knowledge base articles, Fresh Notion knowledge, and image evidence explicitly provided in this prompt.
+- You do NOT have live access to Fadmin, Fanvue account/profile pages, KYC systems, payout processors, media review tools, billing records, device logs, or any external admin system.
+- Never claim or imply that you checked, reviewed, looked at, confirmed, updated, escalated, refunded, approved, rejected, or changed a customer's account/profile/content/payout/KYC/media unless that action or result is explicitly stated in the provided thread or source text.
+- Avoid unsupported phrases like "I've checked your account", "I've reviewed your profile", "I can see on your account", "after checking your payout", or "we've confirmed this on our side".
+- If the right answer requires a live account/profile/tool check, draft a reply that asks for the needed customer detail or says the team will look into it, without pretending the check has already happened.`
 
 // ── System prompt builder ──────────────────────────────────────────────────
 
@@ -71,6 +107,8 @@ Playbooks cover only some cases — when the thread and the playbook disagree, t
 - Personalize to the customer's specific situation without using their real name.
 - If the playbook and articles don't cover the issue, acknowledge warmly and ask one focused clarifying question.
 - ${ENGLISH_ONLY_RULE}
+
+${CAPABILITY_BOUNDARY_RULES}
 
 ## Closing the conversation
 - If the customer has already been answered per the knowledge base articles (policy, steps, or procedures already explained in the thread) and they keep insisting or asking the same thing: **be firm but polite, restate the policy one last time, and signal that the conversation is being closed**.
@@ -143,7 +181,8 @@ The Slack thread above contains internal team discussion. When writing the custo
 - Convert internal language into clear, professional customer-facing wording.
 - Do NOT expose: internal system names, Slack messages as quoted text, staff names, IDs, moderation labels, or backend details.
 - Do NOT use phrases like: "admin notes," "internal review notes," "workflow," "we flagged you internally," "ticket," "case," or "escalated to the team."
-- Instead use: "following a review," "during our review," "after checking," "we have reviewed your account."
+- Use only neutral customer-facing wording supported by the Slack thread. Do not say "I've reviewed your account", "after checking", or similar unless the thread explicitly says a real account/tool review was completed and what it found.
+- When the Slack thread does explicitly support a real review, check, or decision, use first-person customer-facing wording such as "I've reviewed your account" or "I can confirm" as appropriate.
 - Do NOT mention that a Slack thread or workflow exists. The customer should never know about internal tools.
 - If the thread contains conflicting opinions, use the most recent decision or the playbook's guidance.
 - If the thread contains instructions from senior staff, follow them but rephrase them in customer-facing language.
@@ -168,8 +207,9 @@ export function buildNotionAwareSystemPrompt(
   const base = buildSystemPrompt(playbook, examples, agentName, articles)
   if (notionSnippets.length === 0) return base
 
-  const citable = notionSnippets.filter((s) => !s.isInternalSource)
-  const internal = notionSnippets.filter((s) => s.isInternalSource)
+  const citable = notionSnippets.filter((s) => classifyNotionSnippetUse(s) === "customerSafe")
+  const internal = notionSnippets.filter((s) => classifyNotionSnippetUse(s) === "internalOnly")
+  const transientExpired = notionSnippets.filter((s) => classifyNotionSnippetUse(s) === "transientExpired")
 
   const sections: string[] = [`\n\n## Fresh knowledge from Notion (retrieved for this case)`]
 
@@ -187,10 +227,19 @@ export function buildNotionAwareSystemPrompt(
     )
   }
 
+  if (transientExpired.length > 0) {
+    const lines = transientExpired.map((s) => `- (${s.source}; timestamp: ${s.timestamp ?? "unknown"}) ${s.title}: ${s.text}`)
+    sections.push(
+      `### Expired or unverified transient context — DO NOT assert to the customer\nThese results mention temporary states such as outages, incidents, degraded service, known bugs, or workarounds, but they are too old or lack a usable timestamp for customer-facing claims. Use them only as an internal hint to verify current status before sending.\n${lines.join("\n")}`
+    )
+  }
+
   sections.push(`## Firewall rules for the Notion knowledge above
 - The customer-facing reply must be **your own paraphrase** in Fanvue tone — never paste a snippet verbatim.
 - Ground the reply only on the **Support knowledge** items, the knowledge base articles, and the playbook. Treat the **Internal context** items as background reasoning only.
 - Never reveal: internal plans/roadmap, other users' data or flags, Slack channel names, staff names, document names, system/tool names, or that any internal source exists.
+- Notion snippets are knowledge/search context, not live account data. Never treat a Notion result as proof that this customer's profile, payout, KYC, or media was checked.
+- Never tell a customer that Fanvue is currently in an outage, incident, degraded state, or active bug based on **Internal context** or **Expired or unverified transient context**. Ask the agent to verify current status instead.
 - If the only relevant information is in the Internal context, do not invent a customer answer — acknowledge warmly and ask one focused clarifying question, or hold the policy line.`)
 
   return base + sections.join("\n\n")
@@ -199,12 +248,9 @@ export function buildNotionAwareSystemPrompt(
 // ── User message builder ───────────────────────────────────────────────────
 
 export function buildUserMessage(
-  conversation: {
-    customer: string
-    firstMessage: string
-    messages: { role: string; body: string }[]
-  },
-  images?: { name: string; dataUri: string }[]
+  conversation: DraftConversation,
+  images?: DraftImage[],
+  imageEvidence?: string | null
 ): string | OpenAIContentPart[] {
   const parts = [`Customer: ${conversation.customer}`]
 
@@ -229,6 +275,14 @@ export function buildUserMessage(
     )
   }
 
+  if (imageEvidence?.trim()) {
+    parts.push(`\nCustomer image evidence (internal vision analysis):`)
+    parts.push(imageEvidence.trim())
+    parts.push(
+      `Use the image evidence only as factual context from the customer's attachment(s). Do not mention internal vision analysis, and do not infer policy from the image.`
+    )
+  }
+
   parts.push(
     `\nThe latest Customer message above is what you are replying to. Agent and AI helper messages are context about what has already been said or suggested; do not treat them as customer requests. Write the next message in this conversation, anchored on the latest customer message and the context already exchanged. Follow the tone and context rules above. Do not greet again if an agent has already replied, and do not repeat anything already said earlier in the thread.`
   )
@@ -244,6 +298,63 @@ export function buildUserMessage(
       image_url: { url: img.dataUri },
     })),
   ]
+}
+
+export function buildVisionEvidenceMessages(
+  conversation: DraftConversation,
+  images: DraftImage[]
+): OpenAIMessage[] {
+  const thread = buildUserMessage(conversation)
+  const text = [
+    "Extract only factual evidence from the customer's attached image(s) for a support agent.",
+    "Return concise bullets. Include visible error messages, amounts, dates, account/status labels, document fields, IDs, and what screen/page is shown.",
+    "Do not guess policy, do not decide the reply, and do not invent anything not visible.",
+    "Use the conversation only to disambiguate what matters.",
+    "",
+    typeof thread === "string" ? thread : "",
+  ].join("\n")
+
+  return [
+    {
+      role: "system",
+      content:
+        "You are a vision evidence extractor for Fanvue Support. You only describe what is visible in attached customer images.",
+    },
+    {
+      role: "user",
+      content: [
+        { type: "text", text },
+        ...images.map((img) => ({
+          type: "image_url" as const,
+          image_url: { url: img.dataUri },
+        })),
+      ],
+    },
+  ]
+}
+
+export async function buildGroundedDraftUserMessage(
+  conversation: DraftConversation,
+  images: DraftImage[]
+): Promise<string | OpenAIContentPart[]> {
+  if (images.length === 0) return buildUserMessage(conversation)
+
+  let imageEvidence = ""
+  try {
+    for await (const chunk of streamChatCompletion(buildVisionEvidenceMessages(conversation, images), {
+      model: getVisionDraftModel(),
+      maxTokens: 1536,
+      temperature: 0,
+    })) {
+      imageEvidence += chunk
+    }
+  } catch {
+    return buildUserMessage(conversation, images)
+  }
+
+  if (!imageEvidence.trim()) return buildUserMessage(conversation, images)
+
+  return buildUserMessage(conversation, [], imageEvidence)
 }
 
 // ── Improve-an-existing-draft builders ─────────────────────────────────────
@@ -263,7 +374,9 @@ Your task: IMPROVE the existing customer-facing reply draft provided below — d
 - Output ONLY the improved customer-facing message text — ready to copy-paste. No "Here's the improved version:", no headers, no commentary.
 - The output IS markdown.
 - Never use the customer's real name.
-- ${ENGLISH_ONLY_RULE}`
+- ${ENGLISH_ONLY_RULE}
+
+${CAPABILITY_BOUNDARY_RULES}`
 }
 
 export function buildImproveUserMessage(
@@ -338,7 +451,8 @@ Your task: rewrite the internal Slack thread below into a clear, professional cu
 - Convert internal language into clear, professional customer-facing wording.
 - Do NOT expose: internal system names, Slack messages as quoted text, staff names, IDs, moderation labels, or backend details.
 - Do NOT use phrases like: "admin notes," "internal review notes," "workflow," "we flagged you internally," "ticket," "case," or "escalated to the team."
-- Instead use: "following a review," "during our review," "after checking," "we have reviewed your account."
+- Use only neutral customer-facing wording supported by the Slack thread. Do not say "I've reviewed your account", "after checking", or similar unless the thread explicitly says a real account/tool review was completed and what it found.
+- When the Slack thread does explicitly support a real review, check, or decision, use first-person customer-facing wording such as "I've reviewed your account" or "I can confirm" as appropriate.
 - Do NOT mention that a Slack thread or workflow exists. The customer should never know about internal tools.
 - If the thread contains conflicting opinions, use the most recent decision.
 - If the thread contains instructions from senior staff, follow them but rephrase them.
@@ -346,6 +460,8 @@ Your task: rewrite the internal Slack thread below into a clear, professional cu
 - Output ONLY the customer-facing message — ready to copy-paste. No intro, no markdown headers, no internal commentary.
 - Never promise timelines, refunds, or exceptions not stated in the thread.
 - ${ENGLISH_ONLY_RULE}
+
+${CAPABILITY_BOUNDARY_RULES}
 
 ## Internal Slack thread (from #${channelName})
 ${threadLines.join("\n")}
@@ -390,8 +506,53 @@ Your task: **rewrite the approved macro below** so it fits this specific convers
 - No preamble like "Here's the adapted macro:", no markdown headers (no ##, no ###), no internal commentary.
 - ${ENGLISH_ONLY_RULE}
 
+${CAPABILITY_BOUNDARY_RULES}
+
 ## Approved macro to adapt
 ${macroBodyText}`
+}
+
+export function buildDraftVerifierMessages(
+  sourceMessages: OpenAIMessage[],
+  draft: string
+): OpenAIMessage[] {
+  const sourceText = sourceMessages
+    .map((m) => {
+      const content = Array.isArray(m.content)
+        ? m.content
+            .map((part) => (part.type === "text" ? part.text : "[image omitted from verifier]"))
+            .join("\n")
+        : m.content
+      return `${m.role.toUpperCase()}:\n${content}`
+    })
+    .join("\n\n")
+
+  return [
+    {
+      role: "system",
+      content: `You are a strict grounding verifier for Fanvue Support drafts.
+
+Rewrite the draft only as much as needed so every factual claim is supported by the provided source context.
+
+Rules:
+- Preserve the customer's language requirement: final output in English only.
+- Output only the corrected customer-facing draft. No commentary.
+- Remove or soften any claim that says the agent checked, reviewed, saw, confirmed, updated, escalated, refunded, approved, rejected, or changed an account/profile/content/payout/KYC/media unless the source context explicitly proves that action/result.
+- Never invent Fanvue policy, account status, profile state, payout status, KYC result, media-review outcome, or timelines.
+- If a live tool/profile/account check would be needed, phrase it as a future/needed check without claiming it already happened.
+- Keep the warm support tone, markdown readability, and exactly one clear call-to-action.`,
+    },
+    {
+      role: "user",
+      content: `## Source context
+${sourceText}
+
+## Draft to verify
+${draft}
+
+Return the corrected draft now.`,
+    },
+  ]
 }
 
 export function selectModel(messages: OpenAIMessage[]): string {
@@ -400,12 +561,12 @@ export function selectModel(messages: OpenAIMessage[]): string {
       Array.isArray(m.content) &&
       m.content.some((part) => part.type === "image_url")
   )
-  return hasImage ? "qwen3.6-27b" : "deepseek-v4-flash"
+  return hasImage ? getVisionDraftModel() : getTextDraftModel()
 }
 
 export async function* streamChatCompletion(
   messages: OpenAIMessage[],
-  options?: { maxTokens?: number; model?: string }
+  options?: { maxTokens?: number; model?: string; temperature?: number }
 ): AsyncGenerator<string> {
   const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
     method: "POST",
@@ -416,6 +577,9 @@ export async function* streamChatCompletion(
     body: JSON.stringify({
       model: options?.model ?? selectModel(messages),
       max_tokens: options?.maxTokens ?? 4096,
+      temperature:
+        options?.temperature ??
+        numberFromEnv("VERBOO_DRAFT_TEMPERATURE", DEFAULT_DRAFT_TEMPERATURE),
       stream: true,
       messages,
     }),

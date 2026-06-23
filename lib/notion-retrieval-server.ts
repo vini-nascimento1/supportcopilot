@@ -5,7 +5,7 @@ import { searchNotionViaMcp } from "@/lib/notion-mcp-client"
 import type { NotionSnippet } from "@/lib/notion-retrieval"
 
 // How many Notion snippets to retrieve per call.
-export const NOTION_RETRIEVAL_LIMIT = 5
+export const NOTION_RETRIEVAL_LIMIT = 10
 
 // Ground a response in live Notion retrieval via the agent's own hosted-MCP
 // connection. Best-effort: any failure (not connected, needs re-consent,

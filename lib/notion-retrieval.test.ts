@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest"
 
 import {
+  classifyNotionSnippetUse,
   isInternalSource,
   mapAiSearchResults,
   extractSearchPayload,
+  type NotionSnippet,
 } from "./notion-retrieval"
 
 // Real captured shape of the hosted-MCP notion-search (ai_search mode) response.
@@ -47,6 +49,78 @@ describe("isInternalSource", () => {
     expect(isInternalSource("google-drive")).toBe(true)
     expect(isInternalSource("slack")).toBe(true)
     expect(isInternalSource("linear")).toBe(true)
+  })
+})
+
+const snippet = (over: Partial<NotionSnippet>): NotionSnippet => ({
+  id: "id",
+  title: "Title",
+  url: "https://notion.so/x",
+  text: "stable policy text",
+  source: "page",
+  isInternalSource: false,
+  timestamp: "2026-06-23",
+  ...over,
+})
+
+describe("classifyNotionSnippetUse", () => {
+  const now = Date.parse("2026-06-23T12:00:00Z")
+
+  it("treats stable Notion pages as customer-safe support knowledge", () => {
+    expect(classifyNotionSnippetUse(snippet({ title: "Chat troubleshooting" }), now)).toBe("customerSafe")
+  })
+
+  it("keeps connector sources internal even when recent", () => {
+    expect(
+      classifyNotionSnippetUse(
+        snippet({
+          title: "Support Slack thread",
+          source: "slack",
+          isInternalSource: true,
+          timestamp: "2026-06-23",
+        }),
+        now
+      )
+    ).toBe("internalOnly")
+  })
+
+  it("expires old outage/incidents so they cannot support customer-facing current-status claims", () => {
+    expect(
+      classifyNotionSnippetUse(
+        snippet({
+          title: "Chats outage incident",
+          text: "Our system is in outage and chats are temporarily unavailable.",
+          timestamp: "2025-10-23",
+        }),
+        now
+      )
+    ).toBe("transientExpired")
+  })
+
+  it("allows recent outage pages through as customer-safe current support knowledge", () => {
+    expect(
+      classifyNotionSnippetUse(
+        snippet({
+          title: "Current outage notice",
+          text: "Chats are temporarily unavailable during the outage.",
+          timestamp: "2026-06-23",
+        }),
+        now
+      )
+    ).toBe("customerSafe")
+  })
+
+  it("expires transient snippets with no usable timestamp", () => {
+    expect(
+      classifyNotionSnippetUse(
+        snippet({
+          title: "Known issue with chats",
+          text: "Known issue: chats may be missing.",
+          timestamp: null,
+        }),
+        now
+      )
+    ).toBe("transientExpired")
   })
 })
 
