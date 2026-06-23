@@ -21,6 +21,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
 import { onCanvasRefresh } from "@/lib/canvas-refresh"
+import {
+  readPendingOnRequestDrafts,
+  removePendingOnRequestDrafts,
+  subscribePendingOnRequestDrafts,
+  type PendingOnRequestDraft,
+} from "@/lib/on-request-drafts"
 import { relativeTime } from "@/lib/utils"
 
 // Mirrors lib/reply-queue-store.ts QueueItem (defined locally — that module is
@@ -68,20 +74,33 @@ export function QueuePanel({
   // Drafts the agent generated on demand from the Inbox for tickets that are no
   // longer non-read (already replied). Durable — never staled by reconciliation.
   const [onRequest, setOnRequest] = useState<QueueItem[]>([])
+  const [manualDrafting, setManualDrafting] = useState<PendingOnRequestDraft[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/reply-queue")
       const data = await res.json()
-      setItems(Array.isArray(data.items) ? data.items : [])
-      setDrafting(Array.isArray(data.drafting) ? data.drafting : [])
-      setOnRequest(Array.isArray(data.onRequest) ? data.onRequest : [])
+      const nextItems: QueueItem[] = Array.isArray(data.items) ? data.items : []
+      const nextDrafting: DraftingItem[] = Array.isArray(data.drafting) ? data.drafting : []
+      const nextOnRequest: QueueItem[] = Array.isArray(data.onRequest) ? data.onRequest : []
+      setItems(nextItems)
+      setDrafting(nextDrafting)
+      setOnRequest(nextOnRequest)
+      removePendingOnRequestDrafts(
+        [...nextItems, ...nextOnRequest].map((item) => item.intercomConversationId)
+      )
       setError(typeof data.error === "string" ? data.error : null)
     } catch {
       setError("Couldn't load the reply queue.")
       setItems((prev) => prev ?? [])
     }
+  }, [])
+
+  useEffect(() => {
+    const sync = () => setManualDrafting(readPendingOnRequestDrafts())
+    sync()
+    return subscribePendingOnRequestDrafts(sync)
   }, [])
 
   // Poll every 30s + on canvas refresh, but only while this tab is the active,
@@ -100,10 +119,6 @@ export function QueuePanel({
     }
   }, [active, load])
 
-  useEffect(() => {
-    onCount?.((items?.length ?? 0) + drafting.length + onRequest.length)
-  }, [items, drafting, onRequest, onCount])
-
   const remove = useCallback((id: string) => {
     setItems((prev) => (prev ? prev.filter((i) => i.id !== id) : prev))
     setOnRequest((prev) => prev.filter((i) => i.id !== id))
@@ -112,7 +127,24 @@ export function QueuePanel({
   const ready = items?.filter((i) => i.riskBand !== "needs_check").sort(byOldest) ?? []
   const needsCheck = items?.filter((i) => i.riskBand === "needs_check").sort(byOldest) ?? []
   const onRequestSorted = [...onRequest].sort(byOldest)
-  const total = (items?.length ?? 0) + drafting.length + onRequest.length
+  const visibleIds = new Set([
+    ...drafting.map((item) => item.conversationId),
+    ...(items ?? []).map((item) => item.intercomConversationId),
+    ...onRequest.map((item) => item.intercomConversationId),
+  ])
+  const manualDraftingVisible: DraftingItem[] = manualDrafting
+    .filter((item) => !visibleIds.has(item.conversationId))
+    .map((item) => ({
+      conversationId: item.conversationId,
+      customerName: item.customerName,
+      subject: item.subject,
+    }))
+  const draftingVisible = [...drafting, ...manualDraftingVisible]
+  const total = (items?.length ?? 0) + draftingVisible.length + onRequest.length
+
+  useEffect(() => {
+    onCount?.((items?.length ?? 0) + draftingVisible.length + onRequest.length)
+  }, [items, draftingVisible.length, onRequest.length, onCount])
 
   return (
     <div className="flex h-full flex-col">
@@ -122,7 +154,7 @@ export function QueuePanel({
         {items !== null && total > 0 && (
           <div className="flex flex-col gap-4 p-2">
             {error && <p className="px-1 text-xs text-destructive">{error}</p>}
-            {drafting.length > 0 && (
+            {draftingVisible.length > 0 && (
               <section className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-1.5 px-1">
                   <SparklesIcon className="size-3 text-primary" />
@@ -131,11 +163,11 @@ export function QueuePanel({
                     variant="secondary"
                     className="h-4 px-1 text-[10px] font-normal tabular-nums"
                   >
-                    {drafting.length}
+                    {draftingVisible.length}
                   </Badge>
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  {drafting.map((d) => (
+                  {draftingVisible.map((d) => (
                     <DraftingCard key={d.conversationId} item={d} />
                   ))}
                 </div>

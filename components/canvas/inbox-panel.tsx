@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/select"
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
 import { broadcastCanvasRefresh, onCanvasRefresh } from "@/lib/canvas-refresh"
+import { addPendingOnRequestDrafts } from "@/lib/on-request-drafts"
 import { cn, relativeTime } from "@/lib/utils"
 
 // Mirrors the server types (lib/intercom.ts SupportCase / IntercomAdmin and
@@ -256,6 +257,14 @@ export function InboxPanel({
       const json = (await res.json().catch(() => ({}))) as { started?: number; dropped?: number }
       const started = typeof json.started === "number" ? json.started : ids.length
       const dropped = typeof json.dropped === "number" ? json.dropped : 0
+      const selectedRows = (rows ?? []).filter((row) => ids.includes(row.id)).slice(0, started)
+      addPendingOnRequestDrafts(
+        selectedRows.map((row) => ({
+          conversationId: row.id,
+          customerName: row.customer,
+          subject: row.snippet,
+        }))
+      )
       clearSelection()
       broadcastCanvasRefresh()
       toast.success(
