@@ -10,6 +10,7 @@ import {
 import Link from "next/link"
 import { toast } from "sonner"
 import {
+  CircleCheckIcon,
   ExternalLinkIcon,
   InboxIcon,
   Loader2Icon,
@@ -88,11 +89,16 @@ export function InboxPanel({
   const [refreshing, setRefreshing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [acting, setActing] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
   const masterRef = useRef<HTMLInputElement>(null)
+  // Anchor index for shift-click range selection (the last single-toggled row).
+  const anchorRef = useRef<number | null>(null)
 
   const selectInbox = (key: string) => {
     setData(null) // show the skeleton while the new box loads
     setSelectedIds(new Set()) // selection doesn't carry across boxes
+    setConfirmClose(false)
+    anchorRef.current = null
     try {
       localStorage.setItem(INBOX_KEY, key)
     } catch {
@@ -171,20 +177,48 @@ export function InboxPanel({
     if (masterRef.current) masterRef.current.indeterminate = someSelected
   }, [someSelected])
 
-  const toggle = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
+  // Toggle one row, or — when shift is held and we have an anchor — select the
+  // whole contiguous range from the anchor to here (Gmail/Finder behaviour). The
+  // anchor only moves on a plain (non-shift) click, so repeated shift-clicks
+  // extend from the same starting row.
+  const toggleAt = useCallback(
+    (index: number, shift: boolean) => {
+      const list = rows ?? []
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (shift && anchorRef.current !== null) {
+          const lo = Math.min(anchorRef.current, index)
+          const hi = Math.max(anchorRef.current, index)
+          for (let i = lo; i <= hi; i++) {
+            const id = list[i]?.id
+            if (id) next.add(id)
+          }
+        } else {
+          const id = list[index]?.id
+          if (id) {
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+          }
+          anchorRef.current = index
+        }
+        return next
+      })
+    },
+    [rows]
+  )
 
   const toggleAll = useCallback(() => {
+    anchorRef.current = null
     setSelectedIds((prev) =>
       prev.size === (rows?.length ?? 0) ? new Set() : new Set((rows ?? []).map((r) => r.id))
     )
   }, [rows])
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+    setConfirmClose(false)
+    anchorRef.current = null
+  }, [])
 
   // Manual "Refresh" — runs the whole loop on demand instead of waiting for the
   // poll: reload this inbox now AND force the AI to (re)generate drafts for any
@@ -222,7 +256,7 @@ export function InboxPanel({
       const json = (await res.json().catch(() => ({}))) as { started?: number; dropped?: number }
       const started = typeof json.started === "number" ? json.started : ids.length
       const dropped = typeof json.dropped === "number" ? json.dropped : 0
-      setSelectedIds(new Set())
+      clearSelection()
       broadcastCanvasRefresh()
       toast.success(
         started === 1
@@ -259,13 +293,48 @@ export function InboxPanel({
       )
       const ok = results.filter((r) => r.status === "fulfilled").length
       const failed = ids.length - ok
-      setSelectedIds(new Set())
+      clearSelection()
       if (ok > 0) {
         toast.success(
           `Assigned ${ok} to you${failed > 0 ? `, ${failed} failed` : ""}. Drafts are regenerating.`
         )
       } else {
         toast.error("Couldn't assign — try again.")
+      }
+      await load()
+      broadcastCanvasRefresh()
+    } finally {
+      setActing(false)
+    }
+  }
+
+  // Bulk: close the selected conversations in Intercom. A real, outward-facing
+  // write (ADR-0011) — gated behind an explicit confirm click. Each closes as the
+  // agent's own admin id via /api/cases/close. Closed tickets leave the open
+  // inbox on reload.
+  const bulkClose = async () => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    setActing(true)
+    try {
+      const results = await Promise.allSettled(
+        ids.map((id) =>
+          fetch("/api/cases/close", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversationId: id }),
+          }).then((r) => {
+            if (!r.ok) throw new Error()
+          })
+        )
+      )
+      const ok = results.filter((r) => r.status === "fulfilled").length
+      const failed = ids.length - ok
+      clearSelection()
+      if (ok > 0) {
+        toast.success(`Closed ${ok}${failed > 0 ? `, ${failed} failed` : ""}.`)
+      } else {
+        toast.error("Couldn't close — try again.")
       }
       await load()
       broadcastCanvasRefresh()
@@ -345,58 +414,102 @@ export function InboxPanel({
               </p>
             )}
             {data.error && <p className="px-1 text-xs text-destructive">{data.error}</p>}
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <ConversationRow
                 key={row.id}
                 row={row}
                 selected={selectedIds.has(row.id)}
-                onToggle={() => toggle(row.id)}
+                onToggle={(shift) => toggleAt(index, shift)}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* One contextual bulk action — appears only with a selection. */}
+      {/* Bulk actions — appear only with a selection. Tip: shift-click a second
+          checkbox to select the whole range between it and the last one. */}
       {selectedIds.size > 0 && (
-        <div className="flex shrink-0 items-center gap-2 border-t bg-muted/40 px-2 py-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-muted/40 px-2 py-2">
           <span className="text-xs font-medium tabular-nums">{selectedIds.size} selected</span>
           <button
             type="button"
-            onClick={() => setSelectedIds(new Set())}
+            onClick={clearSelection}
             className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
           >
             Clear
           </button>
-          <div className="flex-1" />
-          {showAssign ? (
-            <Button
-              size="sm"
-              className="h-7 gap-1.5 px-2.5 text-[11px]"
-              onClick={() => void bulkAssign()}
-              disabled={acting}
-            >
-              {acting ? (
-                <Loader2Icon className="size-3.5 animate-spin" />
-              ) : (
-                <UserPlusIcon className="size-3.5" />
-              )}
-              Assign to me
-            </Button>
+          {confirmClose ? (
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">
+                Close {selectedIds.size}?
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2.5 text-[11px]"
+                onClick={() => setConfirmClose(false)}
+                disabled={acting}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-7 gap-1.5 px-2.5 text-[11px]"
+                onClick={() => void bulkClose()}
+                disabled={acting}
+              >
+                {acting ? (
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                ) : (
+                  <CircleCheckIcon className="size-3.5" />
+                )}
+                Close
+              </Button>
+            </div>
           ) : (
-            <Button
-              size="sm"
-              className="h-7 gap-1.5 px-2.5 text-[11px]"
-              onClick={() => void bulkGenerate()}
-              disabled={acting}
-            >
-              {acting ? (
-                <Loader2Icon className="size-3.5 animate-spin" />
+            <div className="ml-auto flex items-center gap-1.5">
+              {showAssign ? (
+                <Button
+                  size="sm"
+                  className="h-7 gap-1.5 px-2.5 text-[11px]"
+                  onClick={() => void bulkAssign()}
+                  disabled={acting}
+                >
+                  {acting ? (
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                  ) : (
+                    <UserPlusIcon className="size-3.5" />
+                  )}
+                  Assign to me
+                </Button>
               ) : (
-                <SparklesIcon className="size-3.5" />
+                <Button
+                  size="sm"
+                  className="h-7 gap-1.5 px-2.5 text-[11px]"
+                  onClick={() => void bulkGenerate()}
+                  disabled={acting}
+                >
+                  {acting ? (
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                  ) : (
+                    <SparklesIcon className="size-3.5" />
+                  )}
+                  Generate AI replies
+                </Button>
               )}
-              Generate AI replies
-            </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1.5 px-2.5 text-[11px]"
+                onClick={() => setConfirmClose(true)}
+                disabled={acting}
+                title="Close the selected conversations in Intercom"
+              >
+                <CircleCheckIcon className="size-3.5" />
+                Close
+              </Button>
+            </div>
           )}
         </div>
       )}
@@ -411,7 +524,7 @@ function ConversationRow({
 }: {
   row: SupportCase
   selected: boolean
-  onToggle: () => void
+  onToggle: (shift: boolean) => void
 }) {
   const nav = useCanvasNav()
   const open = () => {
@@ -428,8 +541,12 @@ function ConversationRow({
       <input
         type="checkbox"
         checked={selected}
-        onChange={onToggle}
-        onClick={(e) => e.stopPropagation()}
+        onChange={() => {}}
+        // onClick (not onChange) carries shiftKey — needed for range selection.
+        onClick={(e) => {
+          e.stopPropagation()
+          onToggle(e.shiftKey)
+        }}
         aria-label={`Select ${row.customer}`}
         className="mt-0.5 size-3.5 shrink-0 cursor-pointer rounded border-muted-foreground/40 accent-primary"
       />
