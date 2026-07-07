@@ -80,6 +80,7 @@ export function sweepConversationToLive(c: SweepConversation): ConversationLive 
     adminAssigneeId: c.adminAssigneeId,
     slaStatus: c.slaStatus,
     waitingSinceSec: c.waitingSinceSec,
+    firstAdminReplyAtSec: c.firstAdminReplyAtSec,
   }
 }
 

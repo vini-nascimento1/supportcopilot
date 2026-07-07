@@ -631,6 +631,12 @@ export type SweepConversation = {
   slaName: string | null
   /** Unix seconds since the SLA clock started waiting; null when not waiting. */
   waitingSinceSec: number | null
+  /**
+   * Unix seconds of the first HUMAN admin reply. Intercom EXCLUDES Fin/bot
+   * replies from this stat, so null = no human has replied yet (the FRT-relevant
+   * "awaiting first response" state) even when Fin has already messaged.
+   */
+  firstAdminReplyAtSec: number | null
 }
 
 function toSweepConversation(c: IntercomSearchConversation): {
@@ -657,6 +663,8 @@ function toSweepConversation(c: IntercomSearchConversation): {
       slaStatus: (c.sla_applied?.sla_status ?? "none") as SlaStatus,
       slaName: c.sla_applied?.sla_name ?? null,
       waitingSinceSec: typeof c.waiting_since === "number" ? c.waiting_since : null,
+      firstAdminReplyAtSec:
+        typeof c.statistics?.first_admin_reply_at === "number" ? c.statistics.first_admin_reply_at : null,
     },
   }
 }

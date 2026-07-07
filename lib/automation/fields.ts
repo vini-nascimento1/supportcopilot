@@ -163,6 +163,18 @@ export const FIELDS: FieldDef[] = [
     appliesTo: ["trigger", "monitor"],
     unit: "minutes",
   },
+  // Sourced from Intercom's statistics.first_admin_reply_at, which EXCLUDES Fin/bot
+  // replies. `is false` = no human has replied yet = the FRT "awaiting first
+  // response" state. Use it to target FRT and skip TTC/already-answered cases —
+  // the whole SLA (first reply + time-to-close) shares one sla_status/sla_name, so
+  // sla_status alone can't tell "not answered" from "answered but not closed".
+  {
+    key: "admin_replied",
+    label: "A human teammate has replied (Fin excluded)",
+    type: "boolean",
+    category: "SLA",
+    appliesTo: ["trigger", "monitor"],
+  },
 
   // ── Event (triggers only) ──
   {
