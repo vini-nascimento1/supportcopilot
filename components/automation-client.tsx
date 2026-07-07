@@ -18,6 +18,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -56,9 +57,15 @@ const ACTION_KINDS: { kind: ActionKind; label: string; description: string }[] =
   { kind: "alert.slack", label: "Slack DM", description: "Send you a Slack message (M6)" },
   { kind: "case.flag", label: "Flag case", description: "Mark case with priority hint" },
   { kind: "case.suggest_playbook", label: "Suggest playbook", description: "Link a playbook to the case" },
-  { kind: "draft.prestage", label: "Pre-stage draft", description: "Prepare a draft response (M6)" },
+  { kind: "draft.prestage", label: "Pre-stage draft", description: "Prepare an AI draft response (M6)" },
+  { kind: "draft.macro", label: "Pre-stage macro draft", description: "Queue a fixed macro reply as a draft" },
   { kind: "flow.stop", label: "Stop processing", description: "No further rules run on this case" },
 ]
+
+// Default text for a new draft.macro action — the "Quick Acknowledgement" macro.
+// Agents can edit it per rule; it is staged as a draft for review, never auto-sent.
+const QUICK_ACK_MACRO =
+  "Thanks for reaching out! We've received your message and will get back to you within the next few hours. We appreciate your patience 🙏"
 
 const OP_LABELS: Record<Operator, string> = {
   is: "is",
@@ -1115,7 +1122,12 @@ function ActionsStep({
               value={action.kind}
               onValueChange={(v) => {
                 const next = [...actions]
-                next[i] = { kind: v as ActionKind }
+                // Seed the macro action with the Quick Acknowledgement text so it's
+                // ready to edit; other kinds start with no params.
+                next[i] =
+                  v === "draft.macro"
+                    ? { kind: v, params: { text: QUICK_ACK_MACRO } }
+                    : { kind: v as ActionKind }
                 onChange(next)
               }}
             >
@@ -1166,8 +1178,19 @@ function ActionsStep({
               />
             ) : action.kind === "draft.prestage" ? (
               <p className="flex-1 text-xs text-muted-foreground">
-                Pre-stages a reply draft for the conversation — no params needed.
+                Pre-stages an AI reply draft for the conversation — no params needed.
               </p>
+            ) : action.kind === "draft.macro" ? (
+              <Textarea
+                className="min-h-[72px] flex-1 text-sm"
+                placeholder="Macro text staged as a draft (reviewed before sending)"
+                value={String(action.params?.text ?? "")}
+                onChange={(e) => {
+                  const next = [...actions]
+                  next[i] = { ...action, params: { ...action.params, text: e.target.value } }
+                  onChange(next)
+                }}
+              />
             ) : null}
 
             <Button

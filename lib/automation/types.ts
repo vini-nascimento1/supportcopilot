@@ -62,6 +62,7 @@ export type ActionKind =
   | "case.flag"
   | "case.suggest_playbook"
   | "draft.prestage"
+  | "draft.macro" // fixed macro text staged as a draft (never sends)
   | "flow.stop"
 
 export type Action = {
