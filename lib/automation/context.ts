@@ -49,6 +49,11 @@ function ageSeconds(iso: string | null | undefined, nowMs: number): number | und
   return Math.max(0, Math.floor((nowMs - t) / 1000))
 }
 
+// Intercom admin ids that are BOTS, not humans (see docs/intercom-admins.md).
+// A conversation "assigned" to one of these is effectively unassigned — no human
+// is handling it — so it still counts as awaiting a first human response.
+const BOT_ADMIN_IDS = new Set(["6510758", "6522884"]) // Fin AI, Layla Frost (workflow bot)
+
 /**
  * Build the evaluation context for a case.
  * @param conv   Intercom-side state (live for sweeps, event payload for triggers). Null is allowed for tests.
@@ -101,6 +106,13 @@ export function buildContext(
     // Rules without a teammate condition are "global" — they evaluate against
     // all agents' queues. Rules with `teammate is <id>` are scoped to that agent.
     teammate: conv?.adminAssigneeId ?? null,
+    // A HUMAN teammate is assigned. Bots (Fin, workflow automations) are excluded,
+    // so `human_assigned is false` = null assignee OR Fin-held — both "no human is
+    // on it". Prefer this over `teammate is_empty` for "unassigned" rules, since
+    // FRT-awaiting convos are often assigned to Fin rather than left null.
+    human_assigned: conv
+      ? conv.adminAssigneeId != null && !BOT_ADMIN_IDS.has(conv.adminAssigneeId)
+      : null,
     // SLA fields sourced from Intercom's sla_applied + waiting_since. Use these
     // for "alert before breach" / "alert on breach" rules instead of trying to
     // compute a countdown from createdAt — Intercom already knows whether an

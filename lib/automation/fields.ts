@@ -112,6 +112,16 @@ export const FIELDS: FieldDef[] = [
     category: "Conversation",
     appliesTo: ["trigger", "monitor"],
   },
+  // Derived: a HUMAN teammate is assigned. Bots (Fin, workflow automations) don't
+  // count, so `is false` = unassigned OR Fin-held. Prefer over `teammate is_empty`
+  // for "no human is on it" rules — FRT-awaiting convos are often assigned to Fin.
+  {
+    key: "human_assigned",
+    label: "A human teammate is assigned (Fin excluded)",
+    type: "boolean",
+    category: "Conversation",
+    appliesTo: ["trigger", "monitor"],
+  },
 
   // ── Time-based (monitors lean on these) ──
   // NOTE: time_since_update is now Intercom's real `updated_at` (post live-Intercom
