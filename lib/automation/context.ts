@@ -26,6 +26,11 @@ export type ConversationLive = {
   slaStatus: SlaStatus
   /** Unix seconds since the SLA clock started waiting; null when no one is waiting. */
   waitingSinceSec: number | null
+  /**
+   * Unix seconds of the first HUMAN admin reply (Intercom excludes Fin/bots).
+   * Null = no human has replied yet — the FRT "awaiting first response" state.
+   */
+  firstAdminReplyAtSec: number | null
 }
 
 /** Our DB metadata about a case (rule-set state + playbook link). */
@@ -102,6 +107,11 @@ export function buildContext(
     // admin reply has landed and stops the clock accordingly.
     sla_status: slaStatus,
     time_waiting_seconds: timeWaitingSeconds,
+    // A human teammate has replied. Sourced from Intercom's first_admin_reply_at,
+    // which EXCLUDES Fin/bot replies — so `false` = "awaiting first human response"
+    // (FRT-relevant) even if Fin already messaged. Lets a rule target FRT and skip
+    // TTC/already-answered cases, which share the same single SLA name.
+    admin_replied: conv ? conv.firstAdminReplyAtSec != null : null,
     event,
   }
   return { fields }

@@ -44,6 +44,7 @@ type IntercomConversationItem = {
     sla_name?: string | null
     sla_status?: "active" | "hit" | "missed" | "cancelled" | null
   } | null
+  statistics?: { first_admin_reply_at?: number | null } | null
   source?: {
     subject?: string | null
     body?: string | null
@@ -85,6 +86,8 @@ function itemToConversationLive(item: IntercomConversationItem): ConversationLiv
     adminAssigneeId: item.admin_assignee_id != null ? String(item.admin_assignee_id) : null,
     slaStatus: item.sla_applied?.sla_status ?? "none",
     waitingSinceSec: typeof item.waiting_since === "number" ? item.waiting_since : null,
+    firstAdminReplyAtSec:
+      typeof item.statistics?.first_admin_reply_at === "number" ? item.statistics.first_admin_reply_at : null,
   }
 }
 
