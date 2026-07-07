@@ -1,35 +1,45 @@
-import { type NextRequest } from "next/server"
-import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { type NextRequest, NextResponse } from "next/server"
+
 import { getSignedInEmail } from "@/lib/auth"
 import { mdToHtml } from "@/lib/md-to-html"
+import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { sendIntercomReply } from "./intercom-reply"
 import { buildIntercomReplyPayload } from "./payload"
 
 const INTERCOM_TOKEN = process.env.INTERCOM_ACCESS_TOKEN
-const INTERCOM_API = "https://api.intercom.io"
+
+export const dynamic = "force-dynamic"
+export const maxDuration = 30
+
+type SendDraftPayload = {
+  conversationId?: string
+  body?: string
+  /** When true, body is already HTML (e.g. an Intercom macro), so send as-is. */
+  html?: boolean
+  attachmentFiles?: { name: string; contentType: string; data: string }[]
+}
 
 export async function POST(req: NextRequest) {
   const email = await getSignedInEmail()
   if (!email) {
-    return new Response("Unauthorized", { status: 401 })
+    return errorResponse("Unauthorized", 401)
   }
 
-  const { conversationId, body, html, attachmentFiles } = (await req.json()) as {
-    conversationId: string
-    body: string
-    /** When true, body is already HTML (e.g. an Intercom macro) — send as-is
-        instead of converting markdown. */
-    html?: boolean
-    attachmentFiles?: { name: string; contentType: string; data: string }[]
+  let payload: SendDraftPayload
+  try {
+    payload = (await req.json()) as SendDraftPayload
+  } catch {
+    return errorResponse("Invalid JSON", 400)
   }
 
+  const { conversationId, body = "", html, attachmentFiles } = payload
   if (!conversationId || (!body && !(attachmentFiles && attachmentFiles.length))) {
-    return new Response("Missing conversationId or body", { status: 400 })
+    return errorResponse("Missing conversationId or body", 400)
   }
 
-  // Look up the logged-in agent's Intercom admin ID
   const supabase = getSupabaseAdminClient()
   if (!supabase || !INTERCOM_TOKEN) {
-    return new Response("Server misconfigured", { status: 500 })
+    return errorResponse("Server misconfigured", 500)
   }
 
   const { data: agent } = await supabase
@@ -40,30 +50,48 @@ export async function POST(req: NextRequest) {
 
   const adminId = agent?.intercom_admin_id ?? process.env.INTERCOM_ADMIN_ID
   if (!adminId) {
-    return new Response("No Intercom admin ID found for your account", { status: 400 })
+    return errorResponse("No Intercom admin ID found for your account", 400)
   }
 
-  // Macros arrive as HTML already; drafts are markdown and need conversion.
   const htmlBody = html ? body : mdToHtml(body)
-
-  // Send reply to Intercom
-  const response = await fetch(`${INTERCOM_API}/conversations/${conversationId}/reply`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${INTERCOM_TOKEN}`,
-      "Content-Type": "application/json",
-      "Intercom-Version": "2.11",
-    },
-    body: JSON.stringify(
-      buildIntercomReplyPayload({ adminId: String(adminId), htmlBody, attachmentFiles })
-    ),
+  const replyPayload = buildIntercomReplyPayload({
+    adminId: String(adminId),
+    htmlBody,
+    attachmentFiles,
   })
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => "Unknown error")
-    console.error("Intercom reply failed:", response.status, text)
-    return new Response(`Intercom returned ${response.status}`, { status: 502 })
+  const result = await sendIntercomReply({
+    token: INTERCOM_TOKEN,
+    conversationId,
+    payload: replyPayload,
+  })
+
+  if (!result.ok) {
+    console.error("Intercom reply failed:", {
+      conversationId,
+      status: result.status,
+      attempts: result.attempts,
+      error: result.error,
+    })
+    return NextResponse.json(
+      {
+        ok: false,
+        error: result.error,
+        intercomStatus: result.status,
+        attempts: result.attempts,
+      },
+      { status: result.clientStatus }
+    )
   }
 
-  return Response.json({ ok: true })
+  return NextResponse.json({
+    ok: true,
+    intercomStatus: result.status,
+    attempts: result.attempts,
+    confirmedBy: result.confirmedBy,
+  })
+}
+
+function errorResponse(error: string, status: number) {
+  return NextResponse.json({ ok: false, error }, { status })
 }

@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PinButton } from "@/components/canvas/pin-button"
 import type { MacroRow } from "@/app/api/macros/route"
+import { readApiError } from "@/lib/api-error"
 
 export type MacrosNodeData = {
   /** Present on case canvases; absent on the ad-hoc canvas (send disabled). */
@@ -122,7 +123,7 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
             html: !useAdapted, // original macro = HTML as-is; adapted = markdown
           }),
         })
-        if (!res.ok) throw new Error(await res.text())
+        if (!res.ok) throw new Error(await readApiError(res, `Send failed (${res.status})`))
         toast.success(
           useAdapted ? `Sent the adapted reply for "${m.name}"` : `Sent "${m.name}" to the conversation`
         )

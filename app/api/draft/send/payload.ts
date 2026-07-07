@@ -3,7 +3,7 @@ export const MAX_OUTBOUND_FILES = 8
 
 export type OutboundFile = { name: string; contentType: string; data: string }
 
-type IntercomReplyPayload = {
+export type IntercomReplyPayload = {
   type: "admin"
   message_type: "comment"
   admin_id: string

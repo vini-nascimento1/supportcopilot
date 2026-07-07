@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
+import { readApiError } from "@/lib/api-error"
 import { onCanvasRefresh } from "@/lib/canvas-refresh"
 import {
   readPendingOnRequestDrafts,
@@ -319,6 +320,7 @@ function QueueRow({
   }
 
   const send = async () => {
+    if (sending) return
     setSending(true)
     const bodyChanged = body.trim() !== item.body.trim()
     try {
@@ -327,9 +329,9 @@ function QueueRow({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversationId: item.intercomConversationId, body }),
       })
-      if (!res.ok) throw new Error(await res.text())
-      // Best-effort: mark the queue row resolved so it leaves the queue.
-      await fetch("/api/reply-queue/resolve", {
+      if (!res.ok) throw new Error(await readApiError(res, `Failed to send (${res.status})`))
+
+      const resolveRes = await fetch("/api/reply-queue/resolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -338,11 +340,15 @@ function QueueRow({
           action: bodyChanged ? "edit" : "approve",
           bodyChanged,
         }),
-      }).catch(() => {})
+      }).catch(() => null)
       toast.success(`Sent to ${item.customerName ?? "the customer"}`)
       onDone(item.id)
-    } catch {
-      toast.error("Couldn't send — open the case and try there.")
+      if (!resolveRes?.ok) {
+        toast.warning("Sent to Intercom, but couldn't clear the queue yet. Refreshing.")
+        void onRefresh()
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't send. Open the case and try there.")
       setSending(false)
       setConfirming(false)
     }

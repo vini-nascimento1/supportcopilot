@@ -8,6 +8,7 @@ import {
   MAX_OUTBOUND_FILES,
   type ComposerAttachment,
 } from "@/lib/reply-attachments"
+import { readApiError } from "@/lib/api-error"
 
 type GenMode = "generate" | "improve"
 
@@ -218,9 +219,7 @@ export function useReplyComposer(opts: {
       })
 
       if (!res.ok) {
-        toast.error(
-          (await res.text().catch(() => "")) || `Failed to send (${res.status})`
-        )
+        toast.error(await readApiError(res, `Failed to send (${res.status})`))
         return
       }
 
