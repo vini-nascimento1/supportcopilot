@@ -112,7 +112,8 @@ if (!caseId && assigneeAgentId === ownerId) {
 
 Consequences:
 - `alert.in_app` / `alert.slack` — work fine with `caseId = null`. The DM fires.
-- `case.flag` / `case.suggest_playbook` / `draft.prestage` — need a `caseId`;
+- `case.flag` / `case.suggest_playbook` / `draft.prestage` / `draft.macro` — need a
+  `caseId` (the draft actions create one from the conversation if missing);
   return `"no case id"` in `actions_taken[].detail` when fired cross-agent.
   Visible in `automation_runs` but no client row mutated.
 
@@ -216,7 +217,8 @@ lib/automation/
   webhook.ts           Trigger handler. runTriggerForEvent loads all
                        matching-topic rules + the single payload conversation,
                        same grouping, same lazy-upsert guard.
-  prestage.ts          draft.prestage action implementation.
+  prestage.ts          draft.prestage (AI) + draft.macro (fixed text) — both
+                       persist a draft via the shared persistDraft(); never send.
 ```
 
 The three entry points (`app/api/webhooks/intercom/route.ts`,

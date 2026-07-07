@@ -54,6 +54,54 @@ async function generate(system: string, user: string): Promise<string> {
 export type PrestageResult = { applied: boolean; detail: string }
 
 /**
+ * Persist a reply body as the next draft version for a conversation. DRAFT-ONLY:
+ * writes to the drafts table, never sends. Ensures a case row exists first (fetching
+ * the customer name from Intercom only when the row is missing). Shared by the AI
+ * pre-stage path and the fixed-macro path so both version + attach identically.
+ */
+async function persistDraft(conversationId: string, replyBody: string): Promise<PrestageResult> {
+  const db = getSupabaseAdminClient()
+  if (!db) return { applied: false, detail: "no admin client" }
+
+  const { data: caseRow } = await db
+    .from("cases")
+    .select("id")
+    .eq("intercom_conversation_id", conversationId)
+    .maybeSingle()
+
+  let caseId = caseRow?.id as string | undefined
+  if (!caseId) {
+    // Only reach out to Intercom for the customer name when we must create the row.
+    const conversation = await getConversationDetail(conversationId)
+    const { data: created } = await db
+      .from("cases")
+      .upsert(
+        { intercom_conversation_id: conversationId, customer_name: conversation?.customer ?? null },
+        { onConflict: "intercom_conversation_id" }
+      )
+      .select("id")
+      .single()
+    caseId = created?.id as string | undefined
+  }
+  if (!caseId) return { applied: false, detail: "could not resolve case" }
+
+  const { data: latest } = await db
+    .from("drafts")
+    .select("version")
+    .eq("case_id", caseId)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const { error } = await db.from("drafts").insert({
+    case_id: caseId,
+    version: ((latest?.version as number | undefined) ?? 0) + 1,
+    reply_body: replyBody,
+  })
+  return error ? { applied: false, detail: error.message } : { applied: true, detail: "draft staged" }
+}
+
+/**
  * Generate + persist a draft for a conversation. Skips quietly (applied:false) if
  * the model isn't configured or the conversation can't be fetched — never throws
  * to the action runner.
@@ -64,7 +112,7 @@ export async function prestageDraft(conversationId: string | null): Promise<Pres
   const db = getSupabaseAdminClient()
   if (!db) return { applied: false, detail: "no admin client" }
 
-  // Find the local case (for playbook context + to attach the draft).
+  // Find the local case (for playbook context).
   const { data: caseRow } = await db
     .from("cases")
     .select("id, playbook_id, customer_name")
@@ -89,33 +137,24 @@ export async function prestageDraft(conversationId: string | null): Promise<Pres
   }
   if (!reply) return { applied: false, detail: "empty draft" }
 
-  // Persist: ensure a case row, then insert the next draft version.
-  let caseId = caseRow?.id as string | undefined
-  if (!caseId) {
-    const { data: created } = await db
-      .from("cases")
-      .upsert(
-        { intercom_conversation_id: conversationId, customer_name: conversation.customer },
-        { onConflict: "intercom_conversation_id" }
-      )
-      .select("id")
-      .single()
-    caseId = created?.id as string | undefined
-  }
-  if (!caseId) return { applied: false, detail: "could not resolve case" }
+  const res = await persistDraft(conversationId, reply)
+  return res.applied ? { applied: true, detail: "draft pre-staged" } : res
+}
 
-  const { data: latest } = await db
-    .from("drafts")
-    .select("version")
-    .eq("case_id", caseId)
-    .order("version", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  const { error } = await db.from("drafts").insert({
-    case_id: caseId,
-    version: ((latest?.version as number | undefined) ?? 0) + 1,
-    reply_body: reply,
-  })
-  return error ? { applied: false, detail: error.message } : { applied: true, detail: "draft pre-staged" }
+/**
+ * Stage a fixed macro reply as a draft — NO LLM call, the exact text is what the
+ * agent will review and send. DRAFT-ONLY: never messages the customer. Used by the
+ * `draft.macro` action so a rule can queue e.g. a "Quick Acknowledgement" macro.
+ * The text is stored verbatim (no {{placeholder}} resolution) so no internal field
+ * can leak into a customer-facing draft.
+ */
+export async function stageMacroDraft(
+  conversationId: string | null,
+  text: string | null
+): Promise<PrestageResult> {
+  if (!conversationId) return { applied: false, detail: "no conversation id" }
+  const body = (text ?? "").trim()
+  if (!body) return { applied: false, detail: "no macro text" }
+  const res = await persistDraft(conversationId, body)
+  return res.applied ? { applied: true, detail: "macro draft staged" } : res
 }

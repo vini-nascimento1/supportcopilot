@@ -7,13 +7,16 @@ import "server-only"
 // is `alert.slack` — a system-generated message to the rule OWNER'S OWN DM, never a
 // customer reply. Everything else writes to our own Supabase rows.
 //
-// Status: alert.in_app, alert.slack, case.flag, case.suggest_playbook, draft.prestage
-// all dispatch real work. flow.stop is resolved by the planner (planCaseActions)
-// and never reaches the handler map.
+// Status: alert.in_app, alert.slack, case.flag, case.suggest_playbook, draft.prestage,
+// draft.macro all dispatch real work. flow.stop is resolved by the planner
+// (planCaseActions) and never reaches the handler map.
+//
+// draft.prestage and draft.macro are BOTH draft-only: they write a reply into our
+// drafts table for the agent to review. Neither ever sends to the customer.
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { sendSlackMessage } from "@/lib/slack"
-import { prestageDraft } from "./prestage"
+import { prestageDraft, stageMacroDraft } from "./prestage"
 import type { Action, ActionKind } from "./types"
 
 export type ActionResult = {
@@ -206,12 +209,23 @@ const draftPrestage: Handler = async (action, target) => {
   return { kind: action.kind, applied: res.applied, detail: res.detail }
 }
 
+// ── draft.macro ────────────────────────────────────────────────────────────────
+// Stage a fixed macro reply (params.text) as a draft — no LLM. Draft-only; the
+// agent still reviews and sends. Text is stored verbatim (no template resolution)
+// so no internal placeholder can leak into a customer-facing draft.
+const draftMacro: Handler = async (action, target) => {
+  const text = asString(params(action).text)
+  const res = await stageMacroDraft(target.intercomConversationId ?? null, text)
+  return { kind: action.kind, applied: res.applied, detail: res.detail }
+}
+
 export const ACTION_HANDLERS: Record<ActionKind, Handler> = {
   "alert.in_app": alertInApp,
   "case.flag": caseFlag,
   "case.suggest_playbook": caseSuggestPlaybook,
   "alert.slack": alertSlack, // owner DM only — ADR-0007 carve-out
   "draft.prestage": draftPrestage,
+  "draft.macro": draftMacro,
   // flow.stop is resolved by planCaseActions and never dispatched; keep a safe no-op.
   "flow.stop": async () => ({ kind: "flow.stop", applied: true, detail: "handled by planner" }),
 }

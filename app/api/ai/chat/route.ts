@@ -219,6 +219,8 @@ Example: { kind: "alert.slack", params: { text: "🚨 {{customer}} needs help wi
 - alert.slack — Slack DM to you. params: { text: "message with {{placeholders}}" }
 - case.flag — set priority_hint (urgent/normal/low), add_tags, needs_attention_in_mins
 - case.suggest_playbook — params: { playbook_id: "uuid" }
+- draft.prestage — pre-stage an AI-written reply draft for review. No params. Never sends.
+- draft.macro — pre-stage a fixed macro reply as a draft for review. params: { text: "exact macro text" }. Stored verbatim (no placeholders), never sends.
 - flow.stop — stop further rule evaluation
 
 ## SLA rules
