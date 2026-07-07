@@ -14,6 +14,7 @@ const pb = (over: Partial<PlaybookListItem>): PlaybookListItem => ({
   checks: null,
   resolution: null,
   dosDonts: null,
+  requiresManualAction: false,
   ...over,
 })
 

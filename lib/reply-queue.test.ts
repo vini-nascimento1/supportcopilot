@@ -77,6 +77,17 @@ describe("deriveRiskBand", () => {
       deriveRiskBand({ capabilityGap: false, gateMatched: false, notionHadHits: false })
     ).toBe("low_confidence")
   })
+
+  it("playbook requiring a manual action -> needs_check, even on a clean gate match", () => {
+    expect(
+      deriveRiskBand({
+        capabilityGap: false,
+        gateMatched: true,
+        notionHadHits: true,
+        playbookRequiresManualAction: true,
+      })
+    ).toBe("needs_check")
+  })
 })
 
 describe("isSendLocked", () => {

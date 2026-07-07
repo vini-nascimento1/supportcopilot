@@ -7,6 +7,7 @@ import {
   PaperclipIcon,
   SendIcon,
   SparklesIcon,
+  XIcon,
 } from "lucide-react"
 
 import { AttachmentChips } from "@/components/canvas/attachment-chips"
@@ -34,6 +35,7 @@ export function ComposerBar({ composer }: { composer: Composer }) {
     needsCheckConfirming,
     generate,
     improve,
+    cancelGenerate,
     send,
   } = composer
   const attachmentCount = attachments.length
@@ -122,6 +124,19 @@ export function ComposerBar({ composer }: { composer: Composer }) {
               </Button>
             </PopoverContent>
           </Popover>
+          {aiBusy && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1 px-2 text-muted-foreground"
+              onClick={() => cancelGenerate()}
+              title="Stop generating"
+            >
+              <XIcon />
+              Cancel
+            </Button>
+          )}
         </div>
         <Button
           type="button"

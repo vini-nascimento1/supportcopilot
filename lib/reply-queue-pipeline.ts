@@ -78,11 +78,17 @@ async function getAgentFirstName(email: string | null): Promise<string> {
 function buildJustification(args: {
   band: RiskBand
   capabilityGap: boolean
+  requiresManualAction: boolean
   matchedName: string | null
   gateConfidence: number | null
   snippets: NotionSnippet[]
 }): string {
   const lines: string[] = []
+  if (args.requiresManualAction) {
+    lines.push(
+      "🔁 Manual step required — log into the system and resend the payout email to the creator before/after sending this reply. The AI can't do the resend, so the send is held here for you."
+    )
+  }
   if (args.capabilityGap) {
     lines.push(
       "⚠️ Sensitive category (payout/KYC/media/ban) — verify in fadmin before sending; send is locked."
@@ -192,7 +198,13 @@ export async function computeAndPersistSuggestion(
   }
   const notionHadHits = snippets.length > 0
 
-  const band = deriveRiskBand({ capabilityGap, gateMatched, notionHadHits })
+  const requiresManualAction = matched?.requiresManualAction ?? false
+  const band = deriveRiskBand({
+    capabilityGap,
+    gateMatched,
+    notionHadHits,
+    playbookRequiresManualAction: requiresManualAction,
+  })
 
   // Generate the reply (reuse the draft brain). Even a capability-gap card gets a
   // drafted safe part — only the SEND is locked, not the drafting.
@@ -247,6 +259,7 @@ export async function computeAndPersistSuggestion(
     justification: buildJustification({
       band,
       capabilityGap,
+      requiresManualAction,
       matchedName: matched?.caseType ?? null,
       gateConfidence: gate.reason === "error" ? null : gate.confidence,
       snippets,

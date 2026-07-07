@@ -48,15 +48,21 @@ export type RiskBandInput = {
   capabilityGap: boolean
   gateMatched: boolean // gate found a playbook at/above threshold (head)
   notionHadHits: boolean // tail: notion ai_search returned snippets
+  // The matched playbook is flagged requires_manual_action: the agent must do a
+  // manual system step (e.g. resend a payout email) that the AI can't. Force the
+  // card into needs_check so the send is locked until a human acts.
+  playbookRequiresManualAction?: boolean
 }
 
 // Decide the queue band (D6/D9):
-//   - capability gap         -> needs_check (send LOCKED), regardless of anything else
-//   - head (playbook match)  -> ready
-//   - tail with Notion hits  -> ready
-//   - tail, weak/no Notion   -> low_confidence (enters queue, send NOT locked)
+//   - capability gap                 -> needs_check (send LOCKED), regardless of anything else
+//   - matched playbook needs a manual step -> needs_check (send LOCKED)
+//   - head (playbook match)          -> ready
+//   - tail with Notion hits          -> ready
+//   - tail, weak/no Notion           -> low_confidence (enters queue, send NOT locked)
 export function deriveRiskBand(input: RiskBandInput): RiskBand {
   if (input.capabilityGap) return "needs_check"
+  if (input.playbookRequiresManualAction) return "needs_check"
   if (input.gateMatched) return "ready"
   if (input.notionHadHits) return "ready"
   return "low_confidence"

@@ -13,6 +13,7 @@ export type PlaybookListItem = {
   checks: string | null
   resolution: string | null
   dosDonts: string | null
+  requiresManualAction: boolean
 }
 
 export type PlaybooksDashboardData = {
@@ -37,6 +38,7 @@ const demoRows: PlaybookListItem[] = [
     checks: "Check fadmin and Ondato status before replying.",
     resolution: "Confirm status and escalate technical null-state issues.",
     dosDonts: "Do not promise manual approval before checking the actual state.",
+    requiresManualAction: false,
   },
   {
     id: "demo-payout-hold",
@@ -49,6 +51,7 @@ const demoRows: PlaybookListItem[] = [
     checks: "Check payout status and whether a provider upload link is needed.",
     resolution: "Share the secure upload link when available.",
     dosDonts: "Do not name the payout provider or promise a release date.",
+    requiresManualAction: false,
   },
 ]
 
@@ -73,6 +76,7 @@ function mapPlaybookRow(row: {
   checks: string | null
   resolution: string | null
   dos_donts: string | null
+  requires_manual_action: boolean | null
 }): PlaybookListItem {
   return {
     id: row.id,
@@ -85,6 +89,7 @@ function mapPlaybookRow(row: {
     checks: row.checks,
     resolution: row.resolution,
     dosDonts: row.dos_donts,
+    requiresManualAction: row.requires_manual_action ?? false,
   }
 }
 
@@ -128,7 +133,7 @@ export async function getPlaybooksDashboardData(): Promise<PlaybooksDashboardDat
       supabase
         .from("playbooks")
         .select(
-          "id, case_type, aliases, status, source, last_validated, recognize, checks, resolution, dos_donts"
+          "id, case_type, aliases, status, source, last_validated, recognize, checks, resolution, dos_donts, requires_manual_action"
         )
         .order("case_type", { ascending: true }),
       supabase.from("playbooks").select("id", { count: "exact", head: true }),

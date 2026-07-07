@@ -25,6 +25,10 @@ export function useReplyComposer(opts: {
   const [needsCheckConfirming, setNeedsCheckConfirming] = useState(false)
   const dirtyRef = useRef(false)
   const idRef = useRef(0)
+  // Lets the user cancel an in-flight generation, and backstops a hung stream:
+  // if no chunk arrives for CLIENT_IDLE_MS the controller aborts so the Canvas
+  // never gets stuck on "Generating…".
+  const abortRef = useRef<AbortController | null>(null)
 
   const resetSendConfirmation = useCallback(() => {
     setNeedsCheckConfirming(false)
@@ -95,8 +99,23 @@ export function useReplyComposer(opts: {
 
   const streamInto = useCallback(
     async (mode: GenMode) => {
+      // If a previous run is somehow still around, abort it first.
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      // Inactivity watchdog: aborts if no chunk arrives for a while (covers a
+      // fully hung connection the server-side timeout can't reach us through).
+      const CLIENT_IDLE_MS = 45_000
+      let idleTimer: ReturnType<typeof setTimeout> | undefined
+      const armWatchdog = () => {
+        clearTimeout(idleTimer)
+        idleTimer = setTimeout(() => controller.abort(), CLIENT_IDLE_MS)
+      }
+
       setBusy(mode)
       try {
+        armWatchdog()
         const res = await fetch("/api/draft", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -107,6 +126,7 @@ export function useReplyComposer(opts: {
               ? { mode: "improve", currentDraft: text }
               : {}),
           }),
+          signal: controller.signal,
         })
 
         if (!res.ok || !res.body) {
@@ -127,17 +147,35 @@ export function useReplyComposer(opts: {
         for (;;) {
           const { done, value } = await reader.read()
           if (done) break
+          armWatchdog()
           acc += decoder.decode(value, { stream: true })
           setText(acc)
         }
+
+        // The server surfaces generation failures inline as "[Error: …]" rather
+        // than an HTTP status — treat that as a failure, not a draft.
+        if (acc.trimStart().startsWith("[Error:")) {
+          setText("")
+          toast.error(acc.trim().replace(/^\[Error:\s*/, "").replace(/\]$/, ""))
+        }
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Network error")
+        if (controller.signal.aborted) {
+          toast.info("Generation cancelled")
+        } else {
+          toast.error(error instanceof Error ? error.message : "Network error")
+        }
       } finally {
+        clearTimeout(idleTimer)
+        if (abortRef.current === controller) abortRef.current = null
         setBusy(null)
       }
     },
     [conversationId, playbookId, resetSendConfirmation, text]
   )
+
+  const cancelGenerate = useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
 
   const generate = useCallback(() => streamInto("generate"), [streamInto])
 
@@ -235,6 +273,7 @@ export function useReplyComposer(opts: {
     needsCheckConfirming,
     generate,
     improve,
+    cancelGenerate,
     send,
   }
 }

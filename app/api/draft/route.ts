@@ -117,7 +117,9 @@ export async function POST(req: NextRequest) {
           { role: "user", content: userMessage },
         ]
 
-        for await (const chunk of streamChatCompletion(messages)) {
+        // Pass the request signal so a client cancel/disconnect aborts the
+        // upstream Verboo stream instead of leaving it running.
+        for await (const chunk of streamChatCompletion(messages, { signal: req.signal })) {
           controller.enqueue(encoder.encode(chunk))
         }
       } catch (err) {

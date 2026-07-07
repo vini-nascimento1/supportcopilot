@@ -20,6 +20,17 @@ const DEFAULT_TEXT_MODEL = "deepseek-v4-flash"
 const DEFAULT_VISION_MODEL = "qwen3.6-27b"
 const DEFAULT_DRAFT_TEMPERATURE = 0.2
 
+// Reliability guards for the upstream streaming call. Historically a stalled or
+// rate-limited Verboo request had no timeout, no retry, and no abort path — the
+// stream reader blocked forever, so the Canvas "Generating…" state (and the
+// background reply-queue pipeline) hung with no way to cancel. All three are
+// overridable via env for ops tuning.
+const CONNECT_TIMEOUT_MS = 30_000 // max wait for the response headers (time-to-first-byte)
+const STALL_TIMEOUT_MS = 30_000 // max gap allowed between streamed chunks
+const MAX_RETRIES = 2 // extra attempts on a transient PRE-stream failure (3 total)
+const RETRY_BASE_MS = 600 // exponential backoff base: 600ms, 1.2s, 2.4s… (capped)
+const RETRY_MAX_MS = 5_000
+
 type DraftConversation = {
   customer: string
   firstMessage: string
@@ -564,31 +575,104 @@ export function selectModel(messages: OpenAIMessage[]): string {
   return hasImage ? getVisionDraftModel() : getTextDraftModel()
 }
 
+// Transient statuses worth a retry (rate limit + upstream/gateway hiccups).
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === "AbortError"
+}
+
+// Backoff sleep that resolves early (rejecting) if the caller aborts.
+function backoffDelay(attempt: number, signal?: AbortSignal): Promise<void> {
+  const ms = Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS)
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer)
+        reject(new DOMException("Aborted", "AbortError"))
+      },
+      { once: true }
+    )
+  })
+}
+
+// POST to Verboo with a connect (time-to-first-byte) timeout and bounded retry
+// on transient PRE-stream failures. Never retries once bytes are flowing — a
+// partial stream can't be safely replayed. Honours an external abort signal.
+async function openVerbooStream(
+  body: string,
+  signal?: AbortSignal
+): Promise<Response> {
+  let attempt = 0
+  for (;;) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+
+    const connectController = new AbortController()
+    const onAbort = () => connectController.abort()
+    signal?.addEventListener("abort", onAbort, { once: true })
+    const connectTimer = setTimeout(() => connectController.abort(), CONNECT_TIMEOUT_MS)
+
+    try {
+      const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${VERBOO_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body,
+        signal: connectController.signal,
+      })
+
+      if (res.ok) return res
+
+      const text = await res.text().catch(() => "unknown error")
+      if (isRetryableStatus(res.status) && attempt < MAX_RETRIES) {
+        await backoffDelay(attempt++, signal)
+        continue
+      }
+      throw new Error(`AI API error (${res.status}): ${text}`)
+    } catch (err) {
+      // A caller-driven abort is final — surface it, never retry.
+      if (signal?.aborted) throw err
+      // A connect-timeout or network error is retryable up to the cap.
+      const timedOut = isAbortError(err) // our connect timer fired
+      const isApiError = err instanceof Error && err.message.startsWith("AI API error")
+      if (isApiError) throw err
+      if (attempt < MAX_RETRIES) {
+        await backoffDelay(attempt++, signal)
+        continue
+      }
+      throw new Error(
+        timedOut
+          ? `AI API did not respond within ${CONNECT_TIMEOUT_MS}ms after ${attempt + 1} attempts`
+          : `AI API unreachable after ${attempt + 1} attempts: ${err instanceof Error ? err.message : String(err)}`
+      )
+    } finally {
+      clearTimeout(connectTimer)
+      signal?.removeEventListener("abort", onAbort)
+    }
+  }
+}
+
 export async function* streamChatCompletion(
   messages: OpenAIMessage[],
-  options?: { maxTokens?: number; model?: string; temperature?: number }
+  options?: { maxTokens?: number; model?: string; temperature?: number; signal?: AbortSignal }
 ): AsyncGenerator<string> {
-  const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${VERBOO_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: options?.model ?? selectModel(messages),
-      max_tokens: options?.maxTokens ?? 4096,
-      temperature:
-        options?.temperature ??
-        numberFromEnv("VERBOO_DRAFT_TEMPERATURE", DEFAULT_DRAFT_TEMPERATURE),
-      stream: true,
-      messages,
-    }),
+  const body = JSON.stringify({
+    model: options?.model ?? selectModel(messages),
+    max_tokens: options?.maxTokens ?? 4096,
+    temperature:
+      options?.temperature ??
+      numberFromEnv("VERBOO_DRAFT_TEMPERATURE", DEFAULT_DRAFT_TEMPERATURE),
+    stream: true,
+    messages,
   })
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "unknown error")
-    throw new Error(`AI API error (${res.status}): ${text}`)
-  }
+  const res = await openVerbooStream(body, options?.signal)
 
   const reader = res.body?.getReader()
   if (!reader) throw new Error("No response body from AI API")
@@ -596,29 +680,56 @@ export async function* streamChatCompletion(
   const decoder = new TextDecoder()
   let buffer = ""
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
+  try {
+    for (;;) {
+      // Stall guard: if no chunk arrives within STALL_TIMEOUT_MS (or the caller
+      // aborts), stop waiting instead of blocking forever.
+      let stallTimer: ReturnType<typeof setTimeout> | undefined
+      const guard = new Promise<never>((_, reject) => {
+        stallTimer = setTimeout(
+          () => reject(new Error(`AI stream stalled — no data for ${STALL_TIMEOUT_MS}ms`)),
+          STALL_TIMEOUT_MS
+        )
+        options?.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true }
+        )
+      })
 
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split("\n")
-    buffer = lines.pop() ?? ""
-
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed || !trimmed.startsWith("data: ")) continue
-      const payload = trimmed.slice(6)
-      if (payload === "[DONE]") return
-
+      let result: ReadableStreamReadResult<Uint8Array>
       try {
-        const parsed = JSON.parse(payload) as {
-          choices?: { delta?: { content?: string } }[]
+        result = await Promise.race([reader.read(), guard])
+      } finally {
+        clearTimeout(stallTimer)
+      }
+
+      const { done, value } = result
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith("data: ")) continue
+        const payload = trimmed.slice(6)
+        if (payload === "[DONE]") return
+
+        try {
+          const parsed = JSON.parse(payload) as {
+            choices?: { delta?: { content?: string } }[]
+          }
+          const content = parsed.choices?.[0]?.delta?.content
+          if (content) yield content
+        } catch {
+          // skip malformed JSON chunks
         }
-        const content = parsed.choices?.[0]?.delta?.content
-        if (content) yield content
-      } catch {
-        // skip malformed JSON chunks
       }
     }
+  } finally {
+    // Release the upstream connection on stall/abort/early-return.
+    reader.cancel().catch(() => {})
   }
 }
