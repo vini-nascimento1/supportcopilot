@@ -90,35 +90,43 @@ export async function classifyPlaybookMatch(
     return { playbookId: null, confidence: 0, reason: "error" }
   }
 
+  // Route through the shared Verboo throttle so the gate can't add to a 429
+  // stampede alongside the generation/verifier/backfill calls. Dynamic import
+  // keeps this module's pure functions (buildGatePrompt/parseGateResponse) free
+  // of the server-only dependency chain so they stay unit-testable anywhere.
+  const { withVerbooSlot } = await import("@/lib/verboo-throttle")
+
   try {
-    const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${VERBOO_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "deepseek-v4-flash",
-        // 512, not 200: a smoke test showed 200 truncated the JSON verdict
-        // mid-"reason", which then parses as unparseable → a real match dropped.
-        max_tokens: 512,
-        temperature: 0,
-        stream: false,
-        messages: buildGatePrompt(caseText, playbooks),
-      }),
+    return await withVerbooSlot(async () => {
+      const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${VERBOO_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "deepseek-v4-flash",
+          // 512, not 200: a smoke test showed 200 truncated the JSON verdict
+          // mid-"reason", which then parses as unparseable → a real match dropped.
+          max_tokens: 512,
+          temperature: 0,
+          stream: false,
+          messages: buildGatePrompt(caseText, playbooks),
+        }),
+      })
+      if (!res.ok) return { playbookId: null, confidence: 0, reason: "error" }
+
+      const data = (await res.json()) as {
+        choices?: { message?: { content?: string } }[]
+      }
+      const content = data.choices?.[0]?.message?.content
+      if (!content) return { playbookId: null, confidence: 0, reason: "error" }
+
+      return parseGateResponse(
+        content,
+        playbooks.map((p) => p.id)
+      )
     })
-    if (!res.ok) return { playbookId: null, confidence: 0, reason: "error" }
-
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[]
-    }
-    const content = data.choices?.[0]?.message?.content
-    if (!content) return { playbookId: null, confidence: 0, reason: "error" }
-
-    return parseGateResponse(
-      content,
-      playbooks.map((p) => p.id)
-    )
   } catch {
     return { playbookId: null, confidence: 0, reason: "error" }
   }

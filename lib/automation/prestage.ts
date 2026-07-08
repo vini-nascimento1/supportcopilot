@@ -9,15 +9,21 @@ import "server-only"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getConversationDetail, type ConversationDetail } from "@/lib/intercom"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
+import { withVerbooSlot } from "@/lib/verboo-throttle"
 
 const VERBOO_API_KEY = process.env.VERBOO_API_KEY
 const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
 
 const TONE = `You are a support copilot for a senior Fanvue support agent. Write a warm, first-person customer reply, ready to copy-paste.
-Rules: open with "Hey! 👋 Thanks for reaching out to Fanvue Support…" (do NOT use the customer's real name); light emoji (1-2 max); **bold** key steps; short bullet lists (max 4); exactly one call-to-action; no sign-off footer; never promise timelines/refunds/exceptions not in the playbook. **Write in English only — always:** no matter what language the customer wrote in (Portuguese, Spanish, French, anything), your reply MUST be in English; never mirror the customer's language. Output ONLY the message text — no preamble, no headers.`
+Rules: open with "Hey! 👋 Thanks for reaching out to Fanvue Support…" (do NOT use the customer's real name, and never guess or invent one); light emoji (1-2 max); **bold** key steps; short bullet lists (max 4); exactly one call-to-action; no sign-off and NO signature of any kind (never write your own name, initials, or a "- <name>" closing); never promise timelines/refunds/exceptions not in the playbook. **Write in English only — always:** no matter what language the customer wrote in (Portuguese, Spanish, French, anything), your reply MUST be in English; never mirror the customer's language. Output ONLY the message text — no preamble, no headers.`
 
 function buildUserMessage(c: ConversationDetail, playbook?: { caseType: string; resolution?: string | null }): string {
-  const parts = [`Customer: ${c.customer}`, `\nOriginal message:\n${c.firstMessage}`]
+  // Withhold the customer's real name/email from the model (privacy). The thread
+  // body still gives the model everything it needs to answer.
+  const parts = [
+    `Customer identity: withheld for privacy — never address the customer by name.`,
+    `\nOriginal message:\n${c.firstMessage}`,
+  ]
   const followUps = c.messages.filter((m) => m.role === "customer" && m.body.trim()).slice(0, 3)
   if (followUps.length) {
     parts.push(`\nFollow-up messages:`)
@@ -33,22 +39,26 @@ function buildUserMessage(c: ConversationDetail, playbook?: { caseType: string; 
 }
 
 async function generate(system: string, user: string): Promise<string> {
-  const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${VERBOO_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "deepseek-v4-flash",
-      max_tokens: 1024,
-      stream: false,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
+  // Shares the process-wide Verboo throttle with the gate + reply-queue pipeline
+  // so automation prestage can't contribute to a 429 stampede.
+  return withVerbooSlot(async () => {
+    const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${VERBOO_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "deepseek-v4-flash",
+        max_tokens: 1024,
+        stream: false,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+    })
+    if (!res.ok) throw new Error(`AI API error (${res.status})`)
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+    return data.choices?.[0]?.message?.content?.trim() ?? ""
   })
-  if (!res.ok) throw new Error(`AI API error (${res.status})`)
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
-  return data.choices?.[0]?.message?.content?.trim() ?? ""
 }
 
 export type PrestageResult = { applied: boolean; detail: string }
