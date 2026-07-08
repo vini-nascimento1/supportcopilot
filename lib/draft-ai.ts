@@ -4,6 +4,11 @@ import {
   classifyNotionSnippetUse,
   type NotionSnippet,
 } from "@/lib/notion-retrieval"
+import {
+  acquireVerbooSlot,
+  releaseVerbooSlot,
+  parseRetryAfterMs,
+} from "@/lib/verboo-throttle"
 
 export type OpenAIContentPart =
   | { type: "text"; text: string }
@@ -30,6 +35,11 @@ const STALL_TIMEOUT_MS = 30_000 // max gap allowed between streamed chunks
 const MAX_RETRIES = 2 // extra attempts on a transient PRE-stream failure (3 total)
 const RETRY_BASE_MS = 600 // exponential backoff base: 600ms, 1.2s, 2.4s… (capped)
 const RETRY_MAX_MS = 5_000
+// A 429 is a per-minute window, not a millisecond blip — the 5s network cap is
+// too short to clear it. When the router sends Retry-After we honour it up to
+// this ceiling (the client watchdog is 45s and the pipeline runs in the
+// background, so a longer wait is safe and beats failing the draft outright).
+const RATE_LIMIT_MAX_MS = 20_000
 
 type DraftConversation = {
   customer: string
@@ -66,6 +76,15 @@ const ENGLISH_ONLY_RULE =
 
 const ENGLISH_ONLY_REMINDER =
   "⚠️ Language: write your ENTIRE reply in English, regardless of the language used above. Do NOT reply in the customer's language — translate your response into English."
+
+// ── Privacy: never leak the customer's real identity ────────────────────────
+// The customer label from Intercom is the contact's REAL name (or email) — never
+// the Fanvue creator alias. Feeding it to the model caused replies to address
+// people by their legal name, breaking the de-anonymisation rule. We now withhold
+// it entirely: the thread turns are still labelled "Customer:"/"Agent:" so the
+// model can follow the exchange, but the actual name never enters the prompt.
+const CUSTOMER_PRIVACY_HEADER =
+  "Customer identity: withheld for privacy. Never address the customer by name, never guess or invent a name, and never repeat any real name or email that appears inside the thread."
 
 const CAPABILITY_BOUNDARY_RULES = `## Capability boundaries — do not fake checks
 - You only know what is in the conversation thread, playbook, Internal knowledge base articles, Fresh Notion knowledge, and image evidence explicitly provided in this prompt.
@@ -108,7 +127,7 @@ Playbooks cover only some cases — when the thread and the playbook disagree, t
 - Use **bold** for key requirements or action steps.
 - Use short bullet lists when listing multiple steps (4 max).
 - End with exactly one clear call-to-action.
-- No sign-off footer (no "Warm regards", no name, no title).
+- No sign-off and NO signature of any kind. Never write your own name, initials, a title, or a closing like "- Vincenzo", "Best, <name>", "Warm regards", or "Fanvue Support Team". You do not have a personal name to give — end on the call-to-action. (You are drafting AS the agent; never state or invent the agent's name.)
 - Never promise timelines, refunds, or exceptions not stated in the playbook or articles.
 
 ## Critical constraints
@@ -263,7 +282,7 @@ export function buildUserMessage(
   images?: DraftImage[],
   imageEvidence?: string | null
 ): string | OpenAIContentPart[] {
-  const parts = [`Customer: ${conversation.customer}`]
+  const parts = [CUSTOMER_PRIVACY_HEADER]
 
   // Include the full conversation thread so the AI has complete context
   parts.push(`\nConversation thread:`)
@@ -385,6 +404,7 @@ Your task: IMPROVE the existing customer-facing reply draft provided below — d
 - Output ONLY the improved customer-facing message text — ready to copy-paste. No "Here's the improved version:", no headers, no commentary.
 - The output IS markdown.
 - Never use the customer's real name.
+- No signature: never add or keep your own name, initials, or a "- <name>" / "Best, <name>" sign-off. If the draft already has one, remove it.
 - ${ENGLISH_ONLY_RULE}
 
 ${CAPABILITY_BOUNDARY_RULES}`
@@ -398,7 +418,7 @@ export function buildImproveUserMessage(
   },
   currentDraft: string
 ): string {
-  const parts = [`Customer: ${conversation.customer}`, `\nConversation thread:`]
+  const parts = [CUSTOMER_PRIVACY_HEADER, `\nConversation thread:`]
   parts.push(`Customer: ${conversation.firstMessage}`)
   for (const msg of conversation.messages) {
     if (!msg.body.trim()) continue
@@ -421,7 +441,7 @@ export function buildMacroAdaptUserMessage(conversation: {
   firstMessage: string
   messages: { role: string; body: string }[]
 }): string {
-  const parts = [`Customer: ${conversation.customer}`]
+  const parts = [CUSTOMER_PRIVACY_HEADER]
 
   parts.push(`\nConversation thread:`)
   parts.push(`Customer: ${conversation.firstMessage}`)
@@ -509,7 +529,7 @@ Your task: **rewrite the approved macro below** so it fits this specific convers
 - Use **bold** for the key requirements or action steps.
 - Use short bullet lists when listing multiple steps (4 max).
 - End with exactly one clear call-to-action.
-- No sign-off footer (no "Warm regards", no name, no title).
+- No sign-off and NO signature of any kind: never write your own name, initials, a title, or a closing like "- Vincenzo", "Best, <name>", or "Fanvue Support Team". End on the call-to-action.
 
 ## Critical constraints
 - Output ONLY the customer-facing message text (markdown) — ready to copy-paste.
@@ -584,9 +604,18 @@ function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError"
 }
 
-// Backoff sleep that resolves early (rejecting) if the caller aborts.
-function backoffDelay(attempt: number, signal?: AbortSignal): Promise<void> {
-  const ms = Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS)
+// Backoff sleep that resolves early (rejecting) if the caller aborts. When the
+// server hands us an explicit Retry-After (a 429 window), honour it — clamped to
+// [RETRY_BASE_MS, RATE_LIMIT_MAX_MS] — instead of the short network backoff.
+function backoffDelay(
+  attempt: number,
+  signal?: AbortSignal,
+  explicitMs?: number | null
+): Promise<void> {
+  const ms =
+    explicitMs != null
+      ? Math.min(Math.max(explicitMs, RETRY_BASE_MS), RATE_LIMIT_MAX_MS)
+      : Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS)
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(resolve, ms)
     signal?.addEventListener(
@@ -631,7 +660,9 @@ async function openVerbooStream(
 
       const text = await res.text().catch(() => "unknown error")
       if (isRetryableStatus(res.status) && attempt < MAX_RETRIES) {
-        await backoffDelay(attempt++, signal)
+        const retryAfterMs =
+          res.status === 429 ? parseRetryAfterMs(res.headers.get("retry-after")) : null
+        await backoffDelay(attempt++, signal, retryAfterMs)
         continue
       }
       throw new Error(`AI API error (${res.status}): ${text}`)
@@ -672,10 +703,32 @@ export async function* streamChatCompletion(
     messages,
   })
 
-  const res = await openVerbooStream(body, options?.signal)
+  // Hold one throttle slot for the whole generation — from the request through
+  // the last streamed byte — so concurrency is bounded by real in-flight streams,
+  // not just request starts. Released in the finally below on every exit path
+  // (done, stall, abort, throw).
+  await acquireVerbooSlot(options?.signal)
+  let slotReleased = false
+  const releaseSlot = () => {
+    if (!slotReleased) {
+      slotReleased = true
+      releaseVerbooSlot()
+    }
+  }
+
+  let res: Response
+  try {
+    res = await openVerbooStream(body, options?.signal)
+  } catch (err) {
+    releaseSlot()
+    throw err
+  }
 
   const reader = res.body?.getReader()
-  if (!reader) throw new Error("No response body from AI API")
+  if (!reader) {
+    releaseSlot()
+    throw new Error("No response body from AI API")
+  }
 
   const decoder = new TextDecoder()
   let buffer = ""
@@ -731,5 +784,6 @@ export async function* streamChatCompletion(
   } finally {
     // Release the upstream connection on stall/abort/early-return.
     reader.cancel().catch(() => {})
+    releaseSlot()
   }
 }

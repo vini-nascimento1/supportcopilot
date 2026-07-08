@@ -4,14 +4,17 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import {
+  AlertTriangleIcon,
   ExternalLinkIcon,
   InboxIcon,
   InfoIcon,
   Loader2Icon,
   PencilIcon,
+  RotateCwIcon,
   ShieldAlertIcon,
   SparklesIcon,
   UserPlusIcon,
+  XIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -23,6 +26,8 @@ import { useCanvasNav } from "@/components/canvas/canvas-nav"
 import { readApiError } from "@/lib/api-error"
 import { onCanvasRefresh } from "@/lib/canvas-refresh"
 import {
+  addPendingOnRequestDrafts,
+  isStuck,
   readPendingOnRequestDrafts,
   removePendingOnRequestDrafts,
   subscribePendingOnRequestDrafts,
@@ -77,6 +82,9 @@ export function QueuePanel({
   const [onRequest, setOnRequest] = useState<QueueItem[]>([])
   const [manualDrafting, setManualDrafting] = useState<PendingOnRequestDraft[]>([])
   const [error, setError] = useState<string | null>(null)
+  // Wall-clock, ticked by the poll below (never Date.now() during render — that's
+  // an impure call). Drives the "stuck placeholder → failed" cutoff.
+  const [now, setNow] = useState(0)
 
   const load = useCallback(async () => {
     try {
@@ -109,10 +117,16 @@ export function QueuePanel({
   // the sidebar is collapsed.
   useEffect(() => {
     if (!active) return
+    const tick = () => setNow(Date.now())
+    tick()
     queueMicrotask(() => void load())
     // Each poll reconciles against live Intercom (server-side), so keep it a
-    // touch lighter than the inbox list.
-    const id = setInterval(() => void load(), 15_000)
+    // touch lighter than the inbox list. The same tick advances `now` so stuck
+    // placeholders flip to their failed card within one poll.
+    const id = setInterval(() => {
+      tick()
+      void load()
+    }, 15_000)
     const off = onCanvasRefresh(() => void load())
     return () => {
       clearInterval(id)
@@ -125,6 +139,35 @@ export function QueuePanel({
     setOnRequest((prev) => prev.filter((i) => i.id !== id))
   }, [])
 
+  // Re-kick generation for a placeholder whose draft never landed. Resets the
+  // placeholder timer so it shows "Drafting…" again while the retry runs; the
+  // generate endpoint's upsert makes a repeat harmless if the first attempt was
+  // merely slow rather than failed.
+  const retryManual = useCallback(async (item: PendingOnRequestDraft) => {
+    try {
+      const res = await fetch("/api/reply-queue/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationIds: [item.conversationId] }),
+      })
+      if (!res.ok) throw new Error(await readApiError(res, `Failed (${res.status})`))
+      addPendingOnRequestDrafts([
+        {
+          conversationId: item.conversationId,
+          customerName: item.customerName,
+          subject: item.subject,
+        },
+      ])
+      toast.success("Retrying — the draft will appear here shortly.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't restart generation.")
+    }
+  }, [])
+
+  const dismissManual = useCallback((conversationId: string) => {
+    removePendingOnRequestDrafts([conversationId])
+  }, [])
+
   const ready = items?.filter((i) => i.riskBand !== "needs_check").sort(byOldest) ?? []
   const needsCheck = items?.filter((i) => i.riskBand === "needs_check").sort(byOldest) ?? []
   const onRequestSorted = [...onRequest].sort(byOldest)
@@ -133,19 +176,31 @@ export function QueuePanel({
     ...(items ?? []).map((item) => item.intercomConversationId),
     ...onRequest.map((item) => item.intercomConversationId),
   ])
-  const manualDraftingVisible: DraftingItem[] = manualDrafting
-    .filter((item) => !visibleIds.has(item.conversationId))
-    .map((item) => ({
+  // Manual (on-request) placeholders not yet resolved into a real row. Split by
+  // age: fresh ones still show the animated "Drafting…" card; ones past
+  // STUCK_AFTER_MS are treated as failed (generation almost certainly errored —
+  // e.g. a 429 that outlasted retries) and get a Retry / Dismiss card instead of
+  // hanging silently until the 20-min TTL. `now` is ticked by the poll effect
+  // (never Date.now() during render), so a card flips within one poll.
+  const manualUnresolved = manualDrafting.filter((item) => !visibleIds.has(item.conversationId))
+  const manualStuck = manualUnresolved.filter((item) => isStuck(item, now))
+  const manualFresh = manualUnresolved.filter((item) => !isStuck(item, now))
+  const draftingVisible: DraftingItem[] = [
+    ...drafting,
+    ...manualFresh.map((item) => ({
       conversationId: item.conversationId,
       customerName: item.customerName,
       subject: item.subject,
-    }))
-  const draftingVisible = [...drafting, ...manualDraftingVisible]
-  const total = (items?.length ?? 0) + draftingVisible.length + onRequest.length
+    })),
+  ]
+  const total =
+    (items?.length ?? 0) + draftingVisible.length + manualStuck.length + onRequest.length
 
   useEffect(() => {
-    onCount?.((items?.length ?? 0) + draftingVisible.length + onRequest.length)
-  }, [items, draftingVisible.length, onRequest.length, onCount])
+    onCount?.(
+      (items?.length ?? 0) + draftingVisible.length + manualStuck.length + onRequest.length
+    )
+  }, [items, draftingVisible.length, manualStuck.length, onRequest.length, onCount])
 
   return (
     <div className="flex h-full flex-col">
@@ -170,6 +225,34 @@ export function QueuePanel({
                 <div className="flex flex-col gap-1.5">
                   {draftingVisible.map((d) => (
                     <DraftingCard key={d.conversationId} item={d} />
+                  ))}
+                </div>
+              </section>
+            )}
+            {manualStuck.length > 0 && (
+              <section className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5 px-1">
+                  <AlertTriangleIcon className="size-3 text-destructive" />
+                  <h2 className="text-xs font-medium">Couldn&apos;t draft</h2>
+                  <Badge
+                    variant="secondary"
+                    className="h-4 px-1 text-[10px] font-normal tabular-nums"
+                  >
+                    {manualStuck.length}
+                  </Badge>
+                </div>
+                <p className="px-1 text-[11px] leading-snug text-muted-foreground">
+                  Generation didn&apos;t finish (often a temporary rate-limit hiccup). Retry, or
+                  dismiss and open the case directly.
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {manualStuck.map((item) => (
+                    <FailedDraftCard
+                      key={item.conversationId}
+                      item={item}
+                      onRetry={retryManual}
+                      onDismiss={dismissManual}
+                    />
                   ))}
                 </div>
               </section>
@@ -249,6 +332,65 @@ function DraftingCard({ item }: { item: DraftingItem }) {
         <Skeleton className="h-2.5 w-full" />
         <Skeleton className="h-2.5 w-11/12" />
         <Skeleton className="h-2.5 w-2/3" />
+      </div>
+    </article>
+  )
+}
+
+// Shown when a manual on-request draft never resolved into a real row within
+// STUCK_AFTER_MS — generation errored (commonly a 429 that outlasted retries).
+// Replaces the silent "Drafting…" hang with an explicit Retry / Dismiss.
+function FailedDraftCard({
+  item,
+  onRetry,
+  onDismiss,
+}: {
+  item: PendingOnRequestDraft
+  onRetry: (item: PendingOnRequestDraft) => Promise<void>
+  onDismiss: (conversationId: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const retry = async () => {
+    setBusy(true)
+    try {
+      await onRetry(item)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <article className="overflow-hidden rounded-md border border-destructive/30 bg-card">
+      <div className="flex items-center gap-2 px-2.5 pt-2">
+        <AlertTriangleIcon className="size-3.5 shrink-0 text-destructive" />
+        <span className="truncate text-xs font-medium">
+          Couldn&apos;t draft for{" "}
+          <span className="text-foreground">{item.customerName ?? "the customer"}</span>
+        </span>
+      </div>
+      {item.subject && (
+        <p className="truncate px-2.5 pt-0.5 text-[11px] text-muted-foreground/70">
+          {item.subject}
+        </p>
+      )}
+      <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-2">
+        <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => void retry()} disabled={busy}>
+          {busy ? (
+            <Loader2Icon className="size-3.5 animate-spin" />
+          ) : (
+            <RotateCwIcon className="size-3.5" />
+          )}
+          Retry
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2.5 text-xs text-muted-foreground"
+          onClick={() => onDismiss(item.conversationId)}
+          disabled={busy}
+        >
+          <XIcon className="size-3.5" />
+          Dismiss
+        </Button>
       </div>
     </article>
   )
