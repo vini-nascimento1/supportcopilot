@@ -1,3 +1,4 @@
+import { cache } from "react"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 
 // GitHub's /releases/latest always redirects to the newest published release,
@@ -6,7 +7,10 @@ import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 const DEFAULT_DOWNLOAD_URL =
   "https://github.com/vini-nascimento1/supportcopilot/releases/latest"
 
-export async function getDesktopDownloadUrl(): Promise<string> {
+// Several pages (e.g. app/workspace/page.tsx) call this directly AND render
+// <WorkspaceLayout>, which calls it again for the sidebar — cache() dedupes
+// that to one Supabase query per request.
+export const getDesktopDownloadUrl = cache(async (): Promise<string> => {
   try {
     const supabase = getSupabaseAdminClient()
     if (!supabase) return DEFAULT_DOWNLOAD_URL
@@ -22,4 +26,4 @@ export async function getDesktopDownloadUrl(): Promise<string> {
   } catch {
     return DEFAULT_DOWNLOAD_URL
   }
-}
+})

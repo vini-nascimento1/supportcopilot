@@ -13,8 +13,6 @@ import { type CanvasTool } from "@/lib/canvas-tools"
 type Bootstrap = {
   caseInfo: CaseInfoData
   conversation: Pick<ConversationReplyData, "subject" | "messages">
-  playbookId?: string
-  playbookName?: string
   ticketText: string
 }
 
@@ -120,8 +118,6 @@ export function CanvasPane({
       multiplexed
       caseInfo={data.caseInfo}
       conversation={data.conversation}
-      playbookId={data.playbookId}
-      playbookName={data.playbookName}
       ticketText={data.ticketText}
     />
   )

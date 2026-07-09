@@ -20,6 +20,7 @@ export async function GET() {
     .from("gmail_templates")
     .select("*")
     .order("created_at", { ascending: false })
+    .limit(500)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })

@@ -45,8 +45,6 @@ export type ConversationReplyNodeType = Node<
   "conversation"
 >
 
-const POLL_MS = 15_000
-
 function MessageBubble({ msg }: { msg: ConversationMessageData }) {
   const [copied, setCopied] = useState(false)
 
@@ -177,13 +175,10 @@ export function ConversationReplyNode({
     })()
   }, [data.conversationId, prefillComposer])
 
-  useEffect(() => {
-    const tick = () => {
-      if (!document.hidden) void refreshThread()
-    }
-    const timer = setInterval(tick, POLL_MS)
-    return () => clearInterval(timer)
-  }, [refreshThread])
+  // No independent poll here — CaseCanvas already auto-refreshes this same
+  // conversation (via /api/canvas/conversation) every 30s while its pane is
+  // active and patches this node's data, so a second interval here was just
+  // duplicating that fetch every 15s, including while the pane was hidden.
 
   useEffect(() => {
     requestAnimationFrame(() =>

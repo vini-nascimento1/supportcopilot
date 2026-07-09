@@ -6,6 +6,7 @@ import { NodeResizer, type Node, type NodeProps } from "@xyflow/react"
 import { InboxIcon, Loader2Icon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { useCanvasActive } from "@/components/canvas/active-context"
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
 import { onCanvasRefresh } from "@/lib/canvas-refresh"
 import { cn, relativeTime } from "@/lib/utils"
@@ -30,8 +31,14 @@ export function QueueNode({ selected }: NodeProps<QueueNodeType>) {
   const [rows, setRows] = useState<QueueRow[] | null>(null)
   const [error, setError] = useState(false)
   const nav = useCanvasNav()
+  // In the keep-alive workspace, only the visible pane's queue card should
+  // poll — this card has no other visibility signal, so without this every
+  // background canvas kept re-fetching /api/cases (a full Intercom queue
+  // pull) every 30s regardless of whether it was ever shown.
+  const active = useCanvasActive()
 
   useEffect(() => {
+    if (!active) return
     let cancelled = false
     const load = async () => {
       try {
@@ -53,7 +60,7 @@ export function QueueNode({ selected }: NodeProps<QueueNodeType>) {
       clearInterval(id)
       off()
     }
-  }, [])
+  }, [active])
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border bg-card shadow-md">

@@ -1,12 +1,6 @@
 import { NextResponse } from "next/server"
 
 import { getConversationDetail } from "@/lib/intercom"
-import { getTopMatches } from "@/lib/case-intelligence"
-import {
-  classifyPlaybookMatch,
-  GATE_CONFIDENCE_THRESHOLD,
-} from "@/lib/playbook-gate"
-import { getPlaybooksDashboardData } from "@/lib/playbooks"
 
 export const dynamic = "force-dynamic"
 
@@ -14,16 +8,18 @@ export const dynamic = "force-dynamic"
 // page (app/cases/[id]/canvas/page.tsx) computes this on the server at navigate
 // time; in the workspace host panes mount without navigating, so they fetch the
 // same payload here. Keep the shape in sync with that page's CaseCanvas props.
+//
+// Playbook match is deliberately NOT computed here — it's a live LLM call
+// (see /api/canvas/playbook-match) and blocking this payload on it made every
+// pane take seconds to mount. CaseCanvas fetches the match separately once
+// this payload (and the pane) has already rendered.
 export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get("id")
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 })
   }
 
-  const [conversation, playbooksData] = await Promise.all([
-    getConversationDetail(id),
-    getPlaybooksDashboardData(),
-  ])
+  const conversation = await getConversationDetail(id)
   if (!conversation) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 })
   }
@@ -38,17 +34,6 @@ export async function GET(request: Request) {
     .filter(Boolean)
     .join(" ")
 
-  const gate = await classifyPlaybookMatch(ticketText, playbooksData.allRows)
-
-  // On a Verboo error, degrade to the legacy keyword matcher so behaviour
-  // never regresses; otherwise honour the confidence threshold.
-  const matched =
-    gate.reason === "error"
-      ? getTopMatches(ticketText, playbooksData.allRows, 1)[0]?.playbook ?? null
-      : gate.playbookId && gate.confidence >= GATE_CONFIDENCE_THRESHOLD
-        ? playbooksData.allRows.find((p) => p.id === gate.playbookId) ?? null
-        : null
-
   return NextResponse.json({
     caseInfo: {
       conversationId: id,
@@ -62,13 +47,6 @@ export async function GET(request: Request) {
     conversation: {
       subject: conversation.subject,
       messages: conversation.messages,
-    },
-    playbookId: matched?.id,
-    playbookName: matched?.caseType,
-    gate: {
-      matched: Boolean(matched),
-      confidence: gate.confidence,
-      reason: gate.reason,
     },
     ticketText,
   })

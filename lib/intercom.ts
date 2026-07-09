@@ -3,6 +3,13 @@ import "server-only"
 import { getDraftPlaceholder, getLiveTipForText, type CaseTip } from "@/lib/case-intelligence"
 import type { PlaybookListItem } from "@/lib/playbooks"
 
+// Queue endpoints (getOpenCasesQueue, getNonReadAssignedConversations) are
+// polled every 10-30s from the dashboard and canvas queue cards. Cap the
+// pagination chase so one poll can never turn into an unbounded run of
+// sequential Intercom calls (150 rows/page — 40 pages is already 6,000 open
+// conversations for a single assignee, far past anything real).
+const MAX_QUEUE_PAGES = 40
+
 export type SupportCase = {
   id: string
   customer: string
@@ -395,6 +402,7 @@ export async function getOpenCasesQueue(
 
   const allConversations: IntercomConversation[] = []
   let startingAfter: string | undefined
+  let page = 0
 
   do {
     const body: Record<string, unknown> = {
@@ -453,7 +461,11 @@ export async function getOpenCasesQueue(
     allConversations.push(...conversations)
 
     startingAfter = payload.pages?.next?.starting_after
-  } while (startingAfter)
+    page += 1
+    // Safety cap — this polls every 10-30s from the dashboard/queue cards;
+    // an assignee with an abnormally large open queue should never turn one
+    // poll into an unbounded chain of sequential Intercom calls.
+  } while (startingAfter && page < MAX_QUEUE_PAGES)
 
   return {
     mode: "live",
@@ -494,6 +506,7 @@ export async function getNonReadAssignedConversations(
 
   const result: NonReadConversation[] = []
   let startingAfter: string | undefined
+  let page = 0
 
   try {
     do {
@@ -535,7 +548,8 @@ export async function getNonReadAssignedConversations(
         }
       }
       startingAfter = payload.pages?.next?.starting_after
-    } while (startingAfter)
+      page += 1
+    } while (startingAfter && page < MAX_QUEUE_PAGES)
   } catch {
     return null
   }

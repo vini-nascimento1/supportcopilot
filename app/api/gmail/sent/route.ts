@@ -16,11 +16,17 @@ export async function GET() {
     return NextResponse.json({ error: "Database not configured" }, { status: 500 })
   }
 
+  // Explicit columns (not "*") — the tracker never reads `body`, which stores
+  // the full sent email text and was the largest field in every row. Capped
+  // at 500 rows: this list only ever grows, and had no limit at all before.
   const { data, error } = await admin
     .from("gmail_sent_emails")
-    .select("*")
+    .select(
+      "id, template_name, recipient, cc, user_email, subject, gmail_thread_id, visibility, sent_by, created_at"
+    )
     .or(`sent_by.eq.${tokens.email},visibility.eq.shared`)
     .order("created_at", { ascending: false })
+    .limit(500)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })

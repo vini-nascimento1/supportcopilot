@@ -1,5 +1,6 @@
 import "server-only"
 
+import { cache } from "react"
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
@@ -28,24 +29,40 @@ async function createClient() {
   )
 }
 
-export async function getSignedInUser(): Promise<{ email: string | null; avatarUrl: string | null }> {
+// Every page independently calls getSignedInUser() (sidebar) and/or
+// getAgentTokens() (integration tokens) — without request-scoped memoization
+// that meant 2 supabase.auth network round trips + 2 identical `agents`
+// SELECTs per navigation. React's cache() dedupes each of these to run once
+// per request, however many callers ask for them.
+const getAuthUser = cache(async () => {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  return user
+})
+
+const getAuthSession = cache(async () => {
+  const supabase = await createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+  return session
+})
+
+const getAgentRow = cache(async (email: string) => {
+  const adminClient = getSupabaseAdminClient()
+  if (!adminClient) return null
+  const { data } = await adminClient
+    .from("agents")
+    .select("avatar_url, name, google_token, slack_token, notion_token")
+    .eq("email", email)
+    .maybeSingle()
+  return data
+})
+
+export async function getSignedInUser(): Promise<{ email: string | null; avatarUrl: string | null }> {
+  const user = await getAuthUser()
   if (!user?.email) return { email: null, avatarUrl: null }
 
-  // Fetch avatar from agents table (written by OAuth callback).
-  const adminClient = getSupabaseAdminClient()
-  let avatarUrl: string | null = null
-  if (adminClient) {
-    const { data } = await adminClient
-      .from("agents")
-      .select("avatar_url")
-      .eq("email", user.email)
-      .maybeSingle()
-    avatarUrl = data?.avatar_url ?? null
-  }
-
-  return { email: user.email, avatarUrl }
+  const row = await getAgentRow(user.email)
+  return { email: user.email, avatarUrl: row?.avatar_url ?? null }
 }
 
 /** @deprecated Use getSignedInUser() instead. */
@@ -67,27 +84,8 @@ export type AgentTokens = {
 export async function getAgentTokens(): Promise<AgentTokens> {
   const empty: AgentTokens = { email: null, name: null, googleToken: null, slackToken: null, notionToken: null }
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-          } catch {}
-        },
-      },
-    }
-  )
-
   // getUser() validates with server; getSession() reads the cookie and includes provider_token
-  const [{ data: { user } }, { data: { session } }] = await Promise.all([
-    supabase.auth.getUser(),
-    supabase.auth.getSession(),
-  ])
+  const [user, session] = await Promise.all([getAuthUser(), getAuthSession()])
 
   const email = user?.email ?? null
   if (!email) return empty
@@ -99,11 +97,7 @@ export async function getAgentTokens(): Promise<AgentTokens> {
   const adminClient = getSupabaseAdminClient()
   if (!adminClient) return { ...empty, email, googleToken: sessionGoogleToken }
 
-  const { data } = await adminClient
-    .from("agents")
-    .select("name, google_token, slack_token, notion_token")
-    .eq("email", email)
-    .maybeSingle()
+  const data = await getAgentRow(email)
 
   const googleToken = sessionGoogleToken ?? data?.google_token ?? null
 

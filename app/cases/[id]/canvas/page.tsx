@@ -7,12 +7,6 @@ import { CaseCanvas } from "@/components/canvas/case-canvas"
 import { CanvasTabs } from "@/components/canvas/canvas-tabs"
 import { CanvasModeGuard } from "@/components/canvas/canvas-mode-guard"
 import { getConversationDetail } from "@/lib/intercom"
-import { getTopMatches } from "@/lib/case-intelligence"
-import {
-  classifyPlaybookMatch,
-  GATE_CONFIDENCE_THRESHOLD,
-} from "@/lib/playbook-gate"
-import { getPlaybooksDashboardData } from "@/lib/playbooks"
 import { getCaseTools } from "@/lib/case-tools-db"
 import { getDesktopDownloadUrl } from "@/lib/desktop-download"
 
@@ -21,6 +15,11 @@ export const dynamic = "force-dynamic"
 // Case Canvas Workspace — one canvas per case. Customer context comes live
 // from Intercom (cases in the DB is metadata-only). Layout persists in
 // localStorage keyed by conversation id.
+//
+// The playbook match (Verboo classifier call) is NOT computed here — it's a
+// live LLM round trip and blocking the page on it made every case open feel
+// frozen. CaseCanvas fetches it client-side after the page has painted
+// (see /api/canvas/playbook-match).
 export default async function CaseCanvasPage({
   params,
 }: {
@@ -28,9 +27,8 @@ export default async function CaseCanvasPage({
 }) {
   const { id } = await params
 
-  const [conversation, playbooksData, tools, downloadUrl] = await Promise.all([
+  const [conversation, tools, downloadUrl] = await Promise.all([
     getConversationDetail(id),
-    getPlaybooksDashboardData(),
     getCaseTools(),
     getDesktopDownloadUrl(),
   ])
@@ -45,16 +43,6 @@ export default async function CaseCanvasPage({
   ]
     .filter(Boolean)
     .join(" ")
-  const gate = await classifyPlaybookMatch(searchText, playbooksData.allRows)
-
-  // On a Verboo error, degrade to the legacy keyword matcher so behaviour
-  // never regresses; otherwise honour the confidence threshold.
-  const matched =
-    gate.reason === "error"
-      ? getTopMatches(searchText, playbooksData.allRows, 1)[0]?.playbook ?? null
-      : gate.playbookId && gate.confidence >= GATE_CONFIDENCE_THRESHOLD
-        ? playbooksData.allRows.find((p) => p.id === gate.playbookId) ?? null
-        : null
 
   return (
     <div className="flex h-svh w-full flex-col">
@@ -89,8 +77,6 @@ export default async function CaseCanvasPage({
             subject: conversation.subject,
             messages: conversation.messages,
           }}
-          playbookId={matched?.id}
-          playbookName={matched?.caseType}
         />
       </div>
     </div>

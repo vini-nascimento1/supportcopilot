@@ -16,6 +16,104 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-07-09-a",
+    date: "2026-07-09",
+    title: "The app is noticeably faster — Canvas, Gmail, and page switching",
+    description:
+      "Fixed several things that were adding real delay: opening a case's Canvas no longer waits on an AI classification call before it can even render (the playbook match now loads in after), background Canvas tabs stopped silently re-polling Intercom every 15-30 seconds while hidden, every page navigation was doing duplicate sign-in checks, and the Sent Tracker was pulling every column (including the full email body) with no row limit. Canvas loading and page switching should feel noticeably snappier.",
+  },
+  {
+    id: "seed-2026-07-08-a",
+    date: "2026-07-08",
+    title: "Stuck \"Drafting…\" cards now recover instead of hanging",
+    description:
+      "AI draft generation could hang indefinitely if the AI router was rate-limited or slow, leaving the Queue's \"Drafting…\" placeholder stuck for up to 20 minutes. Generation now has proper timeouts, retries, and a shared throttle so a bulk \"Generate AI replies\" run no longer floods the router. A manual draft that still doesn't land within 4 minutes now flips to a \"Couldn't draft\" card with Retry / Dismiss instead of hanging.",
+  },
+  {
+    id: "seed-2026-07-08-b",
+    date: "2026-07-08",
+    title: "AI drafts never use the customer's real name or a personal sign-off",
+    description:
+      "Draft replies now withhold the customer's real legal name/email (their Intercom contact record, not their Fanvue alias) from every AI prompt, and the model is blocked from signing off with any personal name — fixes occasional replies that leaked the wrong agent's name.",
+  },
+  {
+    id: "seed-2026-07-07-a",
+    date: "2026-07-07",
+    title: "Bulk delete in the Sent Tracker",
+    description:
+      "Select multiple sent emails with checkboxes (or select-all) and delete them in one action, alongside the existing single-row remove. Only your own tracker rows are selectable — shared entries from teammates stay visible but aren't yours to delete. The Gmail messages themselves are never touched.",
+  },
+  {
+    id: "seed-2026-07-07-b",
+    date: "2026-07-07",
+    title: "Payout cases needing a manual step now lock the draft until it's done",
+    description:
+      "When a matched playbook needs a real system action first (e.g. resending the Triple-A payout email), the AI's suggested reply is now automatically locked (\"needs check\") with a note explaining what to do — so it can't be sent before the manual step actually happens.",
+  },
+  {
+    id: "seed-2026-07-07-c",
+    date: "2026-07-07",
+    title: "New automation action: stage a fixed macro as a draft, no AI call",
+    description:
+      "Automation rules can now pre-stage an exact macro (e.g. \"Quick Acknowledgement\") as a review-ready draft instantly, with no AI generation involved — complements the existing AI-generated draft action. Still draft-only: nothing sends without a human clicking Send.",
+  },
+  {
+    id: "seed-2026-07-07-d",
+    date: "2026-07-07",
+    title: "Automation rules can target First Response Time precisely",
+    description:
+      "Two new condition-builder fields — admin_replied (has a human actually replied yet, Fin/bot replies excluded) and human_assigned (is a real person on this case, not just Fin) — so SLA rules can target true First Response Time breaches instead of also catching already-answered tickets that are just nearing their close-time SLA.",
+  },
+  {
+    id: "seed-2026-06-22-a",
+    date: "2026-06-22",
+    title: "Inbox redesign: checkboxes + one bulk-action bar",
+    description:
+      "The Inbox card list was decluttered down to who + when + a one-line snippet. Select cases with checkboxes (or the master checkbox) and a single contextual bar appears — \"Generate AI replies\" in your Mine box, \"Assign to me\" in the Unassigned/teammate boxes.",
+  },
+  {
+    id: "seed-2026-06-22-b",
+    date: "2026-06-22",
+    title: "Bulk Close + shift-click range select in the Inbox",
+    description:
+      "Close multiple cases at once from the Inbox's bulk-action bar, behind a confirm (this is a real Intercom write). Shift-click a checkbox to select the whole range from your last click, same as Gmail or Finder.",
+  },
+  {
+    id: "seed-2026-06-22-c",
+    date: "2026-06-22",
+    title: "Generate an AI reply on demand for any ticket in your Inbox",
+    description:
+      "The reply queue only auto-drafted tickets that hadn't been read yet — an already-answered ticket never got a draft unless you opened it and clicked Generate. Now you can request one straight from the Inbox: a per-card Generate button, or a bulk \"Generate AI replies for all N\" bar for your Mine box. These drafts show up in the Queue under a distinct \"On request\" section.",
+  },
+  {
+    id: "seed-2026-06-21-a",
+    date: "2026-06-21",
+    title: "Work your Intercom inbox without leaving the Canvas",
+    description:
+      "The Canvas left sidebar now has an Inbox tab alongside the existing AI Queue tab — a live view of Mine / Unassigned / any teammate's open conversations, with one-click \"Assign to me\" and \"open in Canvas\". No more keeping Intercom open in a separate window just to triage.",
+  },
+  {
+    id: "seed-2026-06-21-b",
+    date: "2026-06-21",
+    title: "AI drafts can now see the images customers send",
+    description:
+      "When a customer attaches a screenshot or photo, the AI draft now actually looks at it with a vision-enabled model instead of drafting blind from text alone — useful for anything where the picture is the point, like payment errors, ID documents, or bug reports.",
+  },
+  {
+    id: "seed-2026-06-21-c",
+    date: "2026-06-21",
+    title: "Conversation card redesign — thread, composer, and AI copilot in one place",
+    description:
+      "The old separate draft/AI/conversation cards on the Canvas are now one unified card: the live thread, the reply composer, the AI menu, and the Copilot panel together, with the same auto-refresh and queue-prefill behaviour as before.",
+  },
+  {
+    id: "seed-2026-06-21-d",
+    date: "2026-06-21",
+    title: "\"Drafting…\" placeholder cards while the AI writes",
+    description:
+      "The Queue used to show nothing until a draft was fully generated. Now every ticket being drafted shows an animated \"Drafting a reply for {customer}…\" skeleton card, so you can see AI work in progress instead of wondering if it's stuck.",
+  },
+  {
     id: "seed-2026-06-19-a",
     date: "2026-06-19",
     title: "Drafts now read your live Notion — connect it in Settings",

@@ -82,8 +82,6 @@ export interface CaseCanvasProps {
   caseInfo?: CaseInfoData
   /** Intercom thread, rendered as a Conversation card on case canvases */
   conversation?: Pick<ConversationReplyData, "subject" | "messages">
-  playbookId?: string
-  playbookName?: string
   /** Subject + customer messages — drives keyword-based tool suggestions */
   ticketText?: string
   /** localStorage key suffix — conversation id or "adhoc:<id>" */
@@ -215,8 +213,6 @@ function buildDefaultLayout(props: CaseCanvasProps): SavedLayout {
         data: {
           ...props.conversation,
           conversationId: props.caseInfo.conversationId,
-          playbookId: props.playbookId,
-          playbookName: props.playbookName,
         },
       })
     }
@@ -284,8 +280,10 @@ function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
               data: {
                 ...props.conversation,
                 conversationId: props.caseInfo.conversationId,
-                playbookId: props.playbookId,
-                playbookName: props.playbookName,
+                playbookId: (n.data as Partial<ConversationReplyData>)
+                  .playbookId,
+                playbookName: (n.data as Partial<ConversationReplyData>)
+                  .playbookName,
                 copilotTranscript: (n.data as Partial<ConversationReplyData>)
                   .copilotTranscript,
               },
@@ -317,8 +315,6 @@ function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
             data: {
               ...props.conversation,
               conversationId: props.caseInfo.conversationId,
-              playbookId: props.playbookId,
-              playbookName: props.playbookName,
             },
           })
         }
@@ -630,15 +626,18 @@ function CanvasInner(props: CaseCanvasProps) {
     setNodes((nds) =>
       nds.map((n) => {
         if (n.id === "conversation") {
+          // playbookId/playbookName come from the separate async match fetch
+          // (not props — see the effect below), so carry over whatever the
+          // card already has rather than resetting it on every refresh.
+          const prev = n.data as Partial<ConversationReplyData>
           return {
             ...n,
             data: {
               ...fresh.conversation,
               conversationId,
-              playbookId: props.playbookId,
-              playbookName: props.playbookName,
-              copilotTranscript: (n.data as Partial<ConversationReplyData>)
-                .copilotTranscript,
+              playbookId: prev.playbookId,
+              playbookName: prev.playbookName,
+              copilotTranscript: prev.copilotTranscript,
             },
           }
         }
@@ -649,7 +648,44 @@ function CanvasInner(props: CaseCanvasProps) {
         return n
       })
     )
-  }, [conversationId, props.playbookId, props.playbookName, setNodes])
+  }, [conversationId, setNodes])
+
+  // Playbook match banner — fetched separately from the initial render (see
+  // /api/canvas/playbook-match) because it's a live LLM classifier call.
+  // Patches into the already-mounted conversation card once it resolves,
+  // instead of blocking the canvas from painting.
+  const ticketText = props.ticketText
+  useEffect(() => {
+    if (!conversationId || !ticketText) return
+    let cancelled = false
+    fetch("/api/canvas/playbook-match", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticketText }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((match: { playbookId?: string; playbookName?: string } | null) => {
+        if (cancelled || !match?.playbookId) return
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === "conversation"
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    playbookId: match.playbookId,
+                    playbookName: match.playbookName,
+                  },
+                }
+              : n
+          )
+        )
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [conversationId, ticketText, setNodes])
 
   const manualRefresh = useCallback(async () => {
     setRefreshing(true)
