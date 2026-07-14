@@ -22,7 +22,7 @@ function countWorkingDays(startTs: number, endTs: number, workingDays: number[])
   const startD = new Date(startTs * 1000)
   const endD = new Date(endTs * 1000)
   let count = 0
-  for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+  for (let d = new Date(startD); d < endD; d.setDate(d.getDate() + 1)) {
     if (workingDays.includes(d.getDay())) count++
   }
   return Math.max(count, 1)

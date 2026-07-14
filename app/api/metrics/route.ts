@@ -51,7 +51,7 @@ export async function GET(req: Request) {
   const startD = new Date(startTs * 1000)
   const endD = new Date(endTs * 1000)
   let workingDayCount = 0
-  for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+  for (let d = new Date(startD); d < endD; d.setDate(d.getDate() + 1)) {
     if (wd.includes(d.getDay())) workingDayCount++
   }
   workingDayCount = Math.max(workingDayCount, 1)
