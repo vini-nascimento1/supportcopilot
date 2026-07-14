@@ -38,6 +38,10 @@ function fmtDate(d: Date): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
 }
 
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+}
+
 export default function MetricsClient() {
   const [metrics, setMetrics] = useState<AgentMetrics | null>(null)
   const [loading, setLoading] = useState(true)
@@ -52,8 +56,8 @@ export default function MetricsClient() {
   function loadData(start: Date, end: Date) {
     setLoading(true)
     setError(null)
-    const startTs = Math.floor(start.getTime() / 1000)
-    const endTs = Math.floor(end.getTime() / 1000) + 86_400
+    const startTs = Math.floor(startOfDay(start).getTime() / 1000)
+    const endTs = Math.floor(startOfDay(end).getTime() / 1000) + 86_400
     fetch(`/api/metrics?start=${startTs}&end=${endTs}`)
       .then((r) => r.json())
       .then((data) => {
@@ -138,8 +142,8 @@ export default function MetricsClient() {
             variant="outline"
             className="h-8 text-xs"
             onClick={() => {
-              const startTs = Math.floor(startDate.getTime() / 1000)
-              const endTs = Math.floor(endDate.getTime() / 1000) + 86_400
+              const startTs = Math.floor(startOfDay(startDate).getTime() / 1000)
+              const endTs = Math.floor(startOfDay(endDate).getTime() / 1000) + 86_400
               setLoading(true)
               setError(null)
               fetch(`/api/metrics?start=${startTs}&end=${endTs}&refresh=1`)
