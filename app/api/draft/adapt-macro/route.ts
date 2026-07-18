@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
   const { name: agentName, intercomAdminId } = await getAgent(email)
   const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, intercomAdminId)
   const systemPrompt = buildMacroAdaptSystemPrompt(macroText, agentName, hasAgentReplied)
-  const userMessage = buildMacroAdaptUserMessage(conversation)
+  const userMessage = buildMacroAdaptUserMessage(conversation, Boolean(conversation.email))
 
   const encoder = new TextEncoder()
 

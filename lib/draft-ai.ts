@@ -83,8 +83,19 @@ const ENGLISH_ONLY_REMINDER =
 // people by their legal name, breaking the de-anonymisation rule. We now withhold
 // it entirely: the thread turns are still labelled "Customer:"/"Agent:" so the
 // model can follow the exchange, but the actual name never enters the prompt.
-const CUSTOMER_PRIVACY_HEADER =
-  "Customer identity: withheld for privacy. Never address the customer by name, never guess or invent a name, and never repeat any real name or email that appears inside the thread."
+//
+// Withholding the value ALSO withheld the fact that we have one on file — the
+// model, with zero signal either way, defaulted to the generic "what's the
+// email you use to log in?" ask even when the agent can see the contact's
+// email right there in the queue card. Pass whether we have one (never the
+// value itself, so the anonymisation guarantee above is unchanged) so the
+// model can skip that redundant ask.
+function customerPrivacyHeader(hasKnownEmail: boolean): string {
+  const emailNote = hasKnownEmail
+    ? " This customer's account email is already on file for this conversation — do NOT ask them to share their email or account email. If you need to look into their account, just say you'll check the account on file."
+    : ""
+  return `Customer identity: withheld for privacy. Never address the customer by name, never guess or invent a name, and never repeat any real name or email that appears inside the thread.${emailNote}`
+}
 
 // ── Greeting logic ──────────────────────────────────────────────────────────
 // "Has an agent replied" is not the right question — most threads already carry
@@ -307,9 +318,10 @@ export function buildUserMessage(
   conversation: DraftConversation,
   images?: DraftImage[],
   imageEvidence?: string | null,
-  hasAgentReplied = false
+  hasAgentReplied = false,
+  hasKnownEmail = false
 ): string | OpenAIContentPart[] {
-  const parts = [CUSTOMER_PRIVACY_HEADER]
+  const parts = [customerPrivacyHeader(hasKnownEmail)]
 
   // Include the full conversation thread so the AI has complete context
   parts.push(`\nConversation thread:`)
@@ -393,9 +405,10 @@ export function buildVisionEvidenceMessages(
 export async function buildGroundedDraftUserMessage(
   conversation: DraftConversation,
   images: DraftImage[],
-  hasAgentReplied = false
+  hasAgentReplied = false,
+  hasKnownEmail = false
 ): Promise<string | OpenAIContentPart[]> {
-  if (images.length === 0) return buildUserMessage(conversation, undefined, undefined, hasAgentReplied)
+  if (images.length === 0) return buildUserMessage(conversation, undefined, undefined, hasAgentReplied, hasKnownEmail)
 
   let imageEvidence = ""
   try {
@@ -407,12 +420,12 @@ export async function buildGroundedDraftUserMessage(
       imageEvidence += chunk
     }
   } catch {
-    return buildUserMessage(conversation, images, undefined, hasAgentReplied)
+    return buildUserMessage(conversation, images, undefined, hasAgentReplied, hasKnownEmail)
   }
 
-  if (!imageEvidence.trim()) return buildUserMessage(conversation, images, undefined, hasAgentReplied)
+  if (!imageEvidence.trim()) return buildUserMessage(conversation, images, undefined, hasAgentReplied, hasKnownEmail)
 
-  return buildUserMessage(conversation, [], imageEvidence, hasAgentReplied)
+  return buildUserMessage(conversation, [], imageEvidence, hasAgentReplied, hasKnownEmail)
 }
 
 // ── Improve-an-existing-draft builders ─────────────────────────────────────
@@ -444,9 +457,10 @@ export function buildImproveUserMessage(
     firstMessage: string
     messages: { role: string; body: string }[]
   },
-  currentDraft: string
+  currentDraft: string,
+  hasKnownEmail = false
 ): string {
-  const parts = [CUSTOMER_PRIVACY_HEADER, `\nConversation thread:`]
+  const parts = [customerPrivacyHeader(hasKnownEmail), `\nConversation thread:`]
   parts.push(`Customer: ${conversation.firstMessage}`)
   for (const msg of conversation.messages) {
     if (!msg.body.trim()) continue
@@ -464,12 +478,15 @@ export function buildImproveUserMessage(
 // system instruction → it writes a generic draft and ignores the macro. This
 // builder presents the thread but anchors the task on the macro instead.
 
-export function buildMacroAdaptUserMessage(conversation: {
-  customer: string
-  firstMessage: string
-  messages: { role: string; body: string }[]
-}): string {
-  const parts = [CUSTOMER_PRIVACY_HEADER]
+export function buildMacroAdaptUserMessage(
+  conversation: {
+    customer: string
+    firstMessage: string
+    messages: { role: string; body: string }[]
+  },
+  hasKnownEmail = false
+): string {
+  const parts = [customerPrivacyHeader(hasKnownEmail)]
 
   parts.push(`\nConversation thread:`)
   parts.push(`Customer: ${conversation.firstMessage}`)

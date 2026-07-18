@@ -32,9 +32,14 @@ Rules: ${greeting} (do NOT use the customer's real name, and never guess or inve
 
 function buildUserMessage(c: ConversationDetail, playbook?: { caseType: string; resolution?: string | null }): string {
   // Withhold the customer's real name/email from the model (privacy). The thread
-  // body still gives the model everything it needs to answer.
+  // body still gives the model everything it needs to answer. Still tell it
+  // WHETHER we have an email on file (never the value) so it doesn't default
+  // to asking the customer for it when the agent can already see it in fadmin.
+  const emailNote = c.email
+    ? " This customer's account email is already on file for this conversation — do NOT ask them to share their email or account email."
+    : ""
   const parts = [
-    `Customer identity: withheld for privacy — never address the customer by name.`,
+    `Customer identity: withheld for privacy — never address the customer by name.${emailNote}`,
     `\nOriginal message:\n${c.firstMessage}`,
   ]
   // Include prior agent replies too (not just the customer's) — the model was
