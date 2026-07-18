@@ -1,7 +1,7 @@
 import "server-only"
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
-import type { RiskBand } from "@/lib/reply-queue"
+import { hasBodyChanged, type RiskBand } from "@/lib/reply-queue"
 
 // Persistence for the autonomous non-read reply queue (table `suggested_replies`,
 // migration 0025/0026). The pipeline writes via the service role (no user session);
@@ -24,6 +24,10 @@ export type PersistSuggestionInput = {
   confidence: number | null
   gateReason: string | null
   riskBand: RiskBand
+  // The playbook the gate matched (if any). Carried onto the row so the
+  // reply-queue audit log (reply_queue_events.playbook_id) can attribute the
+  // eventual approve/edit/reject back to the playbook that grounded the draft.
+  playbookId: string | null
   // True = generated on demand by the agent from the Inbox ("Generate" /
   // "Generate all"). On-request drafts are durable — the non-read reconciliation
   // never stales them. Defaults to false (the always-on pipeline path).
@@ -65,6 +69,7 @@ export async function upsertPendingSuggestion(
       confidence: input.confidence,
       gate_reason: input.gateReason,
       risk_band: input.riskBand,
+      playbook_id: input.playbookId,
       on_request: input.onRequest ?? false,
       status: "pending",
       supersedes: existing?.id ?? null,
@@ -244,6 +249,11 @@ export type ReplyQueueMetrics = {
   rejected: number
 }
 
+// Counts straight from the reply_queue_events audit log — one row per
+// approve/edit/reject/assign action, written by logReplyQueueEvent below.
+// Replaces the earlier guess-from-suggested_replies-status approach (a
+// superseded/stale row could mean an edit, a reject, OR the thread just moving
+// on without the agent touching the card at all).
 export async function getReplyQueueMetrics(args: {
   agentId: string
   startIso: string
@@ -253,30 +263,89 @@ export async function getReplyQueueMetrics(args: {
   if (!db) return { approved: 0, edited: 0, rejected: 0 }
 
   const { data: rows } = await db
-    .from("suggested_replies")
-    .select("status")
-    .eq("owner_id", args.agentId)
-    .gte("updated_at", args.startIso)
-    .lte("updated_at", args.endIso)
+    .from("reply_queue_events")
+    .select("action")
+    .eq("agent_id", args.agentId)
+    .gte("created_at", args.startIso)
+    .lte("created_at", args.endIso)
 
   if (!rows) return { approved: 0, edited: 0, rejected: 0 }
 
   return {
-    approved: rows.filter((r) => r.status === "approved").length,
-    edited: rows.filter((r) => r.status === "superseded").length,
-    rejected: rows.filter((r) => r.status === "stale").length,
+    approved: rows.filter((r) => r.action === "approve").length,
+    edited: rows.filter((r) => r.action === "edit").length,
+    rejected: rows.filter((r) => r.action === "reject").length,
   }
 }
 
+type LoggedSuggestion = {
+  id: string
+  body: string | null
+  risk_band: string | null
+  gate_reason: string | null
+  confidence: number | null
+  playbook_id: string | null
+}
+
+// Best-effort audit write to reply_queue_events (the migration'd table — this
+// used to be a no-op placeholder before that table existed). Never throws:
+// this runs alongside the human-gated resolve/send flow, and a logging hiccup
+// must never block or fail the actual queue action.
 export async function logReplyQueueEvent(input: {
   action: ReplyQueueAction
   agentId: string
   suggestionId?: string
   conversationId: string
   bodyChanged?: boolean
+  finalBody?: string
 }): Promise<void> {
-  // Insert into a metrics / audit table. Currently a no-op placeholder — the
-  // Phase 6 tracker writes to a separate table when that table is created.
-  // See docs/superpowers/plans/2026-06-20-autonomous-non-read-reply-queue.md §6.
-  void input // placeholder
+  const db = getSupabaseAdminClient()
+  if (!db) return
+
+  const columns = "id, body, risk_band, gate_reason, confidence, playbook_id"
+
+  // Prefer the exact suggestion the caller resolved; otherwise fall back to
+  // the newest row for the conversation (the row may since have been
+  // superseded or the caller may not have had an id handy).
+  let suggestion: LoggedSuggestion | null = null
+  if (input.suggestionId) {
+    const { data } = await db
+      .from("suggested_replies")
+      .select(columns)
+      .eq("id", input.suggestionId)
+      .maybeSingle()
+    suggestion = (data as LoggedSuggestion | null) ?? null
+  } else {
+    const { data } = await db
+      .from("suggested_replies")
+      .select(columns)
+      .eq("intercom_conversation_id", input.conversationId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    suggestion = (data as LoggedSuggestion | null) ?? null
+  }
+
+  // Derive body_changed from the actual final text when we have both sides;
+  // fall back to the caller's flag (e.g. the reject path never has a final
+  // body to compare).
+  const bodyChanged =
+    input.finalBody != null && suggestion?.body != null
+      ? hasBodyChanged(suggestion.body, input.finalBody)
+      : Boolean(input.bodyChanged)
+
+  const { error } = await db.from("reply_queue_events").insert({
+    suggestion_id: suggestion?.id ?? null,
+    intercom_conversation_id: input.conversationId,
+    agent_id: input.agentId,
+    action: input.action,
+    risk_band: suggestion?.risk_band ?? null,
+    gate_reason: suggestion?.gate_reason ?? null,
+    body_changed: bodyChanged,
+    suggested_body: suggestion?.body ?? null,
+    final_body: input.action === "approve" || input.action === "edit" ? (input.finalBody ?? null) : null,
+    confidence: suggestion?.confidence ?? null,
+    playbook_id: suggestion?.playbook_id ?? null,
+  })
+  if (error) return // best-effort; never throw
 }

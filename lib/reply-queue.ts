@@ -73,6 +73,17 @@ export function isSendLocked(band: RiskBand): boolean {
   return band === "needs_check"
 }
 
+// Did the agent meaningfully edit the AI draft before sending, or just
+// reformat whitespace? Normalize both sides (trim + collapse all whitespace
+// runs, including newlines, to a single space) before comparing so line-break
+// or spacing-only differences don't count as an edit. Used by the reply-queue
+// audit log (reply_queue_events.body_changed) to derive the flag from the
+// actual final text rather than trusting a caller-supplied boolean.
+export function hasBodyChanged(suggested: string, final: string): boolean {
+  const normalize = (s: string) => s.trim().replace(/\s+/g, " ")
+  return normalize(suggested) !== normalize(final)
+}
+
 // Map an Intercom webhook topic to the actor whose action it represents:
 //   conversation.user.created / .user.replied / contact.* / lead.* -> "customer"  (recompute)
 //   conversation.admin.replied (an agent answered)                 -> "agent_reply" (leaves the queue)
