@@ -222,10 +222,14 @@ export async function computeAndPersistSuggestion(
   // said anything yet. Computed from the Intercom author id, not inferred by
   // the model from the generic "Agent:" label.
   const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, conversation.adminAssigneeId)
+  // We already have this contact's email (it's how the conversation is even
+  // routed to an agent) — tell the draft brain so it doesn't ask the customer
+  // for it, even though the value itself never enters the prompt.
+  const hasKnownEmail = Boolean(conversation.email)
   const systemPrompt = notionHadHits
     ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied)
     : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied)
-  const userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied)
+  const userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail)
   const messages: OpenAIMessage[] = [
     { role: "system", content: systemPrompt },
     { role: "user", content: userMessage },

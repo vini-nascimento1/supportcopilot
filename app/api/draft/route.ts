@@ -85,9 +85,14 @@ export async function POST(req: NextRequest) {
   let systemPrompt: string
   let userMessage: OpenAIMessage["content"]
 
+  // We already have this contact's email (Intercom resolved it to route the
+  // conversation) — tell the draft brain so it doesn't ask the customer for
+  // it, even though the value itself never enters the prompt.
+  const hasKnownEmail = Boolean(conversation.email)
+
   if (mode === "improve") {
     systemPrompt = buildImproveSystemPrompt(agentName)
-    userMessage = buildImproveUserMessage(conversation, currentDraft as string)
+    userMessage = buildImproveUserMessage(conversation, currentDraft as string, hasKnownEmail)
   } else {
     // Fetch relevant Intercom Help Center articles for extra context.
     const searchQuery = [conversation.subject, conversation.firstMessage]
@@ -112,7 +117,7 @@ export async function POST(req: NextRequest) {
         : buildSystemPrompt(playbook, responseTemplates, agentName, articles, hasAgentReplied)
 
     const images = await encodeImageAttachments(conversation.messages)
-    userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied)
+    userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail)
   }
 
   const encoder = new TextEncoder()

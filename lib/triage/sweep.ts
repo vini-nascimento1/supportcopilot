@@ -42,14 +42,11 @@ function toWaitingSinceIso(waitingSinceSec: number | null): string | null {
   return waitingSinceSec != null ? new Date(waitingSinceSec * 1000).toISOString() : null
 }
 
-/**
- * "Unworked by a human" = nobody proactive is on this conversation:
- * unassigned (adminAssigneeId null), OR assigned to an admin id that isn't in
- * the known set of HUMAN agents (catches Fin / workflow bots, which the
- * always-on reply-queue pipeline never drafts for either).
- */
-function isUnworkedByHuman(conv: SweepConversation, humanAdminIds: Set<string>): boolean {
-  return conv.adminAssigneeId == null || !humanAdminIds.has(conv.adminAssigneeId)
+// Intercom marks an unassigned conversation with a null admin_assignee_id;
+// some payloads use 0/"0" for the same "nobody" sentinel. Treat all three as
+// unassigned.
+function isUnassigned(conv: SweepConversation): boolean {
+  return conv.adminAssigneeId == null || conv.adminAssigneeId === "0"
 }
 
 export async function runTriageSweep(nowMs: number): Promise<TriageSweepSummary> {
@@ -69,19 +66,11 @@ export async function runTriageSweep(nowMs: number): Promise<TriageSweepSummary>
     return { ...empty, error: `intercom search: ${(e as Error).message}` }
   }
 
-  // (b) HUMAN admin ids, from agents.intercom_admin_id. Anything assigned to
-  // an id outside this set (including null) is unworked-by-human.
-  const { data: agentRows, error: agentErr } = await db
-    .from("agents")
-    .select("intercom_admin_id")
-  if (agentErr) return { ...empty, error: `agents: ${agentErr.message}` }
-  const humanAdminIds = new Set(
-    (agentRows ?? [])
-      .map((a) => a.intercom_admin_id as string | null)
-      .filter((id): id is string => id != null)
-  )
-
-  const pool = allOpen.filter((c) => isUnworkedByHuman(c, humanAdminIds))
+  // (b) Pool = strictly UNASSIGNED open conversations (no admin assignee).
+  // A conversation already assigned to any teammate — whether or not they use
+  // this copilot — is that person's to work, so it stays out of the pool. This
+  // is the Intercom "Unassigned" inbox, not "everything no copilot-agent owns".
+  const pool = allOpen.filter(isUnassigned)
 
   // (c) Keyword-only playbook match — zero LLM calls. getPlaybooksDashboardData
   // loaded once and reused across every pooled conversation.
