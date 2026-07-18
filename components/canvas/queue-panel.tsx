@@ -579,6 +579,15 @@ function QueueRow({
             <Textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
+              onKeyDown={(e) => {
+                // Ctrl/Cmd+Enter = Approve & send (same as clicking the button,
+                // including the needs_check confirm step). Plain Enter/Shift+Enter
+                // keep their normal newline behavior in the textarea.
+                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                  e.preventDefault()
+                  if (!sending && !rejecting) onApprove()
+                }
+              }}
               className="min-h-32 text-xs leading-relaxed"
               autoFocus
             />

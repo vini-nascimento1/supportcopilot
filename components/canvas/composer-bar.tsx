@@ -63,6 +63,17 @@ export function ComposerBar({ composer }: { composer: Composer }) {
         value={text}
         onChange={(event) => setText(event.target.value)}
         onPaste={onPaste}
+        onKeyDown={(event) => {
+          // Ctrl/Cmd+Enter = send to Intercom (same as clicking the Send button,
+          // including the needs_check "Confirm send" step). Plain Enter and
+          // Shift+Enter keep inserting a newline, same as any textarea.
+          if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+            event.preventDefault()
+            if (!(busy === "send" || (!text.trim() && attachmentCount === 0))) {
+              void send()
+            }
+          }
+        }}
         placeholder="Type a reply... paste images/files to attach"
         className="min-h-16 resize-y rounded-md text-sm"
       />
