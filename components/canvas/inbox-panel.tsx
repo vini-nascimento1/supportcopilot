@@ -11,17 +11,24 @@ import Link from "next/link"
 import { toast } from "sonner"
 import {
   CircleCheckIcon,
+  ClockIcon,
   ExternalLinkIcon,
   InboxIcon,
   Loader2Icon,
   RefreshCwIcon,
   SparklesIcon,
+  StarIcon,
   UserPlusIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -34,6 +41,14 @@ import {
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
 import { broadcastCanvasRefresh, onCanvasRefresh } from "@/lib/canvas-refresh"
 import { addPendingOnRequestDrafts } from "@/lib/on-request-drafts"
+import {
+  CHECKIN_MACRO,
+  REVIEW_MACRO,
+  customerSilentMinutes,
+  inboxSlaSeverity,
+  type QuickMacro,
+  type SlaSeverity,
+} from "@/lib/inbox-sla"
 import { cn, relativeTime } from "@/lib/utils"
 
 // Mirrors the server types (lib/intercom.ts SupportCase / IntercomAdmin and
@@ -49,6 +64,8 @@ type SupportCase = {
   snippet: string
   intercomUrl: string | null
   tip: CaseTip | null
+  waitingSince: string | null
+  lastAdminReplyAt: string | null
 }
 type CasesData = { mode: "live" | "demo" | "error"; error: string | null; rows: SupportCase[] }
 type IntercomAdmin = { id: string; name: string; email: string | null }
@@ -91,6 +108,11 @@ export function InboxPanel({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [acting, setActing] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
+  // Wall-clock, ticked by the poll below (never Date.now() during render — that
+  // would be impure). Drives the per-row SLA staleness colouring so a row can
+  // tip amber/red between reloads. Starts at 0 → severity is "none" on first
+  // paint (see lib/inbox-sla.ts), then hydrates in the poll effect.
+  const [now, setNow] = useState(0)
   const masterRef = useRef<HTMLInputElement>(null)
   // Anchor index for shift-click range selection (the last single-toggled row).
   const anchorRef = useRef<number | null>(null)
@@ -155,9 +177,16 @@ export function InboxPanel({
   // depends on `inbox`).
   useEffect(() => {
     if (!active) return
+    const tick = () => setNow(Date.now())
+    tick()
     queueMicrotask(() => void load())
-    // Snappy refresh — this is the live triage list the agent works from.
-    const id = setInterval(() => void load(), 10_000)
+    // Snappy refresh — this is the live triage list the agent works from. The
+    // same interval advances `now` so SLA tints cross the 30/60-min thresholds
+    // without waiting on new data.
+    const id = setInterval(() => {
+      tick()
+      void load()
+    }, 10_000)
     const off = onCanvasRefresh(() => void load())
     return () => {
       clearInterval(id)
@@ -427,8 +456,13 @@ export function InboxPanel({
               <ConversationRow
                 key={row.id}
                 row={row}
+                now={now}
                 selected={selectedIds.has(row.id)}
                 onToggle={(shift) => toggleAt(index, shift)}
+                onActed={async () => {
+                  await load()
+                  broadcastCanvasRefresh()
+                }}
               />
             ))}
           </div>
@@ -526,25 +560,42 @@ export function InboxPanel({
   )
 }
 
+// Subtle left-accent + faint fill per SLA staleness. Selection (agent actively
+// working the row) is a stronger signal, so it wins over the tint.
+const SEVERITY_ROW_CLASS: Record<Exclude<SlaSeverity, "none">, string> = {
+  warn: "border-l-2 border-l-amber-400 bg-amber-50/40 hover:border-foreground/20 dark:border-l-amber-500/70 dark:bg-amber-500/10",
+  urgent: "border-l-2 border-l-red-400 bg-red-50/50 hover:border-foreground/20 dark:border-l-red-500/70 dark:bg-red-500/10",
+}
+
 function ConversationRow({
   row,
+  now,
   selected,
   onToggle,
+  onActed,
 }: {
   row: SupportCase
+  now: number
   selected: boolean
   onToggle: (shift: boolean) => void
+  onActed: () => void | Promise<void>
 }) {
   const nav = useCanvasNav()
   const open = () => {
     if (nav) nav.open(row.id)
   }
 
+  const severity = inboxSlaSeverity(row.waitingSince, row.lastAdminReplyAt, now)
+
   return (
     <article
       className={cn(
         "group flex items-start gap-2 rounded-md border bg-card px-2.5 py-2 transition-colors",
-        selected ? "border-foreground/30 bg-accent/40" : "hover:border-foreground/20"
+        selected
+          ? "border-foreground/30 bg-accent/40"
+          : severity !== "none"
+            ? SEVERITY_ROW_CLASS[severity]
+            : "hover:border-foreground/20"
       )}
     >
       <input
@@ -577,19 +628,140 @@ function ConversationRow({
         </Link>
       )}
 
-      {row.intercomUrl && (
-        <a
-          href={row.intercomUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Open directly in Intercom"
-          onClick={(e) => e.stopPropagation()}
-          className="mt-0.5 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-        >
-          <ExternalLinkIcon className="size-3.5" />
-        </a>
-      )}
+      <div className="mt-0.5 flex shrink-0 items-center gap-1">
+        {/* Check-in & close — only when the customer has gone quiet on us
+            (see lib/inbox-sla.ts). Tint matches the row severity. */}
+        {severity !== "none" && (
+          <QuickCloseButton
+            conversationId={row.id}
+            macro={CHECKIN_MACRO}
+            icon={ClockIcon}
+            tone={severity}
+            hint={`Customer quiet ${customerSilentMinutes(row.lastAdminReplyAt, now)}m`}
+            onActed={onActed}
+          />
+        )}
+        {/* Review request & close — available on hover for any ticket. */}
+        <QuickCloseButton
+          conversationId={row.id}
+          macro={REVIEW_MACRO}
+          icon={StarIcon}
+          tone="neutral"
+          hoverOnly
+          onActed={onActed}
+        />
+        {row.intercomUrl && (
+          <a
+            href={row.intercomUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open directly in Intercom"
+            onClick={(e) => e.stopPropagation()}
+            className="text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+          >
+            <ExternalLinkIcon className="size-3.5" />
+          </a>
+        )}
+      </div>
     </article>
+  )
+}
+
+// A minimalist per-row quick action: one icon button that, on confirm, sends a
+// fixed macro to the customer and then closes the ticket. Sending a real
+// customer message + closing is outward-facing and hard to undo, so it's gated
+// behind a small confirm popover that previews the exact macro first (never a
+// bare one-click send).
+const TONE_ICON_CLASS: Record<"warn" | "urgent" | "neutral", string> = {
+  warn: "text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300",
+  urgent: "text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300",
+  neutral: "text-muted-foreground hover:text-foreground",
+}
+
+function QuickCloseButton({
+  conversationId,
+  macro,
+  icon: Icon,
+  tone,
+  hint,
+  hoverOnly,
+  onActed,
+}: {
+  conversationId: string
+  macro: QuickMacro
+  icon: typeof ClockIcon
+  tone: "warn" | "urgent" | "neutral"
+  hint?: string
+  hoverOnly?: boolean
+  onActed: () => void | Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [sending, setSending] = useState(false)
+
+  const run = async () => {
+    if (sending) return
+    setSending(true)
+    try {
+      // Send first — if the reply fails we must NOT close (mirrors the queue's
+      // send-then-followup ordering). Macro HTML is sent verbatim (html: true).
+      const sent = await fetch("/api/draft/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId, body: macro.html, html: true }),
+      })
+      if (!sent.ok) throw new Error("send failed")
+      const closed = await fetch("/api/cases/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId }),
+      })
+      setOpen(false)
+      if (closed.ok) {
+        toast.success("Sent & closed.")
+      } else {
+        toast.warning("Sent, but couldn't close it — try closing manually.")
+      }
+      await onActed()
+    } catch {
+      toast.error("Couldn't send — nothing was closed. Try again.")
+      setSending(false)
+    }
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title={macro.label}
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            "rounded p-0.5 transition-colors",
+            TONE_ICON_CLASS[tone],
+            hoverOnly && !open && "opacity-0 group-hover:opacity-100"
+          )}
+        >
+          <Icon className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        className="w-72 text-xs leading-relaxed"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="font-medium">{macro.label}</p>
+        {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>}
+        <p className="mt-2 whitespace-pre-line rounded bg-muted/60 p-2 text-[11px] text-foreground/80">
+          {macro.text}
+        </p>
+        <div className="mt-2.5 flex justify-end">
+          <Button size="sm" className="h-7 gap-1.5 px-2.5 text-xs" onClick={() => void run()} disabled={sending}>
+            {sending ? <Loader2Icon className="size-3.5 animate-spin" /> : <CircleCheckIcon className="size-3.5" />}
+            Send &amp; close
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 

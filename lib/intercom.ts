@@ -20,6 +20,11 @@ export type SupportCase = {
   intercomUrl: string | null
   tip: CaseTip | null
   draftPlaceholder: string
+  // SLA-staleness inputs for the inbox (see lib/inbox-sla.ts). `waitingSince`
+  // non-null ⇒ waiting on US (an FRT concern, not a check-in candidate).
+  // `lastAdminReplyAt` is when we last replied — the clock for customer silence.
+  waitingSince: string | null
+  lastAdminReplyAt: string | null
 }
 
 export type CasesQueueData = {
@@ -42,6 +47,12 @@ type IntercomConversation = {
   // null once a teammate replies. This — not `read` (which tracks whether an
   // admin opened it) — is the true "non-read / waiting on us" signal.
   waiting_since?: number | null
+  // Intercom's search API embeds a statistics block. We only need the last
+  // admin reply time (unix seconds) to clock customer silence for the inbox
+  // SLA staleness colouring.
+  statistics?: {
+    last_admin_reply_at?: number | null
+  } | null
   title?: string | null
   conversation_message?: {
     body?: string | null
@@ -149,6 +160,8 @@ function demoCases(playbooks: PlaybookListItem[]): CasesQueueData {
       intercomUrl: null,
       tip,
       draftPlaceholder: getDraftPlaceholder(row.snippet, tip),
+      waitingSince: null,
+      lastAdminReplyAt: null,
     }
   })
 
@@ -494,6 +507,8 @@ export async function getOpenCasesQueue(
         intercomUrl: getIntercomUrl(id),
         tip,
         draftPlaceholder: getDraftPlaceholder(snippet, tip),
+        waitingSince: toDate(conversation.waiting_since),
+        lastAdminReplyAt: toDate(conversation.statistics?.last_admin_reply_at),
       }
     }),
   }
