@@ -169,6 +169,10 @@ export type ConversationAttachment = {
 export type ConversationMessage = {
   role: "customer" | "admin" | "ai"
   author: string
+  /** Intercom author id (admin/team id for role "admin"), when Intercom provides one.
+      Lets callers tell "this specific agent replied" apart from "some agent replied" —
+      the generic role alone conflates every teammate (and the bot) into one bucket. */
+  authorId: string | null
   body: string
   createdAt: string
   attachments: ConversationAttachment[]
@@ -202,7 +206,7 @@ type IntercomConversationFull = {
   source?: {
     body?: string | null
     subject?: string | null
-    author?: { name?: string | null; email?: string | null; type?: string | null } | null
+    author?: { id?: string | number | null; name?: string | null; email?: string | null; type?: string | null } | null
     attachments?: Array<{
       type?: string | null
       name?: string | null
@@ -216,7 +220,7 @@ type IntercomConversationFull = {
       part_type?: string | null
       body?: string | null
       created_at?: number | null
-      author?: { name?: string | null; type?: string | null } | null
+      author?: { id?: string | number | null; name?: string | null; type?: string | null } | null
       attachments?: Array<{
         type?: string | null
         name?: string | null
@@ -309,6 +313,10 @@ export async function getConversationDetail(
                 : sourceRole === "ai"
                   ? "Fin"
                   : "Agent"),
+            authorId:
+              sourceRole === "admin" && conv.source?.author?.id != null
+                ? String(conv.source.author.id)
+                : null,
             body: sourceBody,
             createdAt: toDate(conv.created_at) ?? "",
             attachments: sourceAttachments,
@@ -333,6 +341,7 @@ export async function getConversationDetail(
         author:
           p.author?.name ??
           (role === "customer" ? "Customer" : role === "ai" ? "Fin" : "Agent"),
+        authorId: role === "admin" && p.author?.id != null ? String(p.author.id) : null,
         body: stripHtml(p.body),
         createdAt: toDate(p.created_at) ?? "",
         attachments: mapAttachments(p.attachments),

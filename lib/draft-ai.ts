@@ -86,6 +86,30 @@ const ENGLISH_ONLY_REMINDER =
 const CUSTOMER_PRIVACY_HEADER =
   "Customer identity: withheld for privacy. Never address the customer by name, never guess or invent a name, and never repeat any real name or email that appears inside the thread."
 
+// ── Greeting logic ──────────────────────────────────────────────────────────
+// "Has an agent replied" is not the right question — most threads already carry
+// a reply from SOME teammate (another agent's holding message, or the bot's
+// assignment greeting), which made the model think a greeting had already
+// happened even when THIS agent had never personally said a word. The label in
+// the thread text is a generic "Agent:" for every teammate, so the model can't
+// tell them apart from wording alone — this has to be computed in code from the
+// Intercom author id and handed down as an explicit fact.
+export type MessageForGreetingCheck = { role: string; authorId?: string | null }
+
+export function hasAgentPersonallyReplied(
+  messages: MessageForGreetingCheck[],
+  agentAdminId: string | null | undefined
+): boolean {
+  if (!agentAdminId) return false
+  return messages.some((m) => m.role === "admin" && m.authorId === agentAdminId)
+}
+
+function greetingToneRule(hasAgentReplied: boolean): string {
+  return hasAgentReplied
+    ? `- **Do not greet or thank again.** You (this agent) have already sent at least one message earlier in this thread — pick up naturally as the same agent continuing the conversation, even if a greeting hasn't been used since.`
+    : `- **Open with a warm greeting.** You have not personally sent any message in this thread yet — even if a teammate or the AI bot already replied, this is your first message here. Open with a warm greeting + thanks (e.g. "Hey! 👋 Thanks for reaching out to Fanvue Support...") before the actual answer.`
+}
+
 const CAPABILITY_BOUNDARY_RULES = `## Capability boundaries — do not fake checks
 - You only know what is in the conversation thread, playbook, Internal knowledge base articles, Fresh Notion knowledge, and image evidence explicitly provided in this prompt.
 - You do NOT have live access to Fadmin, Fanvue account/profile pages, KYC systems, payout processors, media review tools, billing records, device logs, or any external admin system.
@@ -99,7 +123,8 @@ export function buildSystemPrompt(
   playbook: PlaybookListItem | undefined,
   examples: ResponseItem[],
   agentName: string,
-  articles: IntercomArticle[]
+  articles: IntercomArticle[],
+  hasAgentReplied = false
 ): string {
   const parts: string[] = []
 
@@ -122,7 +147,7 @@ Playbooks cover only some cases — when the thread and the playbook disagree, t
 
 ## Tone rules
 - Warm, personal, first-person. Light emoji (👋 😊 💛) — 1-2 max, never forced.
-- **Greet only on the first reply.** If no agent has replied yet in the thread below, open with a warm greeting + thanks (e.g. "Hey! 👋 Thanks for reaching out to Fanvue Support..."). If an agent has already replied and the conversation is mid-flow, do NOT greet or thank again — pick up naturally as the same agent continuing the thread.
+${greetingToneRule(hasAgentReplied)}
 - Never use the customer's real name.
 - Use **bold** for key requirements or action steps.
 - Use short bullet lists when listing multiple steps (4 max).
@@ -232,9 +257,10 @@ export function buildNotionAwareSystemPrompt(
   examples: ResponseItem[],
   agentName: string,
   articles: IntercomArticle[],
-  notionSnippets: NotionSnippet[]
+  notionSnippets: NotionSnippet[],
+  hasAgentReplied = false
 ): string {
-  const base = buildSystemPrompt(playbook, examples, agentName, articles)
+  const base = buildSystemPrompt(playbook, examples, agentName, articles, hasAgentReplied)
   if (notionSnippets.length === 0) return base
 
   const citable = notionSnippets.filter((s) => classifyNotionSnippetUse(s) === "customerSafe")
@@ -280,7 +306,8 @@ export function buildNotionAwareSystemPrompt(
 export function buildUserMessage(
   conversation: DraftConversation,
   images?: DraftImage[],
-  imageEvidence?: string | null
+  imageEvidence?: string | null,
+  hasAgentReplied = false
 ): string | OpenAIContentPart[] {
   const parts = [CUSTOMER_PRIVACY_HEADER]
 
@@ -314,7 +341,7 @@ export function buildUserMessage(
   }
 
   parts.push(
-    `\nThe latest Customer message above is what you are replying to. Agent and AI helper messages are context about what has already been said or suggested; do not treat them as customer requests. Write the next message in this conversation, anchored on the latest customer message and the context already exchanged. Follow the tone and context rules above. Do not greet again if an agent has already replied, and do not repeat anything already said earlier in the thread.`
+    `\nThe latest Customer message above is what you are replying to. Agent and AI helper messages are context about what has already been said or suggested; do not treat them as customer requests. Write the next message in this conversation, anchored on the latest customer message and the context already exchanged. Follow the tone and context rules above (${hasAgentReplied ? "you have already personally replied earlier in this thread — do not greet again" : "you have not personally replied in this thread yet — open with a greeting"}), and do not repeat anything already said earlier in the thread.`
   )
   parts.push(`\n${ENGLISH_ONLY_REMINDER}`)
   const text = parts.join("\n")
@@ -365,9 +392,10 @@ export function buildVisionEvidenceMessages(
 
 export async function buildGroundedDraftUserMessage(
   conversation: DraftConversation,
-  images: DraftImage[]
+  images: DraftImage[],
+  hasAgentReplied = false
 ): Promise<string | OpenAIContentPart[]> {
-  if (images.length === 0) return buildUserMessage(conversation)
+  if (images.length === 0) return buildUserMessage(conversation, undefined, undefined, hasAgentReplied)
 
   let imageEvidence = ""
   try {
@@ -379,12 +407,12 @@ export async function buildGroundedDraftUserMessage(
       imageEvidence += chunk
     }
   } catch {
-    return buildUserMessage(conversation, images)
+    return buildUserMessage(conversation, images, undefined, hasAgentReplied)
   }
 
-  if (!imageEvidence.trim()) return buildUserMessage(conversation, images)
+  if (!imageEvidence.trim()) return buildUserMessage(conversation, images, undefined, hasAgentReplied)
 
-  return buildUserMessage(conversation, [], imageEvidence)
+  return buildUserMessage(conversation, [], imageEvidence, hasAgentReplied)
 }
 
 // ── Improve-an-existing-draft builders ─────────────────────────────────────
@@ -510,7 +538,8 @@ Write the customer-facing reply now:`
 
 export function buildMacroAdaptSystemPrompt(
   macroBodyText: string,
-  agentName: string
+  agentName: string,
+  hasAgentReplied = false
 ): string {
   return `You are a support copilot for ${agentName}, a senior support agent at Fanvue — a creator subscription platform (AI creators and human creators both use it).
 
@@ -524,7 +553,7 @@ Your task: **rewrite the approved macro below** so it fits this specific convers
 
 ## Tone rules
 - Warm, personal, first-person. Light emoji (👋 😊 💛) — 1-2 max, never forced.
-- Greet only if no agent has replied yet in the thread; otherwise continue naturally as the same agent.
+${greetingToneRule(hasAgentReplied)}
 - Never use the customer's real name.
 - Use **bold** for the key requirements or action steps.
 - Use short bullet lists when listing multiple steps (4 max).
