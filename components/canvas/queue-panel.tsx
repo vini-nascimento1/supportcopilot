@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import {
@@ -11,6 +11,7 @@ import {
   Loader2Icon,
   PencilIcon,
   RotateCwIcon,
+  SendIcon,
   ShieldAlertIcon,
   SparklesIcon,
   UserPlusIcon,
@@ -33,7 +34,7 @@ import {
   subscribePendingOnRequestDrafts,
   type PendingOnRequestDraft,
 } from "@/lib/on-request-drafts"
-import { relativeTime } from "@/lib/utils"
+import { cn, relativeTime } from "@/lib/utils"
 
 // Mirrors lib/reply-queue-store.ts QueueItem (defined locally — that module is
 // server-only, can't be imported into a client component).
@@ -63,6 +64,72 @@ type DraftingItem = {
 const byOldest = (a: QueueItem, b: QueueItem) =>
   new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
 
+// Single source of truth for the audited send path — POST /api/draft/send then
+// POST /api/reply-queue/resolve — shared by QueueRow's own approve button AND
+// the "Ready to send" bulk bar, so the two paths can never diverge.
+async function postSendAndResolve(
+  item: QueueItem,
+  body: string
+): Promise<{ ok: boolean; resolvedOk: boolean; error?: string }> {
+  const bodyChanged = body.trim() !== item.body.trim()
+  try {
+    const res = await fetch("/api/draft/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId: item.intercomConversationId, body }),
+    })
+    if (!res.ok) {
+      return {
+        ok: false,
+        resolvedOk: false,
+        error: await readApiError(res, `Failed to send (${res.status})`),
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      resolvedOk: false,
+      error:
+        error instanceof Error ? error.message : "Couldn't send. Open the case and try there.",
+    }
+  }
+
+  // The queue-clearing resolve call is best-effort — the send already went out,
+  // so a failure here just means the row lingers until the next reconcile.
+  const resolveRes = await fetch("/api/reply-queue/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      conversationId: item.intercomConversationId,
+      suggestionId: item.id,
+      action: bodyChanged ? "edit" : "approve",
+      bodyChanged,
+      finalBody: body,
+    }),
+  }).catch(() => null)
+
+  return { ok: true, resolvedOk: !!resolveRes?.ok }
+}
+
+// Shared reject/dismiss path — a single resolve call, no outbound send.
+async function postReject(item: QueueItem): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/reply-queue/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversationId: item.intercomConversationId,
+        suggestionId: item.id,
+        action: "reject",
+      }),
+    })
+    if (!res.ok) return { ok: false, error: await res.text() }
+    return { ok: true }
+  } catch {
+    return { ok: false, error: "Couldn't dismiss this suggestion." }
+  }
+}
+
 // The autonomous non-read AI reply queue: pre-computed suggestions for the
 // conversations assigned to the signed-in agent, in two bands. The agent
 // approves the send with one click (human-gated). Draft-only: nothing leaves the
@@ -86,6 +153,14 @@ export function QueuePanel({
   // an impure call). Drives the "stuck placeholder → failed" cutoff.
   const [now, setNow] = useState(0)
 
+  // Multi-select for the "Ready to send" band only (mirrors inbox-panel.tsx).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkActing, setBulkActing] = useState(false)
+  const [confirmBulkSend, setConfirmBulkSend] = useState(false)
+  const masterRef = useRef<HTMLInputElement>(null)
+  // Anchor index for shift-click range selection (the last single-toggled row).
+  const anchorRef = useRef<number | null>(null)
+
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/reply-queue")
@@ -100,6 +175,17 @@ export function QueuePanel({
         [...nextItems, ...nextOnRequest].map((item) => item.intercomConversationId)
       )
       setError(typeof data.error === "string" ? data.error : null)
+      // Drop any selected ids that polled away (sent/rejected/no longer in the
+      // ready band), so a bulk action only ever acts on rows still on screen.
+      const readyIds = new Set(
+        nextItems.filter((i) => i.riskBand !== "needs_check").map((i) => i.id)
+      )
+      setSelectedIds((prev) => {
+        let changed = false
+        const next = new Set<string>()
+        prev.forEach((id) => (readyIds.has(id) ? next.add(id) : (changed = true)))
+        return changed ? next : prev
+      })
     } catch {
       setError("Couldn't load the reply queue.")
       setItems((prev) => prev ?? [])
@@ -137,6 +223,12 @@ export function QueuePanel({
   const remove = useCallback((id: string) => {
     setItems((prev) => (prev ? prev.filter((i) => i.id !== id) : prev))
     setOnRequest((prev) => prev.filter((i) => i.id !== id))
+    setSelectedIds((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
   }, [])
 
   // Re-kick generation for a placeholder whose draft never landed. Resets the
@@ -168,7 +260,10 @@ export function QueuePanel({
     removePendingOnRequestDrafts([conversationId])
   }, [])
 
-  const ready = items?.filter((i) => i.riskBand !== "needs_check").sort(byOldest) ?? []
+  const ready = useMemo(
+    () => items?.filter((i) => i.riskBand !== "needs_check").sort(byOldest) ?? [],
+    [items]
+  )
   const needsCheck = items?.filter((i) => i.riskBand === "needs_check").sort(byOldest) ?? []
   const onRequestSorted = [...onRequest].sort(byOldest)
   const visibleIds = new Set([
@@ -201,6 +296,105 @@ export function QueuePanel({
       (items?.length ?? 0) + draftingVisible.length + manualStuck.length + onRequest.length
     )
   }, [items, draftingVisible.length, manualStuck.length, onRequest.length, onCount])
+
+  const allReadySelected = ready.length > 0 && selectedIds.size === ready.length
+  const someReadySelected = selectedIds.size > 0 && !allReadySelected
+  // Native checkbox indeterminate can only be set imperatively, in an effect.
+  useEffect(() => {
+    if (masterRef.current) masterRef.current.indeterminate = someReadySelected
+  }, [someReadySelected])
+
+  // Toggle one ready row, or — when shift is held and we have an anchor —
+  // select the whole contiguous range from the anchor to here (Gmail/Finder
+  // behaviour). The anchor only moves on a plain (non-shift) click.
+  const toggleReadyAt = useCallback(
+    (index: number, shift: boolean) => {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (shift && anchorRef.current !== null) {
+          const lo = Math.min(anchorRef.current, index)
+          const hi = Math.max(anchorRef.current, index)
+          for (let i = lo; i <= hi; i++) {
+            const id = ready[i]?.id
+            if (id) next.add(id)
+          }
+        } else {
+          const id = ready[index]?.id
+          if (id) {
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+          }
+          anchorRef.current = index
+        }
+        return next
+      })
+    },
+    [ready]
+  )
+
+  const toggleAllReady = useCallback(() => {
+    anchorRef.current = null
+    setSelectedIds((prev) =>
+      prev.size === ready.length ? new Set() : new Set(ready.map((r) => r.id))
+    )
+  }, [ready])
+
+  const clearBulkSelection = useCallback(() => {
+    setSelectedIds(new Set())
+    setConfirmBulkSend(false)
+    anchorRef.current = null
+  }, [])
+
+  // Bulk: approve & send every selected ready suggestion, in order (real
+  // Intercom writes — kept sequential, not Promise.all). Sent items are removed
+  // immediately via `remove`; failures stay selected so the agent can retry or
+  // open the case. Guarded by an inline confirm (irreversible outbound sends).
+  const bulkApproveSend = async () => {
+    const targets = ready.filter((i) => selectedIds.has(i.id))
+    if (targets.length === 0) return
+    setBulkActing(true)
+    let sent = 0
+    let failed = 0
+    let resolveFailed = false
+    for (const item of targets) {
+      const result = await postSendAndResolve(item, item.body)
+      if (result.ok) {
+        sent++
+        if (!result.resolvedOk) resolveFailed = true
+        remove(item.id)
+      } else {
+        failed++
+      }
+    }
+    setConfirmBulkSend(false)
+    setBulkActing(false)
+    if (sent > 0) toast.success(`Sent ${sent}`)
+    if (failed > 0) toast.warning(`${failed} couldn't send`)
+    // Some sends went out but the queue-clearing resolve failed — reconcile.
+    if (resolveFailed) void load()
+  }
+
+  // Bulk: dismiss every selected ready suggestion. Sequential for the same
+  // reason as above — each is a real resolve write.
+  const bulkReject = async () => {
+    const targets = ready.filter((i) => selectedIds.has(i.id))
+    if (targets.length === 0) return
+    setBulkActing(true)
+    let dismissed = 0
+    let failed = 0
+    for (const item of targets) {
+      const result = await postReject(item)
+      if (result.ok) {
+        dismissed++
+        remove(item.id)
+      } else {
+        failed++
+      }
+    }
+    setBulkActing(false)
+    if (dismissed > 0) toast.success(`Dismissed ${dismissed}`)
+    if (failed > 0) toast.warning(`${failed} couldn't be dismissed`)
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -262,9 +456,28 @@ export function QueuePanel({
                 title="Ready to send"
                 hint="One click sends it. Oldest first."
                 count={ready.length}
+                headerAccessory={
+                  <input
+                    ref={masterRef}
+                    type="checkbox"
+                    checked={allReadySelected}
+                    onChange={toggleAllReady}
+                    aria-label="Select all ready to send"
+                    title="Select all"
+                    className="size-3.5 shrink-0 cursor-pointer rounded border-muted-foreground/40 accent-primary"
+                  />
+                }
               >
-                {ready.map((i) => (
-                  <QueueRow key={i.id} item={i} onDone={remove} onRefresh={load} />
+                {ready.map((i, index) => (
+                  <QueueRow
+                    key={i.id}
+                    item={i}
+                    onDone={remove}
+                    onRefresh={load}
+                    selectable
+                    selected={selectedIds.has(i.id)}
+                    onToggleSelect={(shift) => toggleReadyAt(index, shift)}
+                  />
                 ))}
               </Band>
             )}
@@ -305,6 +518,77 @@ export function QueuePanel({
           </div>
         )}
       </div>
+
+      {/* Bulk actions for the "Ready to send" band only. Tip: shift-click a
+          second checkbox to select the whole range between it and the last one. */}
+      {selectedIds.size > 0 && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-muted/40 px-2 py-2">
+          <span className="text-xs font-medium tabular-nums">{selectedIds.size} selected</span>
+          <button
+            type="button"
+            onClick={clearBulkSelection}
+            className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Clear
+          </button>
+          {confirmBulkSend ? (
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">
+                Approve &amp; send {selectedIds.size}?
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2.5 text-[11px]"
+                onClick={() => setConfirmBulkSend(false)}
+                disabled={bulkActing}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="h-7 gap-1.5 px-2.5 text-[11px]"
+                onClick={() => void bulkApproveSend()}
+                disabled={bulkActing}
+              >
+                {bulkActing ? (
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                ) : (
+                  <SendIcon className="size-3.5" />
+                )}
+                Confirm
+              </Button>
+            </div>
+          ) : (
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1.5 px-2.5 text-[11px]"
+                onClick={() => void bulkReject()}
+                disabled={bulkActing}
+              >
+                {bulkActing ? (
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                ) : (
+                  <XIcon className="size-3.5" />
+                )}
+                Reject {selectedIds.size}
+              </Button>
+              <Button
+                size="sm"
+                className="h-7 gap-1.5 px-2.5 text-[11px]"
+                onClick={() => setConfirmBulkSend(true)}
+                disabled={bulkActing}
+                title="Send is an irreversible outbound message to the customer"
+              >
+                <SendIcon className="size-3.5" />
+                Approve &amp; send {selectedIds.size}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -411,20 +695,23 @@ function Band({
   title,
   hint,
   count,
+  headerAccessory,
   children,
 }: {
   title: string
   hint: string
   count: number
+  headerAccessory?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
     <section className="flex flex-col gap-1.5">
-      <div className="flex items-baseline gap-2 px-1">
+      <div className="flex items-center gap-2 px-1">
         <h2 className="text-xs font-medium">{title}</h2>
         <Badge variant="secondary" className="h-4 px-1 text-[10px] font-normal tabular-nums">
           {count}
         </Badge>
+        {headerAccessory && <div className="ml-auto flex items-center">{headerAccessory}</div>}
       </div>
       <p className="px-1 text-[11px] leading-snug text-muted-foreground">{hint}</p>
       <div className="flex flex-col gap-1.5">{children}</div>
@@ -439,10 +726,16 @@ function QueueRow({
   item,
   onDone,
   onRefresh,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
 }: {
   item: QueueItem
   onDone: (id: string) => void
   onRefresh: () => Promise<void>
+  selectable?: boolean
+  selected?: boolean
+  onToggleSelect?: (shift: boolean) => void
 }) {
   const nav = useCanvasNav()
   const locked = item.riskBand === "needs_check"
@@ -464,36 +757,18 @@ function QueueRow({
   const send = async () => {
     if (sending) return
     setSending(true)
-    const bodyChanged = body.trim() !== item.body.trim()
-    try {
-      const res = await fetch("/api/draft/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: item.intercomConversationId, body }),
-      })
-      if (!res.ok) throw new Error(await readApiError(res, `Failed to send (${res.status})`))
-
-      const resolveRes = await fetch("/api/reply-queue/resolve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId: item.intercomConversationId,
-          suggestionId: item.id,
-          action: bodyChanged ? "edit" : "approve",
-          bodyChanged,
-          finalBody: body,
-        }),
-      }).catch(() => null)
-      toast.success(`Sent to ${item.customerName ?? "the customer"}`)
-      onDone(item.id)
-      if (!resolveRes?.ok) {
-        toast.warning("Sent to Intercom, but couldn't clear the queue yet. Refreshing.")
-        void onRefresh()
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't send. Open the case and try there.")
+    const result = await postSendAndResolve(item, body)
+    if (!result.ok) {
+      toast.error(result.error ?? "Couldn't send. Open the case and try there.")
       setSending(false)
       setConfirming(false)
+      return
+    }
+    toast.success(`Sent to ${item.customerName ?? "the customer"}`)
+    onDone(item.id)
+    if (!result.resolvedOk) {
+      toast.warning("Sent to Intercom, but couldn't clear the queue yet. Refreshing.")
+      void onRefresh()
     }
   }
 
@@ -525,20 +800,11 @@ function QueueRow({
 
   const reject = async () => {
     setRejecting(true)
-    try {
-      const res = await fetch("/api/reply-queue/resolve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId: item.intercomConversationId,
-          suggestionId: item.id,
-          action: "reject",
-        }),
-      })
-      if (!res.ok) throw new Error(await res.text())
+    const result = await postReject(item)
+    if (result.ok) {
       toast.success("Suggestion dismissed")
       onDone(item.id)
-    } catch {
+    } else {
       toast.error("Couldn't dismiss this suggestion.")
       setRejecting(false)
     }
@@ -547,32 +813,54 @@ function QueueRow({
   const citable = item.sources.filter((s) => s.url)
 
   return (
-    <article className="rounded-md border bg-card transition-colors hover:border-foreground/20">
-      <button
-        type="button"
-        onClick={() => setExpanded((e) => !e)}
-        className="flex w-full flex-col gap-0.5 px-2.5 py-2 text-left"
-      >
-        <span className="flex items-center gap-2">
-          <span className="truncate text-xs font-medium">
-            {item.customerName ?? "Customer"}
-          </span>
-          {item.riskBand === "low_confidence" && (
-            <Badge
-              variant="outline"
-              className="h-4 px-1 text-[10px] font-normal text-muted-foreground"
-            >
-              review carefully
-            </Badge>
-          )}
-          <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground">
-            {relativeTime(item.createdAt)}
-          </span>
-        </span>
-        {item.subject && (
-          <span className="truncate text-[11px] text-muted-foreground">{item.subject}</span>
+    <article
+      className={cn(
+        "rounded-md border bg-card transition-colors hover:border-foreground/20",
+        selected && "border-foreground/30 bg-accent/40"
+      )}
+    >
+      <div className="flex items-start gap-2 px-2.5 py-2">
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => {}}
+            // onClick (not onChange) carries shiftKey — needed for range selection.
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleSelect?.(e.shiftKey)
+            }}
+            aria-label={`Select suggestion for ${item.customerName ?? "customer"}`}
+            className="mt-0.5 size-3.5 shrink-0 cursor-pointer rounded border-muted-foreground/40 accent-primary"
+          />
         )}
-      </button>
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
+        >
+          <span className="flex items-center gap-2">
+            <span className="truncate text-xs font-medium">
+              {item.customerName ?? "Customer"}
+            </span>
+            {item.riskBand === "low_confidence" && (
+              <Badge
+                variant="outline"
+                className="h-4 px-1 text-[10px] font-normal text-muted-foreground"
+              >
+                review carefully
+              </Badge>
+            )}
+            <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground">
+              {relativeTime(item.createdAt)}
+            </span>
+          </span>
+          {item.subject && (
+            <span className="truncate text-[11px] text-muted-foreground">{item.subject}</span>
+          )}
+        </button>
+      </div>
 
       {expanded && (
         <div className="border-t px-2.5 py-2.5">
