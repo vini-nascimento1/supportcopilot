@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import {
@@ -9,6 +9,7 @@ import {
   RadarIcon,
   ShieldAlertIcon,
   SparklesIcon,
+  SquareIcon,
   StarIcon,
   UserPlusIcon,
   XIcon,
@@ -34,6 +35,10 @@ const AUDIENCE_OPTIONS = Object.keys(AUDIENCES) as Array<keyof typeof AUDIENCES>
 const MAX_KEYWORDS = 20
 const MAX_MATCHED_TERMS_SHOWN = 4
 const PREFS_SAVE_DEBOUNCE_MS = 600
+// Mirrors BULK_MAX in app/api/reply-queue/assign-bulk/route.ts — lets the
+// client know exactly which selected ids the server will actually attempt,
+// so only those (not ids beyond the cap) get removed from the list on success.
+const BULK_ASSIGN_MAX = 15
 
 // The "Triage" tab of the canvas left sidebar: a filtered, urgency-ranked view
 // of open conversations nobody is working (unassigned, or Fin-held), swept
@@ -43,7 +48,10 @@ const PREFS_SAVE_DEBOUNCE_MS = 600
 // (lib/triage/match.ts filterAndRank). Every row has exactly one human-gated
 // write — "Assign to me" (POST /api/reply-queue/assign), the same endpoint the
 // Inbox tab uses — which assigns in Intercom and kicks off the AI draft; the
-// case then shows up in the Queue tab. Nothing else here writes anywhere.
+// case then shows up in the Queue tab. The agent can also multi-select rows
+// and claim them together via "Assign N + draft" (POST
+// /api/reply-queue/assign-bulk) — still one explicit click, just batched; the
+// AI never auto-assigns either way. Nothing else here writes anywhere.
 export function TriagePanel({
   active,
   onCount,
@@ -61,6 +69,8 @@ export function TriagePanel({
   const [savingPrefs, setSavingPrefs] = useState(false)
   const [keywordDraft, setKeywordDraft] = useState("")
   const [assigningId, setAssigningId] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkAssigning, setBulkAssigning] = useState(false)
 
   // Whether the in-flight/pending prefs save carries a keyword change with
   // expand=true — that's the only save shape that costs an LLM call, so it's
@@ -108,6 +118,24 @@ export function TriagePanel({
   useEffect(() => {
     onCount?.(ranked?.length ?? 0)
   }, [ranked, onCount])
+
+  // Derived, not synced via an effect: whenever the ranked list reloads, any
+  // selected id no longer present (assigned/closed/filtered out elsewhere)
+  // simply drops out of this view. The underlying `selected` set may still
+  // hold the stale id, but nothing reads `selected` directly for display or
+  // actions — only this filtered value — so it behaves exactly as if the
+  // selection had been reset.
+  const selectedVisible = useMemo(() => {
+    if (!ranked || selected.size === 0) return selected
+    const liveIds = new Set(ranked.map((r) => r.item.conversationId))
+    let changed = false
+    const next = new Set<string>()
+    for (const id of selected) {
+      if (liveIds.has(id)) next.add(id)
+      else changed = true
+    }
+    return changed ? next : selected
+  }, [ranked, selected])
 
   useEffect(() => {
     return () => {
@@ -279,6 +307,67 @@ export function TriagePanel({
     }
   }
 
+  const toggleSelect = useCallback((conversationId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(conversationId)) next.delete(conversationId)
+      else next.add(conversationId)
+      return next
+    })
+  }, [])
+
+  const toggleSelectAll = useCallback(() => {
+    setSelected(
+      selectedVisible.size > 0 ? new Set() : new Set((ranked ?? []).map((r) => r.item.conversationId))
+    )
+  }, [selectedVisible, ranked])
+
+  const assignSelected = async () => {
+    const ids = Array.from(selectedVisible)
+    if (ids.length === 0) return
+    // Mirror the server's own cap/order so we know exactly which ids it will
+    // have attempted, independent of what it reports back.
+    const taken = ids.slice(0, BULK_ASSIGN_MAX)
+
+    setBulkAssigning(true)
+    try {
+      const res = await fetch("/api/reply-queue/assign-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationIds: ids }),
+      })
+      if (!res.ok) throw new Error(await readApiError(res, `Failed (${res.status})`))
+      const data = await res.json()
+
+      const assignedCount = typeof data.assigned === "number" ? data.assigned : 0
+      const failedList: Array<{ conversationId: string; error?: string }> = Array.isArray(data.failed)
+        ? data.failed
+        : []
+      const dropped = typeof data.dropped === "number" ? data.dropped : 0
+      const failedIds = new Set(failedList.map((f) => f.conversationId))
+
+      toast.success(`Assigned ${assignedCount} — drafting replies`)
+      if (failedList.length > 0) {
+        toast.warning(`${failedList.length} couldn't be assigned`)
+      }
+      if (dropped > 0) {
+        toast.info(`Only the first ${BULK_ASSIGN_MAX} were sent (${dropped} not sent)`)
+      }
+
+      // Remove only the ids the server actually took AND succeeded on — ids
+      // beyond the cap were never attempted, and failed ids stay so the
+      // agent can retry them.
+      const removedIds = new Set(taken.filter((id) => !failedIds.has(id)))
+      setRanked((prev) => (prev ? prev.filter((r) => !removedIds.has(r.item.conversationId)) : prev))
+      setSelected(new Set())
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't assign the selected cases.")
+    } finally {
+      setBulkAssigning(false)
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <TriageHeader
@@ -313,18 +402,62 @@ export function TriagePanel({
         {ranked !== null && ranked.length > 0 && (
           <div className="flex flex-col gap-1.5 p-2">
             {error && <p className="px-1 text-xs text-destructive">{error}</p>}
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              disabled={bulkAssigning}
+              className="flex w-fit items-center gap-1.5 px-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              {selectedVisible.size > 0 ? (
+                <CheckIcon className="size-3.5 text-primary" />
+              ) : (
+                <SquareIcon className="size-3.5" />
+              )}
+              {selectedVisible.size > 0 ? `Clear (${selectedVisible.size})` : "Select all"}
+            </button>
             {ranked.map((entry) => (
               <TriageRow
                 key={entry.item.conversationId}
                 entry={entry}
                 assigning={assigningId === entry.item.conversationId}
-                disabled={assigningId !== null}
+                disabled={assigningId !== null || bulkAssigning}
+                selected={selectedVisible.has(entry.item.conversationId)}
+                selectDisabled={bulkAssigning}
+                onToggleSelect={() => toggleSelect(entry.item.conversationId)}
                 onAssign={() => void assignToMe(entry.item.conversationId)}
               />
             ))}
           </div>
         )}
       </div>
+
+      {selectedVisible.size > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-t bg-background px-2 py-2">
+          <span className="text-[11px] text-muted-foreground">{selectedVisible.size} selected</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 px-2 text-[11px]"
+            onClick={() => setSelected(new Set())}
+            disabled={bulkAssigning}
+          >
+            Clear
+          </Button>
+          <Button
+            size="sm"
+            className="h-7 px-2.5 text-xs"
+            onClick={() => void assignSelected()}
+            disabled={bulkAssigning}
+          >
+            {bulkAssigning ? (
+              <Loader2Icon className="size-3.5 animate-spin" />
+            ) : (
+              <UserPlusIcon className="size-3.5" />
+            )}
+            Assign {selectedVisible.size} + draft
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
@@ -518,11 +651,17 @@ function TriageRow({
   entry,
   assigning,
   disabled,
+  selected,
+  selectDisabled,
+  onToggleSelect,
   onAssign,
 }: {
   entry: RankedTriageItem
   assigning: boolean
   disabled: boolean
+  selected: boolean
+  selectDisabled: boolean
+  onToggleSelect: () => void
   onAssign: () => void
 }) {
   const nav = useCanvasNav()
@@ -590,24 +729,49 @@ function TriageRow({
   )
 
   return (
-    <article className="rounded-md border bg-card transition-colors hover:border-foreground/20">
-      {/* Row body: peeks the case (no assignment) — client-side tab switch when
-          this canvas is inside the keep-alive workspace (nav present), a plain
-          navigation link on the route-per-canvas pages otherwise. Same split
-          as InboxPanel/QueuePanel. */}
-      {nav ? (
+    <article
+      className={cn(
+        "rounded-md border bg-card transition-colors hover:border-foreground/20",
+        selected && "border-primary/60 bg-primary/5",
+        selectDisabled && "opacity-60"
+      )}
+    >
+      {/* Row body: checkbox toggles multi-select without opening the peek
+          (stopPropagation); the rest of the row peeks the case (no
+          assignment) — client-side tab switch when this canvas is inside the
+          keep-alive workspace (nav present), a plain navigation link on the
+          route-per-canvas pages otherwise. Same split as InboxPanel/QueuePanel. */}
+      <div className="flex items-start gap-1 px-1.5 pt-1.5">
         <button
           type="button"
-          onClick={openPeek}
-          className="flex w-full flex-col gap-1 px-2.5 py-2 text-left"
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleSelect()
+          }}
+          disabled={selectDisabled}
+          aria-pressed={selected}
+          aria-label={selected ? "Deselect case" : "Select case"}
+          className={cn(
+            "mt-0.5 flex size-4 shrink-0 items-center justify-center disabled:opacity-50",
+            selected ? "text-primary" : "text-muted-foreground/50 hover:text-muted-foreground"
+          )}
         >
-          {header}
+          {selected ? <CheckIcon className="size-4" /> : <SquareIcon className="size-4" />}
         </button>
-      ) : (
-        <Link href={caseHref} className="flex w-full flex-col gap-1 px-2.5 py-2 text-left">
-          {header}
-        </Link>
-      )}
+        {nav ? (
+          <button
+            type="button"
+            onClick={openPeek}
+            className="flex w-full flex-col gap-1 pb-1.5 text-left"
+          >
+            {header}
+          </button>
+        ) : (
+          <Link href={caseHref} className="flex w-full flex-col gap-1 pb-1.5 text-left">
+            {header}
+          </Link>
+        )}
+      </div>
       <div className="flex items-center gap-1.5 border-t px-2.5 py-1.5">
         <Button
           size="sm"

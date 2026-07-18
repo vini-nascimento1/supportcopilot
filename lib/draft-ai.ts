@@ -115,10 +115,31 @@ export function hasAgentPersonallyReplied(
   return messages.some((m) => m.role === "admin" && m.authorId === agentAdminId)
 }
 
-function greetingToneRule(hasAgentReplied: boolean): string {
-  return hasAgentReplied
-    ? `- **Do not greet or thank again.** You (this agent) have already sent at least one message earlier in this thread — pick up naturally as the same agent continuing the conversation, even if a greeting hasn't been used since.`
-    : `- **Open with a warm greeting.** You have not personally sent any message in this thread yet — even if a teammate or the AI bot already replied, this is your first message here. Open with a warm greeting + thanks (e.g. "Hey! 👋 Thanks for reaching out to Fanvue Support...") before the actual answer.`
+// The mandatory opening line for a reply where THIS agent has not spoken in the
+// thread yet (feedback: Vincenzo greeting rule). The reply-queue pipeline injects
+// this deterministically AFTER generation rather than trusting the model to
+// reproduce it, so the exact wording AND the agent's name are guaranteed on every
+// draft. When there is no real agent name (generic fallback), the "I'm X" clause
+// is dropped rather than reading "I'm the support team".
+export function buildAgentGreeting(agentName: string): string {
+  const name = agentName && agentName !== "the support team" ? agentName.trim() : ""
+  return name
+    ? `Hey! 👋 Thanks for reaching out to Fanvue Support, I'm ${name}. I'll do my best to assist you today! 😊`
+    : `Hey! 👋 Thanks for reaching out to Fanvue Support. I'll do my best to assist you today! 😊`
+}
+
+// greetingInjected = the caller (the reply-queue pipeline) will prepend
+// buildAgentGreeting() itself, so the model must NOT write its own greeting or it
+// would double up. Left false for the manual/macro-adapt/improve paths, which
+// have no code-side injection and still want the model to open warmly.
+function greetingToneRule(hasAgentReplied: boolean, greetingInjected: boolean): string {
+  if (hasAgentReplied) {
+    return `- **Do not greet or thank again.** You (this agent) have already sent at least one message earlier in this thread — pick up naturally as the same agent continuing the conversation, even if a greeting hasn't been used since.`
+  }
+  if (greetingInjected) {
+    return `- **Do not write any opening greeting, thanks line, or your own name.** A standard greeting (already carrying your name) is added automatically before your text — begin directly with the substantive answer to the customer's latest message.`
+  }
+  return `- **Open with a warm greeting.** You have not personally sent any message in this thread yet — even if a teammate or the AI bot already replied, this is your first message here. Open with a warm greeting + thanks (e.g. "Hey! 👋 Thanks for reaching out to Fanvue Support...") before the actual answer.`
 }
 
 const CAPABILITY_BOUNDARY_RULES = `## Capability boundaries — do not fake checks
@@ -135,7 +156,8 @@ export function buildSystemPrompt(
   examples: ResponseItem[],
   agentName: string,
   articles: IntercomArticle[],
-  hasAgentReplied = false
+  hasAgentReplied = false,
+  greetingInjected = false
 ): string {
   const parts: string[] = []
 
@@ -158,7 +180,7 @@ Playbooks cover only some cases — when the thread and the playbook disagree, t
 
 ## Tone rules
 - Warm, personal, first-person. Light emoji (👋 😊 💛) — 1-2 max, never forced.
-${greetingToneRule(hasAgentReplied)}
+${greetingToneRule(hasAgentReplied, greetingInjected)}
 - Never use the customer's real name.
 - Use **bold** for key requirements or action steps.
 - Use short bullet lists when listing multiple steps (4 max).
@@ -269,9 +291,17 @@ export function buildNotionAwareSystemPrompt(
   agentName: string,
   articles: IntercomArticle[],
   notionSnippets: NotionSnippet[],
-  hasAgentReplied = false
+  hasAgentReplied = false,
+  greetingInjected = false
 ): string {
-  const base = buildSystemPrompt(playbook, examples, agentName, articles, hasAgentReplied)
+  const base = buildSystemPrompt(
+    playbook,
+    examples,
+    agentName,
+    articles,
+    hasAgentReplied,
+    greetingInjected
+  )
   if (notionSnippets.length === 0) return base
 
   const citable = notionSnippets.filter((s) => classifyNotionSnippetUse(s) === "customerSafe")
@@ -570,7 +600,7 @@ Your task: **rewrite the approved macro below** so it fits this specific convers
 
 ## Tone rules
 - Warm, personal, first-person. Light emoji (👋 😊 💛) — 1-2 max, never forced.
-${greetingToneRule(hasAgentReplied)}
+${greetingToneRule(hasAgentReplied, false)}
 - Never use the customer's real name.
 - Use **bold** for the key requirements or action steps.
 - Use short bullet lists when listing multiple steps (4 max).
