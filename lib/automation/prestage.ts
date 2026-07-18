@@ -9,13 +9,26 @@ import "server-only"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getConversationDetail, type ConversationDetail } from "@/lib/intercom"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
+import { hasAgentPersonallyReplied } from "@/lib/draft-ai"
 import { withVerbooSlot } from "@/lib/verboo-throttle"
 
 const VERBOO_API_KEY = process.env.VERBOO_API_KEY
 const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
 
-const TONE = `You are a support copilot for a senior Fanvue support agent. Write a warm, first-person customer reply, ready to copy-paste.
-Rules: open with "Hey! 👋 Thanks for reaching out to Fanvue Support…" (do NOT use the customer's real name, and never guess or invent one); light emoji (1-2 max); **bold** key steps; short bullet lists (max 4); exactly one call-to-action; no sign-off and NO signature of any kind (never write your own name, initials, or a "- <name>" closing); never promise timelines/refunds/exceptions not in the playbook. **Write in English only — always:** no matter what language the customer wrote in (Portuguese, Spanish, French, anything), your reply MUST be in English; never mirror the customer's language. Output ONLY the message text — no preamble, no headers.`
+// "Has THIS case's owning agent personally replied" — not "has any admin/bot
+// replied". Previously this prompt unconditionally forced the greeting every
+// time, AND the user message below only ever included the customer's own
+// messages — so the model had no way to know an agent had already spoken even
+// if it wanted to. Both are fixed here: prior agent messages are now in
+// context, and the greeting instruction is computed in code from the
+// Intercom author id rather than hardcoded as "always greet".
+function tone(hasAgentReplied: boolean): string {
+  const greeting = hasAgentReplied
+    ? `Do NOT greet or thank again — the owning agent has already sent at least one message in this thread; continue naturally as the same agent picking the conversation back up`
+    : `Open with "Hey! 👋 Thanks for reaching out to Fanvue Support…" — the owning agent has not personally replied in this thread yet`
+  return `You are a support copilot for a senior Fanvue support agent. Write a warm, first-person customer reply, ready to copy-paste.
+Rules: ${greeting} (do NOT use the customer's real name, and never guess or invent one); light emoji (1-2 max); **bold** key steps; short bullet lists (max 4); exactly one call-to-action; no sign-off and NO signature of any kind (never write your own name, initials, or a "- <name>" closing); never promise timelines/refunds/exceptions not in the playbook. **Write in English only — always:** no matter what language the customer wrote in (Portuguese, Spanish, French, anything), your reply MUST be in English; never mirror the customer's language. Output ONLY the message text — no preamble, no headers.`
+}
 
 function buildUserMessage(c: ConversationDetail, playbook?: { caseType: string; resolution?: string | null }): string {
   // Withhold the customer's real name/email from the model (privacy). The thread
@@ -24,10 +37,15 @@ function buildUserMessage(c: ConversationDetail, playbook?: { caseType: string; 
     `Customer identity: withheld for privacy — never address the customer by name.`,
     `\nOriginal message:\n${c.firstMessage}`,
   ]
-  const followUps = c.messages.filter((m) => m.role === "customer" && m.body.trim()).slice(0, 3)
-  if (followUps.length) {
-    parts.push(`\nFollow-up messages:`)
-    followUps.forEach((m) => parts.push(`- ${m.body}`))
+  // Include prior agent replies too (not just the customer's) — the model was
+  // previously blind to anything an agent had already told this customer,
+  // risking a repeated or contradicted answer.
+  const priorTurns = c.messages
+    .filter((m) => (m.role === "customer" || m.role === "admin") && m.body.trim())
+    .slice(0, 6)
+  if (priorTurns.length) {
+    parts.push(`\nConversation so far:`)
+    priorTurns.forEach((m) => parts.push(`- ${m.role === "admin" ? "Agent" : "Customer"}: ${m.body}`))
   }
   if (playbook) {
     parts.push(`\nPlaybook: ${playbook.caseType}`)
@@ -139,9 +157,14 @@ export async function prestageDraft(conversationId: string | null): Promise<Pres
     ? playbooks.allRows.find((p) => p.id === caseRow.playbook_id)
     : undefined
 
+  // Use the conversation's LIVE Intercom assignee (not a stored owner_id) —
+  // matches how the main reply-queue pipeline derives this same fact, and
+  // reflects the current assignment rather than a possibly-stale case row.
+  const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, conversation.adminAssigneeId)
+
   let reply: string
   try {
-    reply = await generate(TONE, buildUserMessage(conversation, playbook))
+    reply = await generate(tone(hasAgentReplied), buildUserMessage(conversation, playbook))
   } catch (e) {
     return { applied: false, detail: (e as Error).message }
   }

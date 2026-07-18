@@ -9,21 +9,25 @@ import {
   buildGroundedDraftUserMessage,
   buildImproveSystemPrompt,
   buildImproveUserMessage,
+  hasAgentPersonallyReplied,
   streamChatCompletion,
 } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
 import { encodeImageAttachments } from "@/lib/attachments"
 import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
 
-async function getAgentName(email: string): Promise<string> {
+async function getAgent(email: string): Promise<{ name: string; intercomAdminId: string | null }> {
   const supabase = getSupabaseAdminClient()
-  if (!supabase) return "the support team"
+  if (!supabase) return { name: "the support team", intercomAdminId: null }
   const { data } = await supabase
     .from("agents")
-    .select("name")
+    .select("name, intercom_admin_id")
     .eq("email", email)
     .maybeSingle()
-  return data?.name?.split(" ")[0] ?? "the support team"
+  return {
+    name: data?.name?.split(" ")[0] ?? "the support team",
+    intercomAdminId: (data?.intercom_admin_id as string | undefined) ?? null,
+  }
 }
 
 // ── Route handler ──────────────────────────────────────────────────────────
@@ -76,7 +80,7 @@ export async function POST(req: NextRequest) {
     ? ((await getResponsesForPlaybookIds([playbookId])).get(playbookId) ?? [])
     : []
 
-  const agentName = await getAgentName(email)
+  const { name: agentName, intercomAdminId } = await getAgent(email)
 
   let systemPrompt: string
   let userMessage: OpenAIMessage["content"]
@@ -98,13 +102,17 @@ export async function POST(req: NextRequest) {
     // (not connected, needs re-consent, or no hits).
     const { origin } = new URL(req.url)
     const snippets = await retrieveNotionSnippets(email, origin, searchQuery)
+    // "Has THIS signed-in agent personally replied" — not "has any agent
+    // replied". See lib/draft-ai.ts's hasAgentPersonallyReplied for why the
+    // generic admin label can't be trusted for this on its own.
+    const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, intercomAdminId)
     systemPrompt =
       snippets.length > 0
-        ? buildNotionAwareSystemPrompt(playbook, responseTemplates, agentName, articles, snippets)
-        : buildSystemPrompt(playbook, responseTemplates, agentName, articles)
+        ? buildNotionAwareSystemPrompt(playbook, responseTemplates, agentName, articles, snippets, hasAgentReplied)
+        : buildSystemPrompt(playbook, responseTemplates, agentName, articles, hasAgentReplied)
 
     const images = await encodeImageAttachments(conversation.messages)
-    userMessage = await buildGroundedDraftUserMessage(conversation, images)
+    userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied)
   }
 
   const encoder = new TextEncoder()

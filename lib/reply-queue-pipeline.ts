@@ -16,6 +16,7 @@ import {
   buildNotionAwareSystemPrompt,
   buildGroundedDraftUserMessage,
   buildDraftVerifierMessages,
+  hasAgentPersonallyReplied,
   streamChatCompletion,
   type OpenAIMessage,
 } from "@/lib/draft-ai"
@@ -215,10 +216,16 @@ export async function computeAndPersistSuggestion(
     getAgentFirstName(owner.email),
     searchArticles(ticketText),
   ])
+  // "Has THIS agent personally replied" — not "has any agent replied". Most
+  // threads already carry a reply from some other teammate (or the bot's
+  // assignment greeting), which is not the same as this specific owner having
+  // said anything yet. Computed from the Intercom author id, not inferred by
+  // the model from the generic "Agent:" label.
+  const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, conversation.adminAssigneeId)
   const systemPrompt = notionHadHits
-    ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets)
-    : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles)
-  const userMessage = await buildGroundedDraftUserMessage(conversation, images)
+    ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied)
+    : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied)
+  const userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied)
   const messages: OpenAIMessage[] = [
     { role: "system", content: systemPrompt },
     { role: "user", content: userMessage },

@@ -2,18 +2,26 @@ import { type NextRequest } from "next/server"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getSignedInEmail } from "@/lib/auth"
 import { getConversationDetail } from "@/lib/intercom"
-import { buildMacroAdaptSystemPrompt, buildMacroAdaptUserMessage, streamChatCompletion } from "@/lib/draft-ai"
+import {
+  buildMacroAdaptSystemPrompt,
+  buildMacroAdaptUserMessage,
+  hasAgentPersonallyReplied,
+  streamChatCompletion,
+} from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
 
-async function getAgentName(email: string): Promise<string> {
+async function getAgent(email: string): Promise<{ name: string; intercomAdminId: string | null }> {
   const supabase = getSupabaseAdminClient()
-  if (!supabase) return "the support team"
+  if (!supabase) return { name: "the support team", intercomAdminId: null }
   const { data } = await supabase
     .from("agents")
-    .select("name")
+    .select("name, intercom_admin_id")
     .eq("email", email)
     .maybeSingle()
-  return data?.name?.split(" ")[0] ?? "the support team"
+  return {
+    name: data?.name?.split(" ")[0] ?? "the support team",
+    intercomAdminId: (data?.intercom_admin_id as string | undefined) ?? null,
+  }
 }
 
 // Minimal server-side HTML → plain-text strip (DOMParser is client-only).
@@ -102,8 +110,9 @@ export async function POST(req: NextRequest) {
     return new Response("Conversation not found in Intercom", { status: 404 })
   }
 
-  const agentName = await getAgentName(email)
-  const systemPrompt = buildMacroAdaptSystemPrompt(macroText, agentName)
+  const { name: agentName, intercomAdminId } = await getAgent(email)
+  const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, intercomAdminId)
+  const systemPrompt = buildMacroAdaptSystemPrompt(macroText, agentName, hasAgentReplied)
   const userMessage = buildMacroAdaptUserMessage(conversation)
 
   const encoder = new TextEncoder()
