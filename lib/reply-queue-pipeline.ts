@@ -275,6 +275,7 @@ export async function computeAndPersistSuggestion(
     confidence: gate.reason === "error" ? null : gate.confidence,
     gateReason: gate.reason,
     riskBand: band,
+    playbookId: matched?.id ?? null,
     onRequest: opts?.onRequest ?? false,
   })
 

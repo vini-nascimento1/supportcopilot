@@ -481,6 +481,7 @@ function QueueRow({
           suggestionId: item.id,
           action: bodyChanged ? "edit" : "approve",
           bodyChanged,
+          finalBody: body,
         }),
       }).catch(() => null)
       toast.success(`Sent to ${item.customerName ?? "the customer"}`)

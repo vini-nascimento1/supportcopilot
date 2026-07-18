@@ -6,6 +6,7 @@ import {
   deriveRiskBand,
   isSendLocked,
   classifyWebhookTopic,
+  hasBodyChanged,
   LOCKED_CATEGORIES,
 } from "./reply-queue"
 
@@ -95,6 +96,21 @@ describe("isSendLocked", () => {
     expect(isSendLocked("needs_check")).toBe(true)
     expect(isSendLocked("ready")).toBe(false)
     expect(isSendLocked("low_confidence")).toBe(false)
+  })
+})
+
+describe("hasBodyChanged", () => {
+  it("is false when the text is identical", () => {
+    expect(hasBodyChanged("Hi there, thanks!", "Hi there, thanks!")).toBe(false)
+  })
+
+  it("is false for whitespace/newline-only differences", () => {
+    expect(hasBodyChanged("Hi there.\n\nThanks!", "Hi   there. Thanks!")).toBe(false)
+    expect(hasBodyChanged("  Hi there  ", "Hi there")).toBe(false)
+  })
+
+  it("is true for a real word change", () => {
+    expect(hasBodyChanged("Hi there, thanks!", "Hi there, thank you!")).toBe(true)
   })
 })
 

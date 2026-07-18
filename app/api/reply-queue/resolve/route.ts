@@ -14,6 +14,7 @@ type ResolvePayload = {
   suggestionId?: string
   action?: ReplyQueueAction
   bodyChanged?: boolean
+  finalBody?: string
 }
 
 // Mark a suggestion resolved after the agent approved it. The actual customer
@@ -49,6 +50,7 @@ export async function POST(req: Request) {
     suggestionId,
     conversationId,
     bodyChanged: payload.bodyChanged,
+    finalBody: payload.finalBody,
   })
   await resolveSuggestionOnReply(conversationId, action === "reject" ? "stale" : "approved")
   return NextResponse.json({ ok: true })
