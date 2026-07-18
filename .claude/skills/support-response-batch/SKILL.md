@@ -155,6 +155,47 @@ When a creator reports this exact error (or shares a screenshot of it) during id
 - If you can't check Fadmin yourself, say so plainly and escalate rather than guessing — do not tell the customer it's a duplicate document, a bad document, or a country block unless Fadmin confirms it.
 - Once the real reason is confirmed: duplicate-document cases need the duplicate-account conflict resolved; bad-document cases need a new document type; country-block cases should be explained honestly (no ETA on when/if that will change unless you know one).
 
+## 4h. New account blocked because the ID is already on file — never suggest "change your email"
+
+When a **new** account fails verification because the creator already has an existing, verified account under a different email, the customer often follows up with something like "how do I change my email?" — **email is not the mechanism here, and changing it will not fix anything.**
+
+- **Email changes on Fanvue are essentially never possible.** There is exactly **one** narrow exception: if a creator has already requested a **crypto payout via TripleA** and lost access to the email that payout confirmation is going to, we can redirect that specific payout's TripleA "Claim" email to a new address — this requires a selfie holding a government ID to confirm identity, is per-payout (not permanent), and does **not** change the actual account/login email. It never applies to a plain "I want a new account" situation.
+- **"One ID = one account" is only true for real (non-AI) creators.** AI creators are the opposite: **one verified ID can be linked across up to 15 AI creator accounts.**
+- The correct branch depends entirely on which type of creator this is — ask if it isn't already clear:
+  - **AI creator, wants multiple accounts:** if the new account hasn't been created yet and the original account has no active/past warnings, self-serve works: **Settings > Account > Linked Accounts > Create new linked account** — existing verification carries over automatically, no re-verification. If the account already exists, or there's a warning on the original, it needs **manual linking** — collect the main account's email/username and the new account's email/username and link internally.
+  - **Real (non-AI) creator:** only one verified account is allowed per person, full stop. The path forward is **recovering access to the original account**, not creating a new one — the ID cannot be reused across two separate real-creator accounts.
+- **Never suggest changing the email** on either the existing or the new account as the fix for this — it does not resolve anything and just sends the customer down a dead end.
+
+## 4i. KYC mismatch dispute — creator insists content is AI-generated, not real
+
+When a creator's content got flagged as a KYC/content mismatch and they push back insisting the flagged media is **100% AI-generated**, not real footage of a person, this needs proof — not a Support judgment call. Support does not make the final AI/non-AI call; it goes to moderation.
+
+**Macro (send once the creator has explained/pushed back, adapt tone as needed):**
+```
+Thank you for clarifying that — I really appreciate you taking the time to explain. To help us verify that your content is 100% AI-generated and not based on any real likenesses, I'd like to ask for a screen recording video that shows the full creation process for one of the pieces of media that was flagged. This will allow our team to confirm and update our review.
+
+Could you please record a video (using your phone or screen capture software) that demonstrates:
+
+- The AI tool/software you used
+- The exact prompt(s) you entered to generate the flagged media
+- The full generation process, step by step
+- The final output, matching the media we identified
+
+Once you have that, just reply here with the video file. We will review it. Thanks again for your patience — I know this has been frustrating, and I want to help get this sorted for you. 😊
+```
+
+**Then — separately — generate and send a Birdie upload link:**
+- The video is collected via a **personalized Birdie recording link** (app.birdie.so / fanvue.birdie.so recorder), not as a plain Intercom attachment.
+- **Generate a new, case-specific link for this customer every time** — the link encodes that specific submission (customer id + email). Never reuse or paste a Birdie link that was generated for a different customer or a different case.
+- Send the macro above first, then follow up with the generated Birdie link once you have it.
+
+**What counts as proof (do not accept less):**
+- Real-time generation, start to finish — not a finished file, not scrolling through a library of already-generated images.
+- The tool/software clearly shown, the actual prompt(s)/inputs used, and a final output that matches the flagged media.
+- If the recording only shows picking a file from a library rather than generating it live, it's not acceptable — ask for a new recording that captures the actual generation process.
+
+**After the video comes in:** escalate to moderation with the customer id, the flagged media id(s), and the recording link — this is a moderation call, not a Support one. Proof covering one flagged item only clears that item, not the whole account.
+
 ## 5. Draft standards (voice & format)
 - Present each draft with a clickable header link to the conversation:
   `**[email](https://app.intercom.com/a/inbox/yzo8ff0f/inbox/conversation/<CONVERSATION_ID>)** — short issue tag → **Macro name**`
