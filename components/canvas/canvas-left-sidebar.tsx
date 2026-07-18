@@ -5,6 +5,7 @@ import {
   InboxIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  RadarIcon,
   SparklesIcon,
 } from "lucide-react"
 
@@ -13,12 +14,16 @@ import { cn } from "@/lib/utils"
 import { useCanvasActive } from "@/components/canvas/active-context"
 import { InboxPanel } from "@/components/canvas/inbox-panel"
 import { QueuePanel } from "@/components/canvas/queue-panel"
+import { TriagePanel } from "@/components/canvas/triage-panel"
 
 // The canvas left sidebar — a fixed, collapsible left rail on every canvas with
-// two tabs:
+// three tabs:
 //   • Inbox — live Intercom conversations (Mine / Unassigned / a teammate) with
-//     one-click "Assign to me" and open-in-canvas. The triage view.
+//     one-click "Assign to me" and open-in-canvas.
 //   • Queue — the autonomous AI reply suggestions for the agent's own cases.
+//   • Triage — the swept pool of open conversations nobody is working
+//     (unassigned or Fin-held), filtered/ranked by the agent's own keyword +
+//     audience prefs, with the same one-click "Assign to me".
 // Collapse and tab selection persist in localStorage and sync across panes via
 // window events. Panels only poll while this pane is the visible one, the
 // sidebar is open, and their tab is selected — so background panes don't hammer
@@ -29,7 +34,7 @@ const COLLAPSE_EVENT = "fv-canvas-queue-toggled"
 const TAB_KEY = "fv-canvas-left-tab"
 const TAB_EVENT = "fv-canvas-left-tab-changed"
 
-type Tab = "inbox" | "queue"
+type Tab = "inbox" | "queue" | "triage"
 
 function subscribeCollapse(cb: () => void) {
   window.addEventListener(COLLAPSE_EVENT, cb)
@@ -65,6 +70,7 @@ export function CanvasLeftSidebar() {
 
   const [inboxCount, setInboxCount] = useState(0)
   const [queueCount, setQueueCount] = useState(0)
+  const [triageCount, setTriageCount] = useState(0)
 
   const toggleCollapse = () => {
     try {
@@ -87,7 +93,8 @@ export function CanvasLeftSidebar() {
   // Only the visible pane, open, on the selected tab actually polls.
   const inboxActive = paneActive && !collapsed && tab === "inbox"
   const queueActive = paneActive && !collapsed && tab === "queue"
-  const railCount = tab === "inbox" ? inboxCount : queueCount
+  const triageActive = paneActive && !collapsed && tab === "triage"
+  const railCount = tab === "inbox" ? inboxCount : tab === "queue" ? queueCount : triageCount
 
   return (
     <div
@@ -125,6 +132,13 @@ export function CanvasLeftSidebar() {
             label="Queue"
             count={queueCount}
           />
+          <TabButton
+            active={tab === "triage"}
+            onClick={() => setTab("triage")}
+            icon={<RadarIcon className="size-3.5" />}
+            label="Triage"
+            count={triageCount}
+          />
           <button
             onClick={toggleCollapse}
             title="Collapse the sidebar"
@@ -143,6 +157,9 @@ export function CanvasLeftSidebar() {
         </div>
         <div className={cn("min-h-0 flex-1", tab !== "queue" && "hidden")}>
           <QueuePanel active={queueActive} onCount={setQueueCount} />
+        </div>
+        <div className={cn("min-h-0 flex-1", tab !== "triage" && "hidden")}>
+          <TriagePanel active={triageActive} onCount={setTriageCount} />
         </div>
       </div>
     </div>
