@@ -660,6 +660,15 @@ export type SweepConversation = {
    * "awaiting first response" state) even when Fin has already messaged.
    */
   firstAdminReplyAtSec: number | null
+  /**
+   * Raw (still-HTML) first customer message body, straight from `source.body`.
+   * Added for the triage sweep (lib/triage/sweep.ts), which needs the message
+   * text separately from `subject` (subject already falls back to body above,
+   * which is right for a queue-row title but loses the distinction the sweep's
+   * keyword matcher needs). Every other SweepConversation caller ignores this
+   * field — no existing semantics change.
+   */
+  body: string | null
 }
 
 function toSweepConversation(c: IntercomSearchConversation): {
@@ -688,6 +697,7 @@ function toSweepConversation(c: IntercomSearchConversation): {
       waitingSinceSec: typeof c.waiting_since === "number" ? c.waiting_since : null,
       firstAdminReplyAtSec:
         typeof c.statistics?.first_admin_reply_at === "number" ? c.statistics.first_admin_reply_at : null,
+      body: c.source?.body ?? null,
     },
   }
 }
