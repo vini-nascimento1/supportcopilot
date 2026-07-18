@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 
 import {
+  buildAgentGreeting,
   buildImproveSystemPrompt,
   buildImproveUserMessage,
   buildMacroAdaptSystemPrompt,
@@ -335,5 +336,19 @@ describe("buildImproveUserMessage", () => {
     expect(out).toContain("hey we cant change payout now")
     expect(out).toContain("Current draft to improve")
     expect(out).toContain("still stuck")
+  })
+})
+
+describe("buildAgentGreeting", () => {
+  it("embeds the agent's name in the mandated opening line", () => {
+    expect(buildAgentGreeting("Vincenzo")).toBe(
+      "Hey! 👋 Thanks for reaching out to Fanvue Support, I'm Vincenzo. I'll do my best to assist you today! 😊"
+    )
+  })
+
+  it("drops the 'I'm X' clause when there is no real agent name", () => {
+    const generic = "Hey! 👋 Thanks for reaching out to Fanvue Support. I'll do my best to assist you today! 😊"
+    expect(buildAgentGreeting("the support team")).toBe(generic)
+    expect(buildAgentGreeting("")).toBe(generic)
   })
 })

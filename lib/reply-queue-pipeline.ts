@@ -16,6 +16,7 @@ import {
   buildNotionAwareSystemPrompt,
   buildGroundedDraftUserMessage,
   buildDraftVerifierMessages,
+  buildAgentGreeting,
   hasAgentPersonallyReplied,
   streamChatCompletion,
   type OpenAIMessage,
@@ -222,9 +223,13 @@ export async function computeAndPersistSuggestion(
   // said anything yet. Computed from the Intercom author id, not inferred by
   // the model from the generic "Agent:" label.
   const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, conversation.adminAssigneeId)
+  // When this agent hasn't spoken in the thread yet, the mandated opening
+  // greeting (with their name) is injected deterministically below — so the
+  // model is told NOT to write its own greeting and never double up.
+  const greetingInjected = !hasAgentReplied
   const systemPrompt = notionHadHits
-    ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied)
-    : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied)
+    ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied, greetingInjected)
+    : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied, greetingInjected)
   const userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied)
   const messages: OpenAIMessage[] = [
     { role: "system", content: systemPrompt },
@@ -251,6 +256,15 @@ export async function computeAndPersistSuggestion(
   } catch {
     // Keep the original draft if the verifier is unavailable; generation still
     // remains draft-only and reviewable before send.
+  }
+
+  // Prepend the mandated opening greeting (with the agent's name) when this
+  // agent hasn't spoken in the thread yet. Injected here, after the verifier,
+  // so the exact wording + name are guaranteed rather than left to the model
+  // (feedback: Vincenzo greeting rule). The system prompt already told the
+  // model not to write its own greeting, so this never doubles up.
+  if (greetingInjected) {
+    body = `${buildAgentGreeting(agentName)}\n\n${body.trim()}`
   }
 
   const sources: SuggestionSource[] = snippets
