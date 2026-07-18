@@ -1135,3 +1135,37 @@ export async function closeConversation(
   }
   return { ok: true, status: res.status }
 }
+
+/** Assign an Intercom conversation to an admin (admin_id and assignee_id are
+    the same signed-in agent — this is a self-assign, not a handoff). Real
+    write — only ever called behind an explicit human click (see ADR-0011),
+    whether that's the single "Assign to me" button or the Triage panel's
+    bulk "Assign N + draft" action. Returns true on success. */
+export async function assignConversationToAdmin(
+  conversationId: string,
+  adminId: string,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!intercomToken) return { ok: false, status: 500, error: "No Intercom token" }
+  const res = await fetchIntercom(
+    `https://api.intercom.io/conversations/${conversationId}/parts`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${intercomToken}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "Intercom-Version": "2.11",
+      },
+      body: JSON.stringify({
+        message_type: "assignment",
+        type: "admin",
+        admin_id: adminId,
+        assignee_id: adminId,
+      }),
+    },
+  )
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await res.text().catch(() => "") }
+  }
+  return { ok: true, status: res.status }
+}

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
-import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getAgentContext } from "@/lib/automation/rules"
+import { assignConversationToAdmin } from "@/lib/intercom"
 import { assignSuggestion } from "@/lib/reply-queue-store"
 import {
   computeAndPersistSuggestion,
@@ -11,7 +11,6 @@ import {
 export const dynamic = "force-dynamic"
 
 const INTERCOM_TOKEN = process.env.INTERCOM_ACCESS_TOKEN
-const INTERCOM_API = "https://api.intercom.io"
 
 // Assign an unassigned conversation to the signed-in agent (the 4th human-gated
 // Intercom write alongside admin-reply / send-macro / close, per ADR-0011).
@@ -55,24 +54,13 @@ export async function POST(req: Request) {
   }
 
   // Human-gated Intercom assignment write
-  const assignRes = await fetch(`${INTERCOM_API}/conversations/${conversationId}/parts`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${INTERCOM_TOKEN}`,
-      "Content-Type": "application/json",
-      "Intercom-Version": "2.11",
-    },
-    body: JSON.stringify({
-      message_type: "assignment",
-      type: "admin",
-      admin_id: adminId,
-      assignee_id: adminId,
-    }),
-  })
+  const assignRes = await assignConversationToAdmin(conversationId, adminId)
 
   if (!assignRes.ok) {
-    const text = await assignRes.text().catch(() => "unknown")
-    return NextResponse.json({ error: `Intercom assignment failed: ${text}` }, { status: 502 })
+    return NextResponse.json(
+      { error: `Intercom assignment failed: ${assignRes.error ?? "unknown"}` },
+      { status: 502 }
+    )
   }
 
   // Claim the pending suggestion row
