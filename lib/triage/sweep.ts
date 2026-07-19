@@ -9,17 +9,19 @@ import "server-only"
 // never writes to Intercom, sends, or assigns anything (ADR-0003/0007/0011).
 // nowMs is injected (not read from the clock) so the sweep stays deterministic.
 
-import { searchOpenConversationsForAdmin, type SweepConversation } from "@/lib/intercom"
+import { searchOpenConversations, type SweepConversation } from "@/lib/intercom"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
 import { getTopMatches } from "@/lib/case-intelligence"
 import { hasCapabilityGap } from "@/lib/reply-queue"
-import { replaceTriagePool, type TriageItemRow } from "./store"
+import { replaceTriagePool, setTriageSweepStatus, type TriageItemRow } from "./store"
 
 export type TriageSweepSummary = {
   pooled: number
   matched: number
   swept: number
+  /** false when the open-queue pagination hit its cap (pool is a partial snapshot). */
+  complete: boolean
   error: string | null
 }
 
@@ -51,19 +53,27 @@ function isUnassigned(conv: SweepConversation): boolean {
 
 export async function runTriageSweep(nowMs: number): Promise<TriageSweepSummary> {
   const sweepStartedIso = new Date(nowMs).toISOString()
-  const empty: TriageSweepSummary = { pooled: 0, matched: 0, swept: 0, error: null }
+  const empty: TriageSweepSummary = { pooled: 0, matched: 0, swept: 0, complete: false, error: null }
 
   const db = getSupabaseAdminClient()
   if (!db) return { ...empty, error: "no admin client" }
 
   // (a) Global open queue — no admin id means "every open conversation",
   // mirroring how runMonitorSweep fetches the full queue once rather than
-  // per-agent.
+  // per-agent. `complete` is false when the page cap was hit — the pool is
+  // then a partial snapshot and MUST NOT be pruned (see below).
   let allOpen: SweepConversation[]
+  let complete: boolean
   try {
-    allOpen = await searchOpenConversationsForAdmin()
+    const res = await searchOpenConversations()
+    allOpen = res.conversations
+    complete = res.complete
   } catch (e) {
-    return { ...empty, error: `intercom search: ${(e as Error).message}` }
+    // A hard failure mid-pagination: record it so the panel can warn, and
+    // leave the existing pool intact (no prune) rather than showing nothing.
+    const error = `intercom search: ${(e as Error).message}`
+    await setTriageSweepStatus({ ranAt: sweepStartedIso, complete: false, seen: 0, error })
+    return { ...empty, error }
   }
 
   // (b) Pool = strictly UNASSIGNED open conversations (no admin assignee).
@@ -102,10 +112,15 @@ export async function runTriageSweep(nowMs: number): Promise<TriageSweepSummary>
     }
   })
 
-  // (e) Full-replace pool refresh — see replaceTriagePool for why the delete
-  // is conditioned on the upsert succeeding.
-  const result = await replaceTriagePool(rows, sweepStartedIso)
-  if (!result.ok) return { pooled: pool.length, matched, swept: 0, error: result.error }
+  // (e) Full-replace pool refresh. Prune (delete un-refreshed rows) ONLY on a
+  // complete sweep — a partial one didn't see the whole queue, so pruning would
+  // evict still-unassigned conversations it just didn't reach this run.
+  const result = await replaceTriagePool(rows, sweepStartedIso, { prune: complete })
+  if (!result.ok) {
+    await setTriageSweepStatus({ ranAt: sweepStartedIso, complete: false, seen: allOpen.length, error: result.error })
+    return { pooled: pool.length, matched, swept: 0, complete: false, error: result.error }
+  }
 
-  return { pooled: pool.length, matched, swept: rows.length, error: null }
+  await setTriageSweepStatus({ ranAt: sweepStartedIso, complete, seen: allOpen.length, error: null })
+  return { pooled: pool.length, matched, swept: rows.length, complete, error: null }
 }

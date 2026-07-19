@@ -2,7 +2,12 @@ import { NextResponse } from "next/server"
 
 import { getAgentContext } from "@/lib/automation/rules"
 import { EMPTY_TRIAGE_PREFS, filterAndRank } from "@/lib/triage/match"
-import { getTriagePrefs, listTriageItems, getLatestSweptAt } from "@/lib/triage/store"
+import {
+  getTriagePrefs,
+  listTriageItems,
+  getLatestSweptAt,
+  getTriageSweepStatus,
+} from "@/lib/triage/store"
 
 export const dynamic = "force-dynamic"
 
@@ -23,10 +28,11 @@ export async function GET() {
     return NextResponse.json({ items: [], pool: 0, prefs: EMPTY_TRIAGE_PREFS, sweptAt: null })
   }
 
-  const [items, prefs, sweptAt] = await Promise.all([
+  const [items, prefs, sweptAt, sweepStatus] = await Promise.all([
     listTriageItems(),
     getTriagePrefs(agentId),
     getLatestSweptAt(),
+    getTriageSweepStatus(),
   ])
 
   const ranked = filterAndRank(items, prefs, Date.now())
@@ -36,5 +42,8 @@ export async function GET() {
     pool: items.length,
     prefs,
     sweptAt,
+    // Lets the panel warn when the pool count is only a partial snapshot
+    // (last sweep hit its page cap or errored mid-pagination).
+    sweepStatus,
   })
 }

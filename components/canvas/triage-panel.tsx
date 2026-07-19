@@ -23,6 +23,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
 import { readApiError } from "@/lib/api-error"
 import { onCanvasRefresh } from "@/lib/canvas-refresh"
+import {
+  markRecentlyAssigned,
+  readRecentlyAssigned,
+  subscribeRecentlyAssigned,
+} from "@/lib/triage-recently-assigned"
 import { cn, relativeTime } from "@/lib/utils"
 import {
   AUDIENCES,
@@ -30,6 +35,10 @@ import {
   type RankedTriageItem,
   type TriagePrefs,
 } from "@/lib/triage/match"
+
+// Mirrors lib/triage/store.ts TriageSweepStatus — that module is server-only
+// and can't be imported into this client component.
+type TriageSweepStatus = { ranAt: string; complete: boolean; seen: number; error: string | null }
 
 const AUDIENCE_OPTIONS = Object.keys(AUDIENCES) as Array<keyof typeof AUDIENCES>
 const MAX_KEYWORDS = 20
@@ -71,6 +80,10 @@ export function TriagePanel({
   const [assigningId, setAssigningId] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkAssigning, setBulkAssigning] = useState(false)
+  const [sweepStatus, setSweepStatus] = useState<TriageSweepStatus | null>(null)
+  // Ids the agent just claimed — hidden locally until the TTL expires, in case
+  // a poll races the server's pool delete (see lib/triage-recently-assigned).
+  const [recentlyAssigned, setRecentlyAssigned] = useState<Set<string>>(() => new Set())
 
   // Whether the in-flight/pending prefs save carries a keyword change with
   // expand=true — that's the only save shape that costs an LLM call, so it's
@@ -91,6 +104,11 @@ export function TriagePanel({
       setRanked(Array.isArray(data.items) ? data.items : [])
       setPool(typeof data.pool === "number" ? data.pool : 0)
       setSweptAt(typeof data.sweptAt === "string" ? data.sweptAt : null)
+      setSweepStatus(
+        data.sweepStatus && typeof data.sweepStatus.complete === "boolean"
+          ? (data.sweepStatus as TriageSweepStatus)
+          : null
+      )
       if (!prefsDirtyRef.current) {
         setPrefs(data.prefs ?? EMPTY_TRIAGE_PREFS)
         lastKeywordsKeyRef.current = (data.prefs?.keywords ?? []).join(",")
@@ -115,9 +133,28 @@ export function TriagePanel({
     }
   }, [active, load])
 
+  // Keep the local "just assigned" set in sync (written by assign/bulk below,
+  // and possibly by another pane via the storage event).
   useEffect(() => {
-    onCount?.(ranked?.length ?? 0)
-  }, [ranked, onCount])
+    const sync = () => setRecentlyAssigned(readRecentlyAssigned())
+    sync()
+    return subscribeRecentlyAssigned(sync)
+  }, [])
+
+  // What the panel actually shows: the ranked list minus anything the agent
+  // just claimed (server already evicts these; this covers a poll that raced
+  // the delete). Null while loading, same as `ranked`.
+  const visibleRanked = useMemo(
+    () =>
+      ranked && recentlyAssigned.size > 0
+        ? ranked.filter((r) => !recentlyAssigned.has(r.item.conversationId))
+        : ranked,
+    [ranked, recentlyAssigned]
+  )
+
+  useEffect(() => {
+    onCount?.(visibleRanked?.length ?? 0)
+  }, [visibleRanked, onCount])
 
   // Derived, not synced via an effect: whenever the ranked list reloads, any
   // selected id no longer present (assigned/closed/filtered out elsewhere)
@@ -126,8 +163,8 @@ export function TriagePanel({
   // actions — only this filtered value — so it behaves exactly as if the
   // selection had been reset.
   const selectedVisible = useMemo(() => {
-    if (!ranked || selected.size === 0) return selected
-    const liveIds = new Set(ranked.map((r) => r.item.conversationId))
+    if (!visibleRanked || selected.size === 0) return selected
+    const liveIds = new Set(visibleRanked.map((r) => r.item.conversationId))
     let changed = false
     const next = new Set<string>()
     for (const id of selected) {
@@ -135,7 +172,7 @@ export function TriagePanel({
       else changed = true
     }
     return changed ? next : selected
-  }, [ranked, selected])
+  }, [visibleRanked, selected])
 
   useEffect(() => {
     return () => {
@@ -298,6 +335,7 @@ export function TriagePanel({
       })
       if (!res.ok) throw new Error(await readApiError(res, `Failed (${res.status})`))
       toast.success("Assigned — drafting a reply")
+      markRecentlyAssigned([conversationId])
       remove(conversationId)
       if (nav) nav.open(conversationId)
     } catch (err) {
@@ -318,9 +356,11 @@ export function TriagePanel({
 
   const toggleSelectAll = useCallback(() => {
     setSelected(
-      selectedVisible.size > 0 ? new Set() : new Set((ranked ?? []).map((r) => r.item.conversationId))
+      selectedVisible.size > 0
+        ? new Set()
+        : new Set((visibleRanked ?? []).map((r) => r.item.conversationId))
     )
-  }, [selectedVisible, ranked])
+  }, [selectedVisible, visibleRanked])
 
   const assignSelected = async () => {
     const ids = Array.from(selectedVisible)
@@ -358,6 +398,7 @@ export function TriagePanel({
       // beyond the cap were never attempted, and failed ids stay so the
       // agent can retry them.
       const removedIds = new Set(taken.filter((id) => !failedIds.has(id)))
+      markRecentlyAssigned(Array.from(removedIds))
       setRanked((prev) => (prev ? prev.filter((r) => !removedIds.has(r.item.conversationId)) : prev))
       setSelected(new Set())
       await load()
@@ -374,6 +415,7 @@ export function TriagePanel({
         sweptAt={sweptAt}
         pool={pool}
         sweeping={sweeping}
+        sweepStatus={sweepStatus}
         onSweep={() => void sweepNow()}
       />
       <FilterBar
@@ -390,8 +432,8 @@ export function TriagePanel({
       />
 
       <div className="flex-1 overflow-y-auto">
-        {ranked === null && <TriageSkeleton />}
-        {ranked !== null && ranked.length === 0 && (
+        {visibleRanked === null && <TriageSkeleton />}
+        {visibleRanked !== null && visibleRanked.length === 0 && (
           <TriageEmptyState
             pool={pool}
             hasFilters={hasFilters}
@@ -399,7 +441,7 @@ export function TriagePanel({
             onClearFilters={clearFilters}
           />
         )}
-        {ranked !== null && ranked.length > 0 && (
+        {visibleRanked !== null && visibleRanked.length > 0 && (
           <div className="flex flex-col gap-1.5 p-2">
             {error && <p className="px-1 text-xs text-destructive">{error}</p>}
             <button
@@ -415,7 +457,7 @@ export function TriagePanel({
               )}
               {selectedVisible.size > 0 ? `Clear (${selectedVisible.size})` : "Select all"}
             </button>
-            {ranked.map((entry) => (
+            {visibleRanked.map((entry) => (
               <TriageRow
                 key={entry.item.conversationId}
                 entry={entry}
@@ -466,33 +508,53 @@ function TriageHeader({
   sweptAt,
   pool,
   sweeping,
+  sweepStatus,
   onSweep,
 }: {
   sweptAt: string | null
   pool: number
   sweeping: boolean
+  sweepStatus: TriageSweepStatus | null
   onSweep: () => void
 }) {
   const swept = sweptAt ? relativeTime(sweptAt) : ""
+  // The pool count is only trustworthy when the last sweep ran to completion.
+  // A partial/errored sweep means the queue is bigger than what's shown and
+  // some conversations weren't refreshed this run — flag it so the agent reads
+  // "N in pool" as a floor, not the whole picture.
+  const partial = sweepStatus != null && !sweepStatus.complete
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b px-2 py-2">
-      <RadarIcon className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="truncate text-[11px] text-muted-foreground">
-        Last swept {swept || "never"}
-      </span>
-      <Badge variant="secondary" className="h-5 shrink-0 px-1.5 font-normal tabular-nums">
-        {pool} in pool
-      </Badge>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="ml-auto h-7 px-2 text-[11px] text-muted-foreground"
-        onClick={onSweep}
-        disabled={sweeping}
-      >
-        {sweeping ? <Loader2Icon className="size-3.5 animate-spin" /> : <RadarIcon className="size-3.5" />}
-        Sweep now
-      </Button>
+    <div className="flex shrink-0 flex-col gap-1 border-b px-2 py-2">
+      <div className="flex items-center gap-2">
+        <RadarIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate text-[11px] text-muted-foreground">
+          Last swept {swept || "never"}
+        </span>
+        <Badge
+          variant={partial ? "outline" : "secondary"}
+          className="h-5 shrink-0 px-1.5 font-normal tabular-nums"
+        >
+          {pool} in pool{partial ? "+" : ""}
+        </Badge>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-7 px-2 text-[11px] text-muted-foreground"
+          onClick={onSweep}
+          disabled={sweeping}
+        >
+          {sweeping ? <Loader2Icon className="size-3.5 animate-spin" /> : <RadarIcon className="size-3.5" />}
+          Sweep now
+        </Button>
+      </div>
+      {partial && (
+        <p className="flex items-center gap-1 text-[10px] leading-tight text-amber-600 dark:text-amber-400">
+          <ShieldAlertIcon className="size-3 shrink-0" />
+          {sweepStatus?.error
+            ? "Last sweep couldn't finish — showing the last good pool; some may be missing or stale."
+            : "Large queue — last sweep was partial; more may be unassigned than shown."}
+        </p>
+      )}
     </div>
   )
 }

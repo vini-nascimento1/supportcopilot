@@ -3,6 +3,7 @@ import { NextResponse, after } from "next/server"
 import { getAgentContext } from "@/lib/automation/rules"
 import { assignConversationToAdmin } from "@/lib/intercom"
 import { assignSuggestion } from "@/lib/reply-queue-store"
+import { removeTriageItems } from "@/lib/triage/store"
 import { computeAndPersistSuggestion } from "@/lib/reply-queue-pipeline"
 
 export const dynamic = "force-dynamic"
@@ -88,6 +89,10 @@ export async function POST(req: Request) {
       failed.push({ conversationId: id, error: res.error ?? `Intercom ${res.status}` })
     }
   }
+
+  // Drop the just-assigned ids from the triage pool immediately so they don't
+  // linger in the panel until the next sweep. Best-effort.
+  await removeTriageItems(assigned)
 
   // Background draft generation — see the top-of-file comment. Does not block
   // the response; a failure here never unwinds the assignment already made.

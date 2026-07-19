@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { getAgentContext } from "@/lib/automation/rules"
 import { assignConversationToAdmin } from "@/lib/intercom"
 import { assignSuggestion } from "@/lib/reply-queue-store"
+import { removeTriageItems } from "@/lib/triage/store"
 import {
   computeAndPersistSuggestion,
   type PipelineOutcome,
@@ -65,6 +66,11 @@ export async function POST(req: Request) {
 
   // Claim the pending suggestion row
   await assignSuggestion(conversationId, agentId)
+
+  // Drop it from the triage pool immediately — it's now assigned, so it must
+  // not reappear in the Triage panel on the next poll before the sweep catches
+  // up (the sweep can lag or run partial). Best-effort.
+  await removeTriageItems([conversationId])
 
   // Trigger the Notion deep search (D10: now has an owner, so ai_search runs)
   const origin = new URL(req.url).origin

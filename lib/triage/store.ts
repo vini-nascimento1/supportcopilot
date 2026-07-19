@@ -55,21 +55,31 @@ export type ReplacePoolResult = { ok: boolean; error: string | null }
 /**
  * Full-replace refresh of the triage pool for one sweep run: upsert every row
  * the sweep produced (onConflict intercom_conversation_id — a conversation
- * already in the pool just gets its fields refreshed), then delete any row
- * whose swept_at predates this sweep's start — i.e. it wasn't touched by the
- * upsert above, because it fell out of the pool (a human picked it up, it
- * closed, etc).
+ * already in the pool just gets its fields refreshed), then (when `prune`)
+ * delete any row whose swept_at predates this sweep's start — i.e. it wasn't
+ * touched by the upsert above, because it fell out of the pool (a human picked
+ * it up, it closed, etc).
  *
  * The delete only runs if the upsert succeeds (or there was nothing to
  * upsert). If we deleted unconditionally, a failed/partial upsert would still
  * wipe out the previous sweep's rows, leaving the UI with a truncated or
  * empty pool instead of the last known-good one — so a bad run aborts before
  * the delete and the existing pool is left intact.
+ *
+ * `prune` MUST be false for a PARTIAL sweep (one that hit the page cap or
+ * errored mid-pagination). A partial sweep only saw a subset of the pool, so
+ * deleting the un-refreshed rows would wrongly evict conversations that are
+ * still genuinely unassigned — it just didn't get to revisit them this run.
+ * On a partial sweep we upsert what we saw and leave the rest intact; the next
+ * complete sweep prunes, and the real-time removal paths (assign routes,
+ * webhook reconcile) keep the assigned ones from lingering meanwhile.
  */
 export async function replaceTriagePool(
   rows: TriageItemRow[],
-  sweepStartedIso: string
+  sweepStartedIso: string,
+  opts: { prune?: boolean } = {}
 ): Promise<ReplacePoolResult> {
+  const { prune = true } = opts
   const db = getSupabaseAdminClient()
   if (!db) return { ok: false, error: "no admin client" }
 
@@ -80,13 +90,71 @@ export async function replaceTriagePool(
     if (error) return { ok: false, error: error.message }
   }
 
-  const { error: deleteError } = await db
-    .from("triage_items")
-    .delete()
-    .lt("swept_at", sweepStartedIso)
-  if (deleteError) return { ok: false, error: deleteError.message }
+  if (prune) {
+    const { error: deleteError } = await db
+      .from("triage_items")
+      .delete()
+      .lt("swept_at", sweepStartedIso)
+    if (deleteError) return { ok: false, error: deleteError.message }
+  }
 
   return { ok: true, error: null }
+}
+
+/**
+ * Evict conversations from the triage pool immediately, without waiting for the
+ * next sweep. Called the moment a conversation leaves the pool through a path
+ * the sweep can't see in real time: an agent claims it (assign routes), or any
+ * assignment/close arrives over the webhook. Best-effort — a failure here just
+ * means the row lingers until the next complete sweep prunes it.
+ */
+export async function removeTriageItems(conversationIds: string[]): Promise<void> {
+  if (conversationIds.length === 0) return
+  const db = getSupabaseAdminClient()
+  if (!db) return
+  await db.from("triage_items").delete().in("intercom_conversation_id", conversationIds)
+}
+
+// ── Last-sweep status (settings table) ──────────────────────────────────────
+// Persisted so the panel can tell the agent when the pool count is only a
+// partial snapshot (the sweep hit its page cap or errored mid-pagination) vs a
+// complete, trustworthy one. Both the cron and the manual "Sweep now" go
+// through runTriageSweep, which writes this.
+
+const SWEEP_STATUS_KEY = "triage_sweep_status"
+
+export type TriageSweepStatus = {
+  /** ISO time the sweep run finished. */
+  ranAt: string
+  /** true = the whole open queue was paged through; false = capped/errored early. */
+  complete: boolean
+  /** How many conversations the sweep actually saw this run. */
+  seen: number
+  error: string | null
+}
+
+export async function setTriageSweepStatus(status: TriageSweepStatus): Promise<void> {
+  const db = getSupabaseAdminClient()
+  if (!db) return
+  await db.from("settings").upsert({ key: SWEEP_STATUS_KEY, value: status }, { onConflict: "key" })
+}
+
+export async function getTriageSweepStatus(): Promise<TriageSweepStatus | null> {
+  const db = getSupabaseAdminClient()
+  if (!db) return null
+  const { data } = await db
+    .from("settings")
+    .select("value")
+    .eq("key", SWEEP_STATUS_KEY)
+    .maybeSingle()
+  const v = data?.value as Partial<TriageSweepStatus> | undefined
+  if (!v || typeof v.ranAt !== "string" || typeof v.complete !== "boolean") return null
+  return {
+    ranAt: v.ranAt,
+    complete: v.complete,
+    seen: typeof v.seen === "number" ? v.seen : 0,
+    error: typeof v.error === "string" ? v.error : null,
+  }
 }
 
 /** Every row in the triage pool, mapped to the read model. Unfiltered — the

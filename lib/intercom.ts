@@ -733,11 +733,30 @@ function toSweepConversation(c: IntercomSearchConversation): {
  *   when omitted fetches ALL open conversations.
  * @throws if INTERCOM_ACCESS_TOKEN is unset or the search request fails.
  */
-export async function searchOpenConversationsForAdmin(adminId?: string): Promise<SweepConversation[]> {
+// Hard page cap for the open-conversation search. 150 rows/page × 40 = 6,000
+// conversations — far past any real open queue, and the same ceiling
+// getOpenCasesQueue uses. Without a cap, one call on an abnormally large queue
+// paginates unbounded and blows past the route's maxDuration, which is what
+// made the triage sweep fail wholesale on big queues (and leave a stale pool).
+const MAX_SWEEP_PAGES = 40
+
+/**
+ * Page through the open-conversation search. Returns the conversations plus
+ * whether the pagination ran to completion — `complete: false` means the page
+ * cap was hit and the queue is larger than what's returned, so callers that
+ * prune based on "everything I didn't see is gone" MUST NOT prune on a partial
+ * result. `adminId` scopes to one assignee; omitted = the whole open queue.
+ * @throws if the token is unset or a search request fails.
+ */
+export async function searchOpenConversations(
+  opts: { adminId?: string; maxPages?: number } = {}
+): Promise<{ conversations: SweepConversation[]; complete: boolean }> {
   if (!intercomToken) throw new Error("INTERCOM_ACCESS_TOKEN is not set")
+  const { adminId, maxPages = MAX_SWEEP_PAGES } = opts
 
   const out: SweepConversation[] = []
   let startingAfter: string | undefined
+  let page = 0
 
   do {
     const queryFilters: Array<Record<string, unknown>> = [
@@ -778,9 +797,20 @@ export async function searchOpenConversationsForAdmin(adminId?: string): Promise
       out.push(conv)
     }
     startingAfter = payload.pages?.next?.starting_after
-  } while (startingAfter)
+    page += 1
+  } while (startingAfter && page < maxPages)
 
-  return out
+  // complete = we exhausted the cursor before hitting the cap.
+  return { conversations: out, complete: !startingAfter }
+}
+
+/** Back-compat wrapper: the conversations only, page-capped. Callers that don't
+    care whether the queue was fully paged (automation rule eval, AI chat tool)
+    use this; the triage sweep uses searchOpenConversations for the `complete`
+    flag. */
+export async function searchOpenConversationsForAdmin(adminId?: string): Promise<SweepConversation[]> {
+  const { conversations } = await searchOpenConversations({ adminId })
+  return conversations
 }
 
 // ── Intercom Help Center articles ───────────────────────────────────────────
