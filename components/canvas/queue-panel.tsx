@@ -26,6 +26,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
 import { readApiError } from "@/lib/api-error"
 import { onCanvasRefresh } from "@/lib/canvas-refresh"
+import { useCanvasListHotkeys } from "@/lib/canvas-hotkeys"
 import {
   addPendingOnRequestDrafts,
   isStuck,
@@ -396,6 +397,19 @@ export function QueuePanel({
     if (failed > 0) toast.warning(`${failed} couldn't be dismissed`)
   }
 
+  // Ctrl/Cmd+A toggles select-all (ready band); Ctrl/Cmd+Enter arms the
+  // "Approve & send" confirm, then a second press sends — a send is an
+  // irreversible outbound message, so it still takes the two-step confirm.
+  useCanvasListHotkeys({
+    active,
+    onSelectAll: toggleAllReady,
+    onPrimary: () => {
+      if (selectedIds.size === 0 || bulkActing) return
+      if (confirmBulkSend) void bulkApproveSend()
+      else setConfirmBulkSend(true)
+    },
+  })
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
@@ -463,7 +477,7 @@ export function QueuePanel({
                     checked={allReadySelected}
                     onChange={toggleAllReady}
                     aria-label="Select all ready to send"
-                    title="Select all"
+                    title="Select all (Ctrl+A) · Ctrl+Enter to approve & send"
                     className="size-3.5 shrink-0 cursor-pointer rounded border-muted-foreground/40 accent-primary"
                   />
                 }

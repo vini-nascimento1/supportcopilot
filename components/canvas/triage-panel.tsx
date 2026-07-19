@@ -23,6 +23,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
 import { readApiError } from "@/lib/api-error"
 import { onCanvasRefresh } from "@/lib/canvas-refresh"
+import { useCanvasListHotkeys } from "@/lib/canvas-hotkeys"
 import {
   markRecentlyAssigned,
   readRecentlyAssigned,
@@ -409,6 +410,17 @@ export function TriagePanel({
     }
   }
 
+  // Ctrl/Cmd+A toggles select-all; Ctrl/Cmd+Enter fires the primary bulk action
+  // ("Assign N + draft") on the current selection.
+  useCanvasListHotkeys({
+    active,
+    onSelectAll: toggleSelectAll,
+    onPrimary: () => {
+      if (selectedVisible.size === 0 || bulkAssigning) return
+      void assignSelected()
+    },
+  })
+
   return (
     <div className="flex h-full flex-col">
       <TriageHeader
@@ -448,6 +460,7 @@ export function TriagePanel({
               type="button"
               onClick={toggleSelectAll}
               disabled={bulkAssigning}
+              title="Select all (Ctrl+A) · Ctrl+Enter to assign + draft"
               className="flex w-fit items-center gap-1.5 px-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
             >
               {selectedVisible.size > 0 ? (

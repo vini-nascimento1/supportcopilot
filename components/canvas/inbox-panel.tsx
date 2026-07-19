@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/select"
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
 import { broadcastCanvasRefresh, onCanvasRefresh } from "@/lib/canvas-refresh"
+import { useCanvasListHotkeys } from "@/lib/canvas-hotkeys"
 import { addPendingOnRequestDrafts } from "@/lib/on-request-drafts"
 import {
   CHECKIN_MACRO,
@@ -470,6 +471,18 @@ export function InboxPanel({
         ? "Unassigned"
         : admins.find((a) => `admin:${a.id}` === inbox)?.name ?? "Teammate"
 
+  // Ctrl/Cmd+A toggles select-all; Ctrl/Cmd+Enter fires the primary bulk
+  // action (Generate in Mine, Assign to me elsewhere) on the current selection.
+  useCanvasListHotkeys({
+    active,
+    onSelectAll: toggleAll,
+    onPrimary: () => {
+      if (selectedIds.size === 0 || acting) return
+      if (showAssign) void bulkAssign()
+      else void bulkGenerate()
+    },
+  })
+
   return (
     <div className="flex h-full flex-col">
       {/* Inbox picker + select-all — pinned to the top of the panel. */}
@@ -481,7 +494,7 @@ export function InboxPanel({
             checked={allSelected}
             onChange={toggleAll}
             aria-label="Select all"
-            title="Select all"
+            title="Select all (Ctrl+A) · Ctrl+Enter runs the primary bulk action"
             className="size-3.5 shrink-0 cursor-pointer rounded border-muted-foreground/40 accent-primary"
           />
         )}
