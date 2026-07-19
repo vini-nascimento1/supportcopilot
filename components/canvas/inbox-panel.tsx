@@ -18,6 +18,7 @@ import {
   RefreshCwIcon,
   SparklesIcon,
   StarIcon,
+  UserMinusIcon,
   UserPlusIcon,
 } from "lucide-react"
 
@@ -427,6 +428,41 @@ export function InboxPanel({
     }
   }
 
+  // Bulk: move the selected conversations back to the Unassigned pool (assignee
+  // 0). Reversible (unlike close), so no separate confirm — the click is the
+  // explicit action. Handy for ejecting tickets stuck in the Fin/bot queue back
+  // to the pool. Each is unassigned as the agent's own admin id.
+  const bulkUnassign = async () => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    setActing(true)
+    try {
+      const results = await Promise.allSettled(
+        ids.map((id) =>
+          fetch("/api/cases/unassign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversationId: id }),
+          }).then((r) => {
+            if (!r.ok) throw new Error()
+          })
+        )
+      )
+      const ok = results.filter((r) => r.status === "fulfilled").length
+      const failed = ids.length - ok
+      clearSelection()
+      if (ok > 0) {
+        toast.success(`Moved ${ok} to Unassigned${failed > 0 ? `, ${failed} failed` : ""}.`)
+      } else {
+        toast.error("Couldn't move — try again.")
+      }
+      await load()
+      broadcastCanvasRefresh()
+    } finally {
+      setActing(false)
+    }
+  }
+
   const activeLabel =
     inbox === "mine"
       ? "Mine"
@@ -633,6 +669,22 @@ export function InboxPanel({
                   {checkinEligible.length !== selectedIds.size && (
                     <span className="tabular-nums opacity-70">({checkinEligible.length})</span>
                   )}
+                </Button>
+              )}
+              {/* Move to Unassigned — pointless in the Unassigned box itself, so
+                  hidden there. Reversible, so no confirm. Ejects tickets stuck in
+                  a bot/teammate queue back to the pool. */}
+              {inbox !== "unassigned" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 px-2.5 text-[11px]"
+                  onClick={() => void bulkUnassign()}
+                  disabled={acting}
+                  title="Move the selected conversations back to the Unassigned pool"
+                >
+                  <UserMinusIcon className="size-3.5" />
+                  Move to Unassigned
                 </Button>
               )}
               <Button

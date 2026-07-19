@@ -1194,3 +1194,37 @@ export async function assignConversationToAdmin(
   }
   return { ok: true, status: res.status }
 }
+
+/** Move an Intercom conversation back to the unassigned pool (assignee_id 0 =
+    Intercom's "nobody" sentinel). `adminId` is the actor performing the write.
+    Real write — only ever called behind an explicit human click (see ADR-0011).
+    Used to bulk-eject tickets stuck in a bot/other queue back to Unassigned.
+    Returns true on success. */
+export async function unassignConversation(
+  conversationId: string,
+  adminId: string,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!intercomToken) return { ok: false, status: 500, error: "No Intercom token" }
+  const res = await fetchIntercom(
+    `https://api.intercom.io/conversations/${conversationId}/parts`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${intercomToken}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "Intercom-Version": "2.11",
+      },
+      body: JSON.stringify({
+        message_type: "assignment",
+        type: "admin",
+        admin_id: adminId,
+        assignee_id: 0,
+      }),
+    },
+  )
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await res.text().catch(() => "") }
+  }
+  return { ok: true, status: res.status }
+}
