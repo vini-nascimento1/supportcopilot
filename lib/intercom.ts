@@ -745,14 +745,16 @@ const MAX_SWEEP_PAGES = 40
  * whether the pagination ran to completion — `complete: false` means the page
  * cap was hit and the queue is larger than what's returned, so callers that
  * prune based on "everything I didn't see is gone" MUST NOT prune on a partial
- * result. `adminId` scopes to one assignee; omitted = the whole open queue.
+ * result. `adminId` scopes to one assignee; `unassignedOnly` scopes to the
+ * Intercom "Unassigned" inbox (admin_assignee_id = 0); omit both = the whole
+ * open queue. `adminId` and `unassignedOnly` are mutually exclusive — pass one.
  * @throws if the token is unset or a search request fails.
  */
 export async function searchOpenConversations(
-  opts: { adminId?: string; maxPages?: number } = {}
+  opts: { adminId?: string; unassignedOnly?: boolean; maxPages?: number } = {}
 ): Promise<{ conversations: SweepConversation[]; complete: boolean }> {
   if (!intercomToken) throw new Error("INTERCOM_ACCESS_TOKEN is not set")
-  const { adminId, maxPages = MAX_SWEEP_PAGES } = opts
+  const { adminId, unassignedOnly, maxPages = MAX_SWEEP_PAGES } = opts
 
   const out: SweepConversation[] = []
   let startingAfter: string | undefined
@@ -766,6 +768,12 @@ export async function searchOpenConversations(
       const adminIdNum = Number(adminId)
       if (!Number.isFinite(adminIdNum)) throw new Error(`Invalid intercom_admin_id: ${adminId}`)
       queryFilters.push({ field: "admin_assignee_id", operator: "=", value: adminIdNum })
+    } else if (unassignedOnly) {
+      // Intercom encodes "unassigned" as admin_assignee_id = 0 (same value the
+      // Inbox "Unassigned" filter uses). Filtering here means the triage sweep
+      // fetches only the ~pool it keeps, not every open conversation workspace-
+      // wide — which is what actually made big-workspace sweeps slow/timeout.
+      queryFilters.push({ field: "admin_assignee_id", operator: "=", value: 0 })
     }
 
     const body: Record<string, unknown> = {

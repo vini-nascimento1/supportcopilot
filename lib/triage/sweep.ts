@@ -58,14 +58,16 @@ export async function runTriageSweep(nowMs: number): Promise<TriageSweepSummary>
   const db = getSupabaseAdminClient()
   if (!db) return { ...empty, error: "no admin client" }
 
-  // (a) Global open queue — no admin id means "every open conversation",
-  // mirroring how runMonitorSweep fetches the full queue once rather than
-  // per-agent. `complete` is false when the page cap was hit — the pool is
-  // then a partial snapshot and MUST NOT be pruned (see below).
+  // (a) Open + UNASSIGNED only — filtered server-side (admin_assignee_id = 0)
+  // so we fetch just the pool we keep (~130 max in practice = one page), not
+  // every open conversation workspace-wide. That server-side filter is the
+  // real fix for slow/timing-out sweeps; the page cap below is just a backstop.
+  // `complete` is false only if even the unassigned set overflows the cap — the
+  // pool is then a partial snapshot and MUST NOT be pruned (see below).
   let allOpen: SweepConversation[]
   let complete: boolean
   try {
-    const res = await searchOpenConversations()
+    const res = await searchOpenConversations({ unassignedOnly: true })
     allOpen = res.conversations
     complete = res.complete
   } catch (e) {
