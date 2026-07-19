@@ -242,6 +242,15 @@ Fanvue runs a **no-refund policy** (consumable digital service — access is ins
 
 **Refund mechanics (any refund leaf):** fadmin → Finance > Payments, filter status PAID + created within the last 90 days, search the fan handle, tick the rows → Refund / Ban / Refund & Ban. **Always leave admin notes on BOTH the creator and fan accounts.** The refund itself (money) is a manual human action in fadmin — the copilot only drafts the investigate / evidence-request reply, never the money movement.
 
+## 4l. "Giveaway" line in a creator's earnings history — internal label, not a transaction
+
+A creator's transaction/earnings history can show a line labeled **"Giveaway"** with a deduction (e.g. `-$112.15`). This is **never** something the creator purchased, a raffle they entered, or an unrelated transaction — it's **Fanvue's internal accounting label** for when compliance/finance deducts earnings from a creator's balance because those earnings are tied to **non-compliant content** (most commonly content removed for being stolen/non-original).
+
+- **Never guess an explanation for a "Giveaway" line.** Don't say things like "that's likely a separate purchase from another creator's page" — that's actively wrong and will send the creator looking in the wrong place. It is not a customer-facing transaction type at all.
+- Check for the internal note tied to the deduction — it's usually formatted like `<date> <initials>: Stolen content removed, associated earnings deducted (-$X)`. Confirm the actual date/amount/reason before answering; never invent one.
+- Once confirmed: explain plainly that the line is an earnings deduction tied to non-compliant content that was removed, share the confirmed date and amount, and note this is a compliance action, not a billing error — earnings from non-compliant/stolen content don't belong to the creator, so it's not typically reversed.
+- If the creator disputes the underlying content finding itself (insists the content was original/theirs), that's a different conversation — escalate per the KYC-mismatch/stolen-content playbook rather than resolving it here.
+
 ## 5. Draft standards (voice & format)
 - Present each draft with a clickable header link to the conversation:
   `**[email](https://app.intercom.com/a/inbox/yzo8ff0f/inbox/conversation/<CONVERSATION_ID>)** — short issue tag → **Macro name**`
