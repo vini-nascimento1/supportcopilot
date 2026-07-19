@@ -46,6 +46,7 @@ import {
   REVIEW_MACRO,
   customerSilentMinutes,
   inboxSlaSeverity,
+  isWaitingOnCustomer,
   type QuickMacro,
   type SlaSeverity,
 } from "@/lib/inbox-sla"
@@ -108,6 +109,7 @@ export function InboxPanel({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [acting, setActing] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
+  const [confirmCheckin, setConfirmCheckin] = useState(false)
   // Wall-clock, ticked by the poll below (never Date.now() during render — that
   // would be impure). Drives the per-row SLA staleness colouring so a row can
   // tip amber/red between reloads. Starts at 0 → severity is "none" on first
@@ -247,6 +249,7 @@ export function InboxPanel({
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set())
     setConfirmClose(false)
+    setConfirmCheckin(false)
     anchorRef.current = null
   }, [])
 
@@ -373,6 +376,49 @@ export function InboxPanel({
         toast.success(`Closed ${ok}${failed > 0 ? `, ${failed} failed` : ""}.`)
       } else {
         toast.error("Couldn't close — try again.")
+      }
+      await load()
+      broadcastCanvasRefresh()
+    } finally {
+      setActing(false)
+    }
+  }
+
+  // Selected rows the check-in macro genuinely applies to: we replied last and
+  // the customer has gone quiet (waiting on THEM). A selected row that's waiting
+  // on US is skipped — "we haven't heard back from you" would be wrong there.
+  const checkinEligible = (rows ?? []).filter(
+    (r) => selectedIds.has(r.id) && isWaitingOnCustomer(r.waitingSince, r.lastAdminReplyAt)
+  )
+
+  // Bulk: send the "just checking in" macro to every check-in-eligible selected
+  // conversation, then close it. Outward-facing customer message + close, so it's
+  // gated behind an explicit confirm. Ineligible selections (waiting on us) are
+  // left untouched and reported as skipped.
+  const bulkCheckinClose = async () => {
+    if (checkinEligible.length === 0) return
+    const eligible = checkinEligible
+    const skipped = selectedIds.size - eligible.length
+    setActing(true)
+    try {
+      const results = await Promise.allSettled(
+        eligible.map((r) =>
+          sendMacroAndClose(r.id, CHECKIN_MACRO.html).then((res) => {
+            if (!res.sent) throw new Error()
+          })
+        )
+      )
+      const ok = results.filter((r) => r.status === "fulfilled").length
+      const failed = eligible.length - ok
+      clearSelection()
+      if (ok > 0) {
+        toast.success(
+          `Sent check-in & closed ${ok}` +
+            (failed > 0 ? `, ${failed} failed` : "") +
+            (skipped > 0 ? `. ${skipped} skipped (waiting on us)` : "")
+        )
+      } else {
+        toast.error("Couldn't send — nothing was closed.")
       }
       await load()
       broadcastCanvasRefresh()
@@ -510,6 +556,34 @@ export function InboxPanel({
                 Close
               </Button>
             </div>
+          ) : confirmCheckin ? (
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">
+                Send check-in &amp; close {checkinEligible.length}?
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2.5 text-[11px]"
+                onClick={() => setConfirmCheckin(false)}
+                disabled={acting}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="h-7 gap-1.5 px-2.5 text-[11px]"
+                onClick={() => void bulkCheckinClose()}
+                disabled={acting}
+              >
+                {acting ? (
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                ) : (
+                  <ClockIcon className="size-3.5" />
+                )}
+                Send &amp; close
+              </Button>
+            </div>
           ) : (
             <div className="ml-auto flex items-center gap-1.5">
               {showAssign ? (
@@ -539,6 +613,26 @@ export function InboxPanel({
                     <SparklesIcon className="size-3.5" />
                   )}
                   Generate AI replies
+                </Button>
+              )}
+              {/* Bulk check-in & close — only when at least one selected row is
+                  waiting on the customer (see checkinEligible). */}
+              {checkinEligible.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 px-2.5 text-[11px]"
+                  onClick={() => setConfirmCheckin(true)}
+                  disabled={acting}
+                  title={`Send the check-in macro and close ${checkinEligible.length} quiet ${
+                    checkinEligible.length === 1 ? "ticket" : "tickets"
+                  }`}
+                >
+                  <ClockIcon className="size-3.5" />
+                  Check-in &amp; close
+                  {checkinEligible.length !== selectedIds.size && (
+                    <span className="tabular-nums opacity-70">({checkinEligible.length})</span>
+                  )}
                 </Button>
               )}
               <Button
@@ -678,6 +772,33 @@ const TONE_ICON_CLASS: Record<"warn" | "urgent" | "neutral", string> = {
   neutral: "text-muted-foreground hover:text-foreground",
 }
 
+// Send a verbatim macro (HTML) to a conversation, then close it. Send FIRST —
+// a failed reply must never leave a closed-but-unanswered ticket, so we only
+// close after the send succeeds. Shared by the per-row QuickCloseButton and the
+// bulk check-in action. Never throws — returns what happened for the caller to
+// toast/count.
+async function sendMacroAndClose(
+  conversationId: string,
+  html: string
+): Promise<{ sent: boolean; closed: boolean }> {
+  try {
+    const sent = await fetch("/api/draft/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId, body: html, html: true }),
+    })
+    if (!sent.ok) return { sent: false, closed: false }
+    const closed = await fetch("/api/cases/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId }),
+    })
+    return { sent: true, closed: closed.ok }
+  } catch {
+    return { sent: false, closed: false }
+  }
+}
+
 function QuickCloseButton({
   conversationId,
   macro,
@@ -701,31 +822,19 @@ function QuickCloseButton({
   const run = async () => {
     if (sending) return
     setSending(true)
-    try {
-      // Send first — if the reply fails we must NOT close (mirrors the queue's
-      // send-then-followup ordering). Macro HTML is sent verbatim (html: true).
-      const sent = await fetch("/api/draft/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId, body: macro.html, html: true }),
-      })
-      if (!sent.ok) throw new Error("send failed")
-      const closed = await fetch("/api/cases/close", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId }),
-      })
-      setOpen(false)
-      if (closed.ok) {
-        toast.success("Sent & closed.")
-      } else {
-        toast.warning("Sent, but couldn't close it — try closing manually.")
-      }
-      await onActed()
-    } catch {
+    const res = await sendMacroAndClose(conversationId, macro.html)
+    if (!res.sent) {
       toast.error("Couldn't send — nothing was closed. Try again.")
       setSending(false)
+      return
     }
+    setOpen(false)
+    if (res.closed) {
+      toast.success("Sent & closed.")
+    } else {
+      toast.warning("Sent, but couldn't close it — try closing manually.")
+    }
+    await onActed()
   }
 
   return (

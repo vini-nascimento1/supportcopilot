@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 
 import {
   inboxSlaSeverity,
+  isWaitingOnCustomer,
   customerSilentMinutes,
   CHECKIN_MACRO,
   REVIEW_MACRO,
@@ -11,6 +12,18 @@ import {
 
 const NOW = Date.parse("2026-07-18T12:00:00.000Z")
 const minsAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
+
+describe("isWaitingOnCustomer", () => {
+  it("is true when we replied last and nobody is waiting on us", () => {
+    expect(isWaitingOnCustomer(null, minsAgo(10))).toBe(true)
+  })
+  it("is false when the ticket is waiting on US (waitingSince set)", () => {
+    expect(isWaitingOnCustomer(minsAgo(5), minsAgo(90))).toBe(false)
+  })
+  it("is false when we never replied", () => {
+    expect(isWaitingOnCustomer(null, null)).toBe(false)
+  })
+})
 
 describe("inboxSlaSeverity", () => {
   it("is 'none' before the clock hydrates (nowMs <= 0)", () => {

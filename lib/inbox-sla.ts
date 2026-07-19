@@ -14,12 +14,25 @@ export const SLA_WARN_MINUTES = 30
 export const SLA_URGENT_MINUTES = 60
 
 /**
+ * True when the ball is in the CUSTOMER's court — we replied last and nobody is
+ * waiting on us. This is the precondition for the "just checking in, we haven't
+ * heard back from you" macro: sending it while WE owe a reply (waitingSince set)
+ * would be wrong, so both the colouring and the check-in-&-close actions gate on
+ * this. `waitingSince` non-null ⇒ waiting on us.
+ */
+export function isWaitingOnCustomer(
+  waitingSince: string | null,
+  lastAdminReplyAt: string | null
+): boolean {
+  if (waitingSince) return false
+  return Boolean(lastAdminReplyAt)
+}
+
+/**
  * Staleness severity for an OPEN inbox row — but ONLY while we're waiting on the
- * customer (we replied last / nobody is waiting on us). Returns "none" when:
+ * customer (see isWaitingOnCustomer). Returns "none" when:
  *  - the clock hasn't hydrated yet (nowMs <= 0) — avoids a false red on first paint;
- *  - the ticket is waiting on US (`waitingSince` set) — the "we haven't heard back
- *    from you" macro would be wrong there, so we never colour or offer it;
- *  - we never replied (nothing to nudge about yet).
+ *  - the ticket is waiting on US, or we never replied (isWaitingOnCustomer false).
  *
  * `waitingSince` and `lastAdminReplyAt` are ISO strings (or null).
  */
@@ -29,9 +42,8 @@ export function inboxSlaSeverity(
   nowMs: number
 ): SlaSeverity {
   if (nowMs <= 0) return "none"
-  if (waitingSince) return "none"
-  if (!lastAdminReplyAt) return "none"
-  const repliedMs = Date.parse(lastAdminReplyAt)
+  if (!isWaitingOnCustomer(waitingSince, lastAdminReplyAt)) return "none"
+  const repliedMs = Date.parse(lastAdminReplyAt as string)
   if (Number.isNaN(repliedMs)) return "none"
   const minutes = (nowMs - repliedMs) / 60_000
   if (minutes >= SLA_URGENT_MINUTES) return "urgent"
