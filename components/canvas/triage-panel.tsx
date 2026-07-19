@@ -694,8 +694,13 @@ function TriageRow({
           {relativeTime(item.waitingSince)}
         </span>
       </span>
-      {item.subject && (
-        <span className="truncate text-[11px] text-muted-foreground">{item.subject}</span>
+      {/* Ticket theme: the subject when there is one, else a preview of the
+          first customer message (subject is often empty on chat/widget
+          tickets — see lib/intercom.ts toSweepConversation). */}
+      {(item.subject || item.snippet) && (
+        <span className="line-clamp-1 text-[11px] text-muted-foreground">
+          {item.subject || item.snippet}
+        </span>
       )}
       <span className="flex flex-wrap items-center gap-1">
         {item.slaStatus === "missed" && (

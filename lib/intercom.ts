@@ -695,7 +695,17 @@ function toSweepConversation(c: IntercomSearchConversation): {
     conv: {
       id: String(c.id ?? ""),
       intercomState: c.state ?? (c.open ? "open" : "closed"),
-      subject: stripHtml(c.source?.subject ?? c.source?.body ?? c.title) || null,
+      // Fall through on EMPTY strings, not just null/undefined: chat- and
+      // widget-initiated conversations come back with source.subject = "" (an
+      // empty string, not null), so a `??` chain would stop there and never
+      // reach the real first message in source.body — leaving the triage row
+      // with no theme. `||` treats "" as absent and falls through to the body,
+      // then the title.
+      subject:
+        stripHtml(c.source?.subject) ||
+        stripHtml(c.source?.body) ||
+        stripHtml(c.title) ||
+        null,
       tags,
       customerName:
         contact?.name ?? contact?.email ?? c.source?.author?.name ?? c.source?.author?.email ?? null,
