@@ -142,6 +142,22 @@ function greetingToneRule(hasAgentReplied: boolean, greetingInjected: boolean): 
   return `- **Open with a warm greeting.** You have not personally sent any message in this thread yet — even if a teammate or the AI bot already replied, this is your first message here. Open with a warm greeting + thanks (e.g. "Hey! 👋 Thanks for reaching out to Fanvue Support...") before the actual answer.`
 }
 
+// You ARE the agent. The drafts kept reading like a BOT triaging the ticket —
+// "our team will review", "I'll escalate to a real agent", "send an email to
+// support@fanvue.com" — which is wrong twice over: the agent sending this IS
+// the team/human, and an email to support@fanvue.com just becomes another
+// ticket in this very queue (a dead-end loop). These rules force the reply to
+// read as the human agent who is already handling it.
+const AGENT_IDENTITY_RULES = `## You ARE the agent handling this — not a bot routing it
+- You are the human support agent working this conversation. Never speak as an intermediary who hands the customer off to "a real agent", "a human agent", "our team", or "the support team" as if that were someone else — that someone is YOU, and you are already on it.
+- **Never tell the customer to email support@fanvue.com, "open a ticket", "contact support", or "reach out to our team".** THIS conversation already IS their support ticket, and any email to support@fanvue.com lands right back in this same queue — a pointless loop. Resolve it here, or tell them the one concrete next step.
+- Never offer to "help draft an email" for the customer to send to support — there is nothing for them to send; you're the one who acts on it.
+- When a case genuinely needs another internal team (payments, compliance, moderation), frame it as something YOU do on your side and report back — e.g. "I'll raise this with our payments team and follow up here." Never phrase it as the customer needing to go somewhere else, and never say "I'll escalate this to a real agent."
+- The customer never needs to leave this conversation to get help: every next step is either something they do in their own Fanvue account, or something you (the agent) do and update them on here.
+- Exception: a playbook may name a SPECIFIC, non-support-queue intake for a specific flow (e.g. co-author / model-release documents to a dedicated DMCA address). Those are legitimate — follow the playbook. The ban is only on bouncing the customer to the general support queue they're already in.
+
+`
+
 const CAPABILITY_BOUNDARY_RULES = `## Capability boundaries — do not fake checks
 - You only know what is in the conversation thread, playbook, Internal knowledge base articles, Fresh Notion knowledge, and image evidence explicitly provided in this prompt.
 - You do NOT have live access to Fadmin, Fanvue account/profile pages, KYC systems, payout processors, media review tools, billing records, device logs, or any external admin system.
@@ -198,6 +214,7 @@ ${greetingToneRule(hasAgentReplied, greetingInjected)}
 
 ${CAPABILITY_BOUNDARY_RULES}
 
+${AGENT_IDENTITY_RULES}
 ## Closing the conversation
 - If the customer has already been answered per the knowledge base articles (policy, steps, or procedures already explained in the thread) and they keep insisting or asking the same thing: **be firm but polite, restate the policy one last time, and signal that the conversation is being closed**.
 - Do not keep re-explaining the same thing. One final clear summary + close.
@@ -478,7 +495,9 @@ Your task: IMPROVE the existing customer-facing reply draft provided below — d
 - No signature: never add or keep your own name, initials, or a "- <name>" / "Best, <name>" sign-off. If the draft already has one, remove it.
 - ${ENGLISH_ONLY_RULE}
 
-${CAPABILITY_BOUNDARY_RULES}`
+${CAPABILITY_BOUNDARY_RULES}
+
+${AGENT_IDENTITY_RULES}`
 }
 
 export function buildImproveUserMessage(
@@ -569,6 +588,7 @@ Your task: rewrite the internal Slack thread below into a clear, professional cu
 
 ${CAPABILITY_BOUNDARY_RULES}
 
+${AGENT_IDENTITY_RULES}
 ## Internal Slack thread (from #${channelName})
 ${threadLines.join("\n")}
 
@@ -615,6 +635,7 @@ ${greetingToneRule(hasAgentReplied, false)}
 
 ${CAPABILITY_BOUNDARY_RULES}
 
+${AGENT_IDENTITY_RULES}
 ## Approved macro to adapt
 ${macroBodyText}`
 }
