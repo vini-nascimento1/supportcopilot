@@ -221,12 +221,14 @@ Fanvue runs a **no-refund policy** (consumable digital service — access is ins
 - **Fan wants money back** → Q2.
 - **Creator upset about a fan's chargeback** → not a refund; different playbook (chargebacks are the fan's legal right, reassure the creator).
 
+**Off-platform override — check this BEFORE Q2's leaves:** if **any part** of the deal (the negotiation, the agreed terms, or the delivery itself) happened off-platform (Telegram, WhatsApp, Snapchat, cash apps, etc.), that routes straight to **leaf A — NO REFUND** — regardless of what the fan alleges was promised or delivered. Fanvue has no record of an off-platform arrangement to verify against, and conducting the deal off-platform is itself a **Terms & Conditions breach for BOTH the creator and the fan** — separate from, and in addition to, the refund decision. Don't treat an off-platform "not as described" complaint as leaf B (investigate) just because the fan has screenshots of the in-app chat around it — the underlying agreement being off-platform is what controls, not the delivery-quality complaint layered on top.
+
 **Q2 — Which ground applies?** (no match → **NO REFUND**)
 
 | Ground | Outcome |
 | --- | --- |
-| **A. Buyer's remorse** — changed mind, forgot to cancel, auto-charged after a free trial, "didn't like it", content already accessed in a sub, "creator is AI" (AI tag visible), creator just slow/not replying, deal made or moved off-platform (e.g. Telegram) | **NO REFUND** |
-| **B. Content not delivered / not as described** (PPV or custom) | **INVESTIGATE, refund LAST RESORT** — screenshots of the agreement, verify in fadmin, ask if they contacted the creator. Creator unresponsive → PPV = 3-day notice, Custom = 2-week notice (macros). Refund only if no other resolution. |
+| **A. Buyer's remorse** — changed mind, forgot to cancel, auto-charged after a free trial, "didn't like it", content already accessed in a sub, "creator is AI" (AI tag visible), creator just slow/not replying, deal made or moved off-platform (e.g. Telegram) — **applies even to "wrong item delivered" complaints if the deal itself was arranged off-platform** | **NO REFUND** |
+| **B. Content not delivered / not as described** (PPV or custom, arranged and delivered **on-platform**) | **INVESTIGATE, refund LAST RESORT** — screenshots of the agreement, verify in fadmin, ask if they contacted the creator. Creator unresponsive → PPV = 3-day notice, Custom = 2-week notice (macros). Refund only if no other resolution. |
 | **C. Unauthorised / fraudulent charge** | 3DS **completed** → **NO REFUND**. 3DS **NOT** completed / suspicious → **ESCALATE to Fraud Issues** (don't refund yourself). |
 | **D. Creator banned (compliance)** | Refund the **ACTIVE subscription ONLY**. Past periods + one-time tips/messages → **NO REFUND**. |
 | **E. Real underage content** on the creator profile | **Refund ALL fans immediately** (top priority, escalate). |
@@ -237,6 +239,8 @@ Fanvue runs a **no-refund policy** (consumable digital service — access is ins
 | **J. Possible scam by creator** (money for "hospital bills", promised meetups, emotional manipulation) | **INVESTIGATE**: screenshots + verify in fadmin, second opinion if unsure → if confirmed, refund all payments, strike the creator, disable payouts until they reach out. |
 
 **Before any refund leaf (mandatory checks):** confirm the fan raised **within 30 days**; verify in **fadmin yourself** that the claim matches (delivered content / the agreement / ban timing / the actual charge); require screenshots for not-as-described; check 3DS for unauthorised charges; separate active sub vs past periods/tips for banned creators.
+
+**Separate from the refund decision:** if the off-platform override applies, or the creator's conduct in the thread (harassment, threats, blackmail-style pressure) raises its own concern, log that for review independent of the NO REFUND outcome. Confirmed off-platform activity and/or harassment/threats **can lead to a warning on BOTH the creator's and the fan's account** — never promise this outcome to the customer, just confirm it's under review.
 
 **Tip vs PPV — what's actually refundable:** a tip/gift is generally **not** refunded ("a tip is a tip"). What's refundable when undelivered is the **PPV / paid content** — there the fan paid for a view. Steer fans toward buying a PPV for a custom rather than tipping. **Exception:** if the creator is clearly acting in bad faith (lying, scamming, just taking money), a tip **can** be manually reviewed and refunded — we don't act in bad faith either. (On the $1000 ticket: the $500 "video access" is PPV-style and in scope; the $50 + $450 tips/gifts normally aren't, but the creator's bad-faith behaviour puts them on the table for manual review.)
 
