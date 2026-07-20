@@ -75,6 +75,16 @@ const byOldest = (a: QueueItem, b: QueueItem) =>
 // generation is likely failing outright (not just slow).
 const AUTONOMOUS_STUCK_AFTER_MS = 8 * 60 * 1000
 
+// After the agent hits Retry on a stuck autonomous card, treat it as freshly
+// drafting for this long — the card flips back to the "Drafting…" spinner
+// instead of staying red, giving visible feedback while the recompute runs. A
+// successful recompute lands within a poll or two and the card moves to "Ready";
+// if it fails again, the card returns to stuck once this window elapses. (The
+// stuck state is derived from waiting_since, which Retry can't change, so we
+// need this client-side timer — mirrors how the manual retry resets its own
+// placeholder timestamp.)
+const AUTONOMOUS_RETRY_GRACE_MS = 4 * 60 * 1000
+
 function isAutonomousDraftingStuck(item: DraftingItem, nowMs: number): boolean {
   if (!item.waitingSince) return false
   const since = Date.parse(item.waitingSince)
@@ -179,6 +189,10 @@ export function QueuePanel({
   // stuck-again is fine, and this avoids a persistence layer for what's really
   // just "stop showing me this one for now".
   const [dismissedAutonomous, setDismissedAutonomous] = useState<Set<string>>(new Set())
+  // conversationId → timestamp of the last Retry click. While within
+  // AUTONOMOUS_RETRY_GRACE_MS, the card renders as "Drafting…" again instead of
+  // stuck (session-local; expires by time).
+  const [retriedAutonomous, setRetriedAutonomous] = useState<Record<string, number>>({})
   const masterRef = useRef<HTMLInputElement>(null)
   // Anchor index for shift-click range selection (the last single-toggled row).
   const anchorRef = useRef<number | null>(null)
@@ -300,6 +314,8 @@ export function QueuePanel({
         next.delete(item.conversationId)
         return next
       })
+      // Flip the card back to "Drafting…" immediately so the retry is visible.
+      setRetriedAutonomous((prev) => ({ ...prev, [item.conversationId]: Date.now() }))
       toast.success("Retrying — the draft will appear here shortly.")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't restart generation.")
@@ -335,10 +351,21 @@ export function QueuePanel({
   // every ~5 min, so one still stuck past AUTONOMOUS_STUCK_AFTER_MS is very
   // likely failing outright, not just slow. Surface it the same way rather than
   // spinning forever with no way for the agent to intervene.
+  // A card the agent just retried is treated as freshly drafting for the grace
+  // window — visible feedback while the recompute runs, instead of staying red.
+  const isRetrying = (conversationId: string) => {
+    const at = retriedAutonomous[conversationId]
+    return at != null && now - at < AUTONOMOUS_RETRY_GRACE_MS
+  }
   const autonomousStuck = drafting.filter(
-    (item) => isAutonomousDraftingStuck(item, now) && !dismissedAutonomous.has(item.conversationId)
+    (item) =>
+      isAutonomousDraftingStuck(item, now) &&
+      !isRetrying(item.conversationId) &&
+      !dismissedAutonomous.has(item.conversationId)
   )
-  const autonomousFresh = drafting.filter((item) => !isAutonomousDraftingStuck(item, now))
+  const autonomousFresh = drafting.filter(
+    (item) => !isAutonomousDraftingStuck(item, now) || isRetrying(item.conversationId)
+  )
   const draftingVisible: DraftingItem[] = [
     ...autonomousFresh,
     ...manualFresh.map((item) => ({
