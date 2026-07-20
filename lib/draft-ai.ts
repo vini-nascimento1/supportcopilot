@@ -833,15 +833,26 @@ export async function* streamChatCompletion(
         ? provider.visionModel
         : provider.textModel
       : selectModel(messages))
-  const body = JSON.stringify({
-    model,
-    max_tokens: options?.maxTokens ?? 4096,
-    temperature:
-      options?.temperature ??
-      numberFromEnv("VERBOO_DRAFT_TEMPERATURE", DEFAULT_DRAFT_TEMPERATURE),
-    stream: true,
-    messages,
-  })
+
+  // Request shape differs by provider. The shared Verboo router (DeepSeek/Qwen)
+  // takes the classic `max_tokens` + `temperature`. Personal keys target OpenAI,
+  // whose gpt-5 / o-series models REJECT both: they require `max_completion_tokens`
+  // and only accept the default temperature (sending any temperature → 400). So
+  // for a personal provider we use the modern OpenAI contract and omit temperature.
+  const maxTokens = options?.maxTokens ?? 4096
+  const body = JSON.stringify(
+    provider
+      ? { model, max_completion_tokens: maxTokens, stream: true, messages }
+      : {
+          model,
+          max_tokens: maxTokens,
+          temperature:
+            options?.temperature ??
+            numberFromEnv("VERBOO_DRAFT_TEMPERATURE", DEFAULT_DRAFT_TEMPERATURE),
+          stream: true,
+          messages,
+        }
+  )
 
   const endpoint: StreamEndpoint | undefined = provider
     ? { baseUrl: provider.baseUrl, apiKey: provider.apiKey }
