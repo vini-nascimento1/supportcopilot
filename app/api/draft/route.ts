@@ -124,9 +124,10 @@ export async function POST(req: NextRequest) {
     userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail, provider)
   }
 
-  // Personal (OpenAI) models tend to emit their action plan as a checklist and
-  // ask to proceed — steer them to output just the reply. Shared path unchanged.
-  if (provider) systemPrompt += `\n\n${REPLY_STYLE_NUDGE}`
+  // Steer any model away from emitting its action plan as a checklist and asking
+  // to proceed — output just the reply. (Most pronounced on the OpenAI gpt-5
+  // family, but good hygiene for the shared model too.)
+  systemPrompt += `\n\n${REPLY_STYLE_NUDGE}`
 
   const encoder = new TextEncoder()
 
