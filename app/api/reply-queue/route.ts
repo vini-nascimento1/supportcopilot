@@ -75,7 +75,12 @@ export async function GET(request: Request) {
     const haveDraft = new Set(pending.map((p) => p.intercomConversationId))
     const drafting = nonRead
       .filter((c) => !haveDraft.has(c.id))
-      .map((c) => ({ conversationId: c.id, customerName: c.customer, subject: c.subject }))
+      .map((c) => ({
+        conversationId: c.id,
+        customerName: c.customer,
+        subject: c.subject,
+        waitingSince: c.waitingSince,
+      }))
 
     // Reconcile in the background — never block the response. Stale ONLY auto
     // drafts whose conversation left the non-read set; on-request drafts are

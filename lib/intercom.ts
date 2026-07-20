@@ -514,7 +514,15 @@ export async function getOpenCasesQueue(
   }
 }
 
-export type NonReadConversation = { id: string; customer: string; subject: string }
+export type NonReadConversation = {
+  id: string
+  customer: string
+  subject: string
+  /** ISO time the customer's message landed (Intercom waiting_since). Lets the
+      Queue tab tell a fresh "drafting…" placeholder from one that's been stuck
+      for a while (the autonomous pipeline kept failing silently). */
+  waitingSince: string | null
+}
 
 // The conversations currently assigned to `adminId`, open, and NON-READ (waiting
 // on a teammate reply — `waiting_since` is set). The live source of truth for the
@@ -568,7 +576,12 @@ export async function getNonReadAssignedConversations(
       const conversations = payload.conversations ?? payload.data ?? []
       for (const c of conversations) {
         if (c.waiting_since != null) {
-          result.push({ id: String(c.id), customer: getCustomerLabel(c), subject: getSnippet(c) })
+          result.push({
+            id: String(c.id),
+            customer: getCustomerLabel(c),
+            subject: getSnippet(c),
+            waitingSince: toDate(c.waiting_since),
+          })
         }
       }
       startingAfter = payload.pages?.next?.starting_after

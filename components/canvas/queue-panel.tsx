@@ -55,15 +55,31 @@ type QueueItem = {
   createdAt: string
 }
 // A non-read conversation whose AI draft is still being generated (no ready row
-// yet). Mirrors the `drafting` payload from /api/reply-queue.
+// yet). Mirrors the `drafting` payload from /api/reply-queue. `waitingSince` is
+// when the customer's message landed (Intercom waiting_since) — the basis for
+// telling a fresh placeholder from one that's been silently failing.
 type DraftingItem = {
   conversationId: string
   customerName: string | null
   subject: string | null
+  waitingSince: string | null
 }
 
 const byOldest = (a: QueueItem, b: QueueItem) =>
   new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+
+// The autonomous backfill (app/api/reply-queue/route.ts) only retries a given
+// conversation once per BACKFILL_WINDOW_MS (5 min), so a threshold shorter than
+// that would flag something as "stuck" before it ever got a real second try.
+// 8 minutes gives it a full retry cycle plus margin before we tell the agent
+// generation is likely failing outright (not just slow).
+const AUTONOMOUS_STUCK_AFTER_MS = 8 * 60 * 1000
+
+function isAutonomousDraftingStuck(item: DraftingItem, nowMs: number): boolean {
+  if (!item.waitingSince) return false
+  const since = Date.parse(item.waitingSince)
+  return Number.isFinite(since) && nowMs - since > AUTONOMOUS_STUCK_AFTER_MS
+}
 
 // Single source of truth for the audited send path — POST /api/draft/send then
 // POST /api/reply-queue/resolve — shared by QueueRow's own approve button AND
@@ -158,6 +174,11 @@ export function QueuePanel({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkActing, setBulkActing] = useState(false)
   const [confirmBulkSend, setConfirmBulkSend] = useState(false)
+  // Autonomous "drafting…" placeholders the agent dismissed after they got
+  // stuck. Session-local (no localStorage): a reload re-evaluating them as
+  // stuck-again is fine, and this avoids a persistence layer for what's really
+  // just "stop showing me this one for now".
+  const [dismissedAutonomous, setDismissedAutonomous] = useState<Set<string>>(new Set())
   const masterRef = useRef<HTMLInputElement>(null)
   // Anchor index for shift-click range selection (the last single-toggled row).
   const anchorRef = useRef<number | null>(null)
@@ -261,6 +282,34 @@ export function QueuePanel({
     removePendingOnRequestDrafts([conversationId])
   }, [])
 
+  // Re-kick generation for an autonomous placeholder that's been stuck past
+  // AUTONOMOUS_STUCK_AFTER_MS — the backfill loop kept retrying every poll and
+  // silently failing (commonly a transient Verboo error/rate-limit). Un-dismiss
+  // it too, in case the agent had previously hidden it.
+  const retryAutonomous = useCallback(async (item: DraftingItem) => {
+    try {
+      const res = await fetch("/api/reply-queue/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationIds: [item.conversationId] }),
+      })
+      if (!res.ok) throw new Error(await readApiError(res, `Failed (${res.status})`))
+      setDismissedAutonomous((prev) => {
+        if (!prev.has(item.conversationId)) return prev
+        const next = new Set(prev)
+        next.delete(item.conversationId)
+        return next
+      })
+      toast.success("Retrying — the draft will appear here shortly.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't restart generation.")
+    }
+  }, [])
+
+  const dismissAutonomous = useCallback((conversationId: string) => {
+    setDismissedAutonomous((prev) => new Set(prev).add(conversationId))
+  }, [])
+
   const ready = useMemo(
     () => items?.filter((i) => i.riskBand !== "needs_check").sort(byOldest) ?? [],
     [items]
@@ -281,22 +330,30 @@ export function QueuePanel({
   const manualUnresolved = manualDrafting.filter((item) => !visibleIds.has(item.conversationId))
   const manualStuck = manualUnresolved.filter((item) => isStuck(item, now))
   const manualFresh = manualUnresolved.filter((item) => !isStuck(item, now))
+  // Same idea for the AUTONOMOUS backfill placeholders (a non-read conversation
+  // with no draft yet, not agent-requested): the backfill loop silently retries
+  // every ~5 min, so one still stuck past AUTONOMOUS_STUCK_AFTER_MS is very
+  // likely failing outright, not just slow. Surface it the same way rather than
+  // spinning forever with no way for the agent to intervene.
+  const autonomousStuck = drafting.filter(
+    (item) => isAutonomousDraftingStuck(item, now) && !dismissedAutonomous.has(item.conversationId)
+  )
+  const autonomousFresh = drafting.filter((item) => !isAutonomousDraftingStuck(item, now))
   const draftingVisible: DraftingItem[] = [
-    ...drafting,
+    ...autonomousFresh,
     ...manualFresh.map((item) => ({
       conversationId: item.conversationId,
       customerName: item.customerName,
       subject: item.subject,
+      waitingSince: null,
     })),
   ]
-  const total =
-    (items?.length ?? 0) + draftingVisible.length + manualStuck.length + onRequest.length
+  const stuckCount = manualStuck.length + autonomousStuck.length
+  const total = (items?.length ?? 0) + draftingVisible.length + stuckCount + onRequest.length
 
   useEffect(() => {
-    onCount?.(
-      (items?.length ?? 0) + draftingVisible.length + manualStuck.length + onRequest.length
-    )
-  }, [items, draftingVisible.length, manualStuck.length, onRequest.length, onCount])
+    onCount?.((items?.length ?? 0) + draftingVisible.length + stuckCount + onRequest.length)
+  }, [items, draftingVisible.length, stuckCount, onRequest.length, onCount])
 
   const allReadySelected = ready.length > 0 && selectedIds.size === ready.length
   const someReadySelected = selectedIds.size > 0 && !allReadySelected
@@ -437,7 +494,7 @@ export function QueuePanel({
                 </div>
               </section>
             )}
-            {manualStuck.length > 0 && (
+            {stuckCount > 0 && (
               <section className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-1.5 px-1">
                   <AlertTriangleIcon className="size-3 text-destructive" />
@@ -446,7 +503,7 @@ export function QueuePanel({
                     variant="secondary"
                     className="h-4 px-1 text-[10px] font-normal tabular-nums"
                   >
-                    {manualStuck.length}
+                    {stuckCount}
                   </Badge>
                 </div>
                 <p className="px-1 text-[11px] leading-snug text-muted-foreground">
@@ -458,8 +515,16 @@ export function QueuePanel({
                     <FailedDraftCard
                       key={item.conversationId}
                       item={item}
-                      onRetry={retryManual}
-                      onDismiss={dismissManual}
+                      onRetry={() => retryManual(item)}
+                      onDismiss={() => dismissManual(item.conversationId)}
+                    />
+                  ))}
+                  {autonomousStuck.map((item) => (
+                    <FailedDraftCard
+                      key={item.conversationId}
+                      item={item}
+                      onRetry={() => retryAutonomous(item)}
+                      onDismiss={() => dismissAutonomous(item.conversationId)}
                     />
                   ))}
                 </div>
@@ -643,15 +708,15 @@ function FailedDraftCard({
   onRetry,
   onDismiss,
 }: {
-  item: PendingOnRequestDraft
-  onRetry: (item: PendingOnRequestDraft) => Promise<void>
-  onDismiss: (conversationId: string) => void
+  item: { conversationId: string; customerName: string | null; subject: string | null }
+  onRetry: () => Promise<void>
+  onDismiss: () => void
 }) {
   const [busy, setBusy] = useState(false)
   const retry = async () => {
     setBusy(true)
     try {
-      await onRetry(item)
+      await onRetry()
     } finally {
       setBusy(false)
     }
@@ -683,7 +748,7 @@ function FailedDraftCard({
           size="sm"
           variant="ghost"
           className="h-7 px-2.5 text-xs text-muted-foreground"
-          onClick={() => onDismiss(item.conversationId)}
+          onClick={() => onDismiss()}
           disabled={busy}
         >
           <XIcon className="size-3.5" />
