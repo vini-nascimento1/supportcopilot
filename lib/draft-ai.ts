@@ -163,6 +163,17 @@ const AGENT_IDENTITY_RULES = `## You ARE the agent handling this — not a bot r
 
 `
 
+// Style guard for models (notably the OpenAI gpt-5 family) that tend to narrate
+// their internal plan as a bulleted checklist and then ask the customer to
+// confirm they may proceed — instead of just writing the reply. Injected only on
+// the personal-provider path so the shared-model prompts are unchanged.
+export const REPLY_STYLE_NUDGE = `## Output the reply, not a plan
+- Output ONLY the customer-facing message — the exact text the customer should read, and nothing else.
+- Do NOT include an internal action plan, a numbered or bulleted list of steps you intend to take, or meta-commentary about your process ("Verify the payout status", "Check for holds", "I'll coordinate on our side", etc.). Those are your internal reasoning — they must never appear in the message.
+- Do NOT end by asking the customer to confirm that you may perform internal checks, escalations, or reviews (no "Please confirm you'd like me to proceed with these checks"). Just handle it and tell them plainly what is happening, or ask the ONE specific thing you genuinely need from them.
+- Write warm, natural prose in short paragraphs — like a person typing a reply, not a status report or a task list.`
+
+
 const CAPABILITY_BOUNDARY_RULES = `## Capability boundaries — do not fake checks
 - You only know what is in the conversation thread, playbook, Internal knowledge base articles, Fresh Notion knowledge, and image evidence explicitly provided in this prompt.
 - You do NOT have live access to Fadmin, Fanvue account/profile pages, KYC systems, payout processors, media review tools, billing records, device logs, or any external admin system.

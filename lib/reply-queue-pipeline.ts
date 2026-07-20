@@ -19,6 +19,7 @@ import {
   buildAgentGreeting,
   hasAgentPersonallyReplied,
   streamChatCompletion,
+  REPLY_STYLE_NUDGE,
   type OpenAIMessage,
 } from "@/lib/draft-ai"
 import { encodeImageAttachments } from "@/lib/attachments"
@@ -242,9 +243,12 @@ export async function computeAndPersistSuggestion(
   // greeting (with their name) is injected deterministically below — so the
   // model is told NOT to write its own greeting and never double up.
   const greetingInjected = !hasAgentReplied
-  const systemPrompt = notionHadHits
+  let systemPrompt = notionHadHits
     ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied, greetingInjected)
     : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied, greetingInjected)
+  // Personal (OpenAI) models tend to emit their action plan as a checklist and
+  // ask to proceed — steer them to output just the reply.
+  if (provider) systemPrompt += `\n\n${REPLY_STYLE_NUDGE}`
   const userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail, provider)
   const messages: OpenAIMessage[] = [
     { role: "system", content: systemPrompt },
