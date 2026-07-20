@@ -26,11 +26,14 @@ type PersonalRow = {
   personal_ai_key_enc: string | null
   personal_ai_base_url: string | null
   personal_ai_model: string | null
+  personal_ai_enabled: boolean | null
 }
 
 function providerFromRow(row: PersonalRow | null): AiProvider | null {
   const enc = row?.personal_ai_key_enc
   if (!enc) return null
+  // Paused: the key is kept, but drafting reverts to the shared app key.
+  if (row?.personal_ai_enabled === false) return null
   const apiKey = decryptSecret(enc)
   if (!apiKey) return null // bad master key / tampered value → fall back to shared
   const model = row?.personal_ai_model?.trim() || DEFAULT_PERSONAL_MODEL
@@ -43,7 +46,8 @@ function providerFromRow(row: PersonalRow | null): AiProvider | null {
   }
 }
 
-const SELECT_COLS = "personal_ai_key_enc, personal_ai_base_url, personal_ai_model"
+const SELECT_COLS =
+  "personal_ai_key_enc, personal_ai_base_url, personal_ai_model, personal_ai_enabled"
 
 /** Personal provider for the agent with this email, or null to use the shared key. */
 export async function resolveProviderForAgentEmail(

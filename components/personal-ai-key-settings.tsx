@@ -6,10 +6,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle2Icon, InfoIcon, KeyRoundIcon } from "lucide-react"
+import { CheckCircle2Icon, InfoIcon, KeyRoundIcon, PauseCircleIcon } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 type Status = {
   hasPersonalKey: boolean
+  enabled: boolean
   baseUrl: string | null
   model: string | null
   defaults: { baseUrl: string; model: string }
@@ -72,6 +74,26 @@ export function PersonalAiKeySettings() {
     }
   }
 
+  async function toggleEnabled(next: boolean) {
+    setError(null)
+    // Optimistic — reflect the flip immediately, reconcile on reload.
+    setStatus((prev) => (prev ? { ...prev, enabled: next } : prev))
+    try {
+      const res = await fetch("/api/agent/provider", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      })
+      if (!res.ok) {
+        setError(`Couldn't update (${res.status})`)
+      }
+    } catch {
+      setError("Couldn't update — please try again.")
+    } finally {
+      await load()
+    }
+  }
+
   async function clearKey() {
     setSaving(true)
     setSaved(false)
@@ -93,6 +115,8 @@ export function PersonalAiKeySettings() {
   }
 
   const connected = status?.hasPersonalKey ?? false
+  const enabled = status?.enabled ?? true
+  const active = connected && enabled
   const defaultModel = status?.defaults.model ?? "gpt-5-nano"
 
   return (
@@ -105,10 +129,15 @@ export function PersonalAiKeySettings() {
               Use your own OpenAI key for drafting, on your own quota — lifts the shared rate limit.
             </CardDescription>
           </div>
-          {connected ? (
+          {active ? (
             <Badge variant="secondary" className="gap-1">
               <CheckCircle2Icon className="size-3 text-green-500" />
               Active
+            </Badge>
+          ) : connected ? (
+            <Badge variant="outline" className="gap-1">
+              <PauseCircleIcon className="size-3 text-amber-500" />
+              Paused
             </Badge>
           ) : (
             <Badge variant="outline">Using shared key</Badge>
@@ -121,6 +150,37 @@ export function PersonalAiKeySettings() {
             <InfoIcon className="size-4 shrink-0" />
             Key encryption isn&apos;t configured on the server yet — ask your admin to set{" "}
             <code className="font-mono text-xs">PROVIDER_ENCRYPTION_KEY</code>.
+          </div>
+        )}
+
+        {connected && (
+          <div className="flex items-start justify-between gap-4 rounded-md border bg-muted/30 px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Use my personal key</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {enabled
+                  ? "On — your drafts run on your own key."
+                  : "Paused — your key is kept, but drafts use the app's shared key."}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              aria-label="Use my personal AI key"
+              onClick={() => void toggleEnabled(!enabled)}
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+                enabled ? "bg-primary" : "bg-input"
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-block size-5 transform rounded-full bg-background shadow transition-transform",
+                  enabled ? "translate-x-[1.375rem]" : "translate-x-0.5"
+                )}
+              />
+            </button>
           </div>
         )}
 

@@ -20,17 +20,45 @@ export async function GET() {
 
   const { data } = await db
     .from("agents")
-    .select("personal_ai_key_enc, personal_ai_base_url, personal_ai_model")
+    .select("personal_ai_key_enc, personal_ai_base_url, personal_ai_model, personal_ai_enabled")
     .eq("email", email)
     .maybeSingle()
 
   return NextResponse.json({
     hasPersonalKey: Boolean(data?.personal_ai_key_enc),
+    enabled: (data?.personal_ai_enabled as boolean | null) ?? true,
     baseUrl: (data?.personal_ai_base_url as string | null) ?? null,
     model: (data?.personal_ai_model as string | null) ?? null,
     defaults: PERSONAL_AI_DEFAULTS,
     cryptoAvailable: providerCryptoAvailable(),
   })
+}
+
+// PATCH { enabled } → pause/resume the personal key without deleting it. When
+// paused, drafting reverts to the shared app key; the stored key is untouched.
+export async function PATCH(request: Request) {
+  const email = await getSignedInEmail()
+  if (!email) return NextResponse.json({ error: "Authentication required" }, { status: 401 })
+  const db = getSupabaseAdminClient()
+  if (!db) return NextResponse.json({ error: "Storage unavailable" }, { status: 503 })
+
+  let body: { enabled?: boolean }
+  try {
+    body = (await request.json()) as typeof body
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
+  if (typeof body.enabled !== "boolean") {
+    return NextResponse.json({ error: "enabled (boolean) is required" }, { status: 400 })
+  }
+
+  const { error } = await db
+    .from("agents")
+    .update({ personal_ai_enabled: body.enabled })
+    .eq("email", email)
+  if (error) return NextResponse.json({ error: "Failed to update" }, { status: 500 })
+
+  return NextResponse.json({ ok: true, enabled: body.enabled })
 }
 
 // POST { apiKey?, baseUrl?, model? } → set/rotate the key and/or update config.
@@ -52,7 +80,7 @@ export async function POST(request: Request) {
   const baseUrl = body.baseUrl?.trim() || null
   const model = body.model?.trim() || null
 
-  const patch: Record<string, string | null> = {
+  const patch: Record<string, string | boolean | null> = {
     personal_ai_base_url: baseUrl,
     personal_ai_model: model,
   }
@@ -65,6 +93,8 @@ export async function POST(request: Request) {
       )
     }
     patch.personal_ai_key_enc = encryptSecret(apiKey)
+    // Saving a (new) key means the agent wants to use it — un-pause.
+    patch.personal_ai_enabled = true
   } else {
     // No new key supplied — only allow config edits if a key already exists.
     const { data } = await db
