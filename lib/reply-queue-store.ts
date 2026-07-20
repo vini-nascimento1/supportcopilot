@@ -222,10 +222,31 @@ export async function markSuggestionsStaleByConversations(
     .in("intercom_conversation_id", conversationIds)
 }
 
-// Conversation ids (from the given set) that already have ANY suggestion row
-// created at/after `sinceIso`, regardless of status. The backfill uses this to
-// avoid recomputing a draft for a conversation we attempted recently — bounding
-// repeated LLM work to once per window even if generation keeps yielding nothing.
+// Record that we ATTEMPTED to draft these conversations right now — called at
+// the very start of the pipeline, BEFORE the (multi-second) LLM work, so the
+// backfill guard can dedup in-flight and failed generations, not just completed
+// ones. Upsert on the conversation-id PK; best-effort (never blocks drafting).
+export async function recordSuggestionAttempts(conversationIds: string[]): Promise<void> {
+  if (conversationIds.length === 0) return
+  const db = getSupabaseAdminClient()
+  if (!db) return
+  const nowIso = new Date().toISOString()
+  const rows = conversationIds.map((id) => ({
+    intercom_conversation_id: id,
+    attempted_at: nowIso,
+  }))
+  await db
+    .from("reply_queue_attempts")
+    .upsert(rows, { onConflict: "intercom_conversation_id" })
+}
+
+// Conversation ids (from the given set) we drafted or ATTEMPTED to draft at/after
+// `sinceIso`. The backfill uses this to avoid recomputing a draft for a
+// conversation we touched recently — bounding repeated LLM work to once per
+// window even when generation is slow (in-flight, no row yet) or keeps failing
+// (never writes a row). Unions the attempt log (written before generation) with
+// completed suggestion rows (covers conversations attempted before the log
+// existed).
 export async function getRecentlyTouchedConversationIds(
   conversationIds: string[],
   sinceIso: string
@@ -233,12 +254,22 @@ export async function getRecentlyTouchedConversationIds(
   if (conversationIds.length === 0) return new Set()
   const db = getSupabaseAdminClient()
   if (!db) return new Set()
-  const { data } = await db
-    .from("suggested_replies")
-    .select("intercom_conversation_id")
-    .in("intercom_conversation_id", conversationIds)
-    .gte("created_at", sinceIso)
-  return new Set((data ?? []).map((r) => r.intercom_conversation_id as string))
+  const [attempts, suggestions] = await Promise.all([
+    db
+      .from("reply_queue_attempts")
+      .select("intercom_conversation_id")
+      .in("intercom_conversation_id", conversationIds)
+      .gte("attempted_at", sinceIso),
+    db
+      .from("suggested_replies")
+      .select("intercom_conversation_id")
+      .in("intercom_conversation_id", conversationIds)
+      .gte("created_at", sinceIso),
+  ])
+  const touched = new Set<string>()
+  for (const r of attempts.data ?? []) touched.add(r.intercom_conversation_id as string)
+  for (const r of suggestions.data ?? []) touched.add(r.intercom_conversation_id as string)
+  return touched
 }
 
 export type ReplyQueueAction = "approve" | "reject" | "edit"

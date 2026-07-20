@@ -31,6 +31,7 @@ import {
 import {
   upsertPendingSuggestion,
   resolveSuggestionOnReply,
+  recordSuggestionAttempts,
   type SuggestionSource,
 } from "@/lib/reply-queue-store"
 import { resolveProviderForAgentId } from "@/lib/ai-provider"
@@ -171,6 +172,11 @@ export async function computeAndPersistSuggestion(
   if (!owner.id) {
     return { handled: true, action: "skipped", reason: "unassigned (assigned-only gate)" }
   }
+
+  // Mark the attempt NOW, before the multi-second LLM work — the backfill guard
+  // reads this so a concurrent poll (or a failed/slow generation) doesn't kick
+  // off a duplicate draft for the same conversation. Best-effort; never blocks.
+  await recordSuggestionAttempts([conversationId]).catch(() => {})
 
   // If this agent has set a personal AI key, route their autonomous drafts
   // through it (own quota, bypasses the shared Verboo throttle).
