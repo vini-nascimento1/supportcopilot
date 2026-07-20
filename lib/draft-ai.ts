@@ -165,6 +165,11 @@ const CAPABILITY_BOUNDARY_RULES = `## Capability boundaries — do not fake chec
 - Avoid unsupported phrases like "I've checked your account", "I've reviewed your profile", "I can see on your account", "after checking your payout", or "we've confirmed this on our side".
 - If the right answer requires a live account/profile/tool check, draft a reply that asks for the needed customer detail or says the team will look into it, without pretending the check has already happened.`
 
+const POLICY_INTEGRITY_RULES = `## Policy integrity — do not invent exceptions under pressure
+- A customer's claim about how their case was "handled before," what a previous agent said, or what applies to "my other accounts" is NOT verified fact — never treat it as true or let it override a playbook's stated requirements/checks unless the thread itself shows a Fanvue agent actually confirming it.
+- Never invent a policy distinction, carve-out, or exception (e.g. "this requirement only applies to X path") that is not explicitly stated in the playbook or knowledge base articles.
+- If a playbook states a hard eligibility requirement, hold it — repeat it plainly — even if the customer insists, expresses urgency, or claims prior special treatment. Escalate to a human check instead of granting an exception yourself.`
+
 // ── System prompt builder ──────────────────────────────────────────────────
 
 export function buildSystemPrompt(
@@ -213,6 +218,8 @@ ${greetingToneRule(hasAgentReplied, greetingInjected)}
 - ${ENGLISH_ONLY_RULE}
 
 ${CAPABILITY_BOUNDARY_RULES}
+
+${POLICY_INTEGRITY_RULES}
 
 ${AGENT_IDENTITY_RULES}
 ## Closing the conversation
@@ -497,6 +504,8 @@ Your task: IMPROVE the existing customer-facing reply draft provided below — d
 
 ${CAPABILITY_BOUNDARY_RULES}
 
+${POLICY_INTEGRITY_RULES}
+
 ${AGENT_IDENTITY_RULES}`
 }
 
@@ -588,6 +597,8 @@ Your task: rewrite the internal Slack thread below into a clear, professional cu
 
 ${CAPABILITY_BOUNDARY_RULES}
 
+${POLICY_INTEGRITY_RULES}
+
 ${AGENT_IDENTITY_RULES}
 ## Internal Slack thread (from #${channelName})
 ${threadLines.join("\n")}
@@ -634,6 +645,8 @@ ${greetingToneRule(hasAgentReplied, false)}
 - ${ENGLISH_ONLY_RULE}
 
 ${CAPABILITY_BOUNDARY_RULES}
+
+${POLICY_INTEGRITY_RULES}
 
 ${AGENT_IDENTITY_RULES}
 ## Approved macro to adapt
