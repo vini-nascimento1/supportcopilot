@@ -9,6 +9,11 @@ import {
   releaseVerbooSlot,
   parseRetryAfterMs,
 } from "@/lib/verboo-throttle"
+import type { AiProvider } from "@/lib/ai-provider"
+
+// Where an outbound completion is sent. Defaults to the shared Verboo router;
+// a personal AiProvider overrides base URL + key so an agent's own quota is used.
+type StreamEndpoint = { baseUrl: string; apiKey: string | undefined }
 
 export type OpenAIContentPart =
   | { type: "text"; text: string }
@@ -460,16 +465,18 @@ export async function buildGroundedDraftUserMessage(
   conversation: DraftConversation,
   images: DraftImage[],
   hasAgentReplied = false,
-  hasKnownEmail = false
+  hasKnownEmail = false,
+  provider?: AiProvider
 ): Promise<string | OpenAIContentPart[]> {
   if (images.length === 0) return buildUserMessage(conversation, undefined, undefined, hasAgentReplied, hasKnownEmail)
 
   let imageEvidence = ""
   try {
     for await (const chunk of streamChatCompletion(buildVisionEvidenceMessages(conversation, images), {
-      model: getVisionDraftModel(),
+      model: provider ? provider.visionModel : getVisionDraftModel(),
       maxTokens: 1536,
       temperature: 0,
+      provider,
     })) {
       imageEvidence += chunk
     }
@@ -696,13 +703,16 @@ Return the corrected draft now.`,
   ]
 }
 
-export function selectModel(messages: OpenAIMessage[]): string {
-  const hasImage = messages.some(
+function messagesHaveImage(messages: OpenAIMessage[]): boolean {
+  return messages.some(
     (m) =>
       Array.isArray(m.content) &&
       m.content.some((part) => part.type === "image_url")
   )
-  return hasImage ? getVisionDraftModel() : getTextDraftModel()
+}
+
+export function selectModel(messages: OpenAIMessage[]): string {
+  return messagesHaveImage(messages) ? getVisionDraftModel() : getTextDraftModel()
 }
 
 // Transient statuses worth a retry (rate limit + upstream/gateway hiccups).
@@ -744,8 +754,11 @@ function backoffDelay(
 // partial stream can't be safely replayed. Honours an external abort signal.
 async function openVerbooStream(
   body: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  endpoint?: StreamEndpoint
 ): Promise<Response> {
+  const baseUrl = endpoint?.baseUrl ?? VERBOO_BASE_URL
+  const apiKey = endpoint?.apiKey ?? VERBOO_API_KEY
   let attempt = 0
   for (;;) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
@@ -756,10 +769,10 @@ async function openVerbooStream(
     const connectTimer = setTimeout(() => connectController.abort(), CONNECT_TIMEOUT_MS)
 
     try {
-      const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
+      const res = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${VERBOO_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body,
@@ -801,10 +814,27 @@ async function openVerbooStream(
 
 export async function* streamChatCompletion(
   messages: OpenAIMessage[],
-  options?: { maxTokens?: number; model?: string; temperature?: number; signal?: AbortSignal }
+  options?: {
+    maxTokens?: number
+    model?: string
+    temperature?: number
+    signal?: AbortSignal
+    // When set, route through this agent's personal OpenAI-compatible key
+    // instead of the shared Verboo router (and skip the shared-key throttle).
+    provider?: AiProvider
+  }
 ): AsyncGenerator<string> {
+  const provider = options?.provider
+  // Model precedence: explicit override → personal provider's model → shared default.
+  const model =
+    options?.model ??
+    (provider
+      ? messagesHaveImage(messages)
+        ? provider.visionModel
+        : provider.textModel
+      : selectModel(messages))
   const body = JSON.stringify({
-    model: options?.model ?? selectModel(messages),
+    model,
     max_tokens: options?.maxTokens ?? 4096,
     temperature:
       options?.temperature ??
@@ -813,14 +843,21 @@ export async function* streamChatCompletion(
     messages,
   })
 
+  const endpoint: StreamEndpoint | undefined = provider
+    ? { baseUrl: provider.baseUrl, apiKey: provider.apiKey }
+    : undefined
+  // The shared-key throttle protects the shared Verboo quota only. A personal
+  // key has its own quota, so it bypasses the limiter entirely.
+  const useThrottle = !provider || provider.shared
+
   // Hold one throttle slot for the whole generation — from the request through
   // the last streamed byte — so concurrency is bounded by real in-flight streams,
   // not just request starts. Released in the finally below on every exit path
   // (done, stall, abort, throw).
-  await acquireVerbooSlot(options?.signal)
+  if (useThrottle) await acquireVerbooSlot(options?.signal)
   let slotReleased = false
   const releaseSlot = () => {
-    if (!slotReleased) {
+    if (useThrottle && !slotReleased) {
       slotReleased = true
       releaseVerbooSlot()
     }
@@ -828,7 +865,7 @@ export async function* streamChatCompletion(
 
   let res: Response
   try {
-    res = await openVerbooStream(body, options?.signal)
+    res = await openVerbooStream(body, options?.signal, endpoint)
   } catch (err) {
     releaseSlot()
     throw err

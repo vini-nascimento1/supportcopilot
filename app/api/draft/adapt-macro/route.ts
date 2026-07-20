@@ -9,6 +9,7 @@ import {
   streamChatCompletion,
 } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
+import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
 
 async function getAgent(email: string): Promise<{ name: string; intercomAdminId: string | null }> {
   const supabase = getSupabaseAdminClient()
@@ -111,6 +112,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { name: agentName, intercomAdminId } = await getAgent(email)
+  const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
   const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, intercomAdminId)
   const systemPrompt = buildMacroAdaptSystemPrompt(macroText, agentName, hasAgentReplied)
   const userMessage = buildMacroAdaptUserMessage(conversation, Boolean(conversation.email))
@@ -125,7 +127,7 @@ export async function POST(req: NextRequest) {
           { role: "user", content: userMessage },
         ]
 
-        for await (const chunk of streamChatCompletion(messages)) {
+        for await (const chunk of streamChatCompletion(messages, { provider })) {
           controller.enqueue(encoder.encode(chunk))
         }
       } catch (err) {

@@ -9,6 +9,7 @@ import {
   type OpenAIMessage,
   type OpenAIContentPart,
 } from "@/lib/draft-ai"
+import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
 
 export const dynamic = "force-dynamic"
 
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
   if (!process.env.VERBOO_API_KEY) {
     return new Response("AI is not configured (missing key)", { status: 500 })
   }
+  const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
 
   const body = await request.json().catch(() => null)
   const conversationId: string | undefined = body?.conversationId
@@ -167,6 +169,7 @@ ${playbookSection}${notionSection}
       try {
         for await (const chunk of streamChatCompletion(aiMessages, {
           maxTokens: MAX_TOKENS,
+          provider,
         })) {
           controller.enqueue(encoder.encode(chunk))
         }

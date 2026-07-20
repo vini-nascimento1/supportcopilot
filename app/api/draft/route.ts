@@ -15,6 +15,7 @@ import {
 import type { OpenAIMessage } from "@/lib/draft-ai"
 import { encodeImageAttachments } from "@/lib/attachments"
 import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
+import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
 
 async function getAgent(email: string): Promise<{ name: string; intercomAdminId: string | null }> {
   const supabase = getSupabaseAdminClient()
@@ -81,6 +82,8 @@ export async function POST(req: NextRequest) {
     : []
 
   const { name: agentName, intercomAdminId } = await getAgent(email)
+  // Route through this agent's personal AI key if they've set one.
+  const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
 
   let systemPrompt: string
   let userMessage: OpenAIMessage["content"]
@@ -117,7 +120,7 @@ export async function POST(req: NextRequest) {
         : buildSystemPrompt(playbook, responseTemplates, agentName, articles, hasAgentReplied)
 
     const images = await encodeImageAttachments(conversation.messages)
-    userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail)
+    userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail, provider)
   }
 
   const encoder = new TextEncoder()
@@ -132,7 +135,7 @@ export async function POST(req: NextRequest) {
 
         // Pass the request signal so a client cancel/disconnect aborts the
         // upstream Verboo stream instead of leaving it running.
-        for await (const chunk of streamChatCompletion(messages, { signal: req.signal })) {
+        for await (const chunk of streamChatCompletion(messages, { signal: req.signal, provider })) {
           controller.enqueue(encoder.encode(chunk))
         }
       } catch (err) {

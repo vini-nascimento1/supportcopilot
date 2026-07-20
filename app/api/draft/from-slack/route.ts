@@ -8,6 +8,7 @@ import {
   streamChatCompletion,
 } from "@/lib/draft-ai"
 import type { OpenAIMessage, SlackThreadReply } from "@/lib/draft-ai"
+import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
 
 export async function POST(req: NextRequest) {
   if (!process.env.VERBOO_API_KEY) {
@@ -40,6 +41,7 @@ export async function POST(req: NextRequest) {
   if (!email) {
     return new Response("Authentication required", { status: 401 })
   }
+  const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
 
   // Fetch conversation for context and Slack thread
   const [conversation, tokens] = await Promise.all([
@@ -87,7 +89,7 @@ Open warmly without using the customer's real name. End with a clear call-to-act
           { role: "user", content: userMessage },
         ]
 
-        for await (const chunk of streamChatCompletion(messages)) {
+        for await (const chunk of streamChatCompletion(messages, { provider })) {
           controller.enqueue(encoder.encode(chunk))
         }
       } catch (err) {

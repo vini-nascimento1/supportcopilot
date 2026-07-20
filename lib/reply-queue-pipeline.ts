@@ -33,6 +33,7 @@ import {
   resolveSuggestionOnReply,
   type SuggestionSource,
 } from "@/lib/reply-queue-store"
+import { resolveProviderForAgentId } from "@/lib/ai-provider"
 
 // The always-on reply-queue pipeline — runs off the Intercom webhook (in the
 // background via `after()`). Composes the existing brain: gate -> Notion
@@ -171,6 +172,10 @@ export async function computeAndPersistSuggestion(
     return { handled: true, action: "skipped", reason: "unassigned (assigned-only gate)" }
   }
 
+  // If this agent has set a personal AI key, route their autonomous drafts
+  // through it (own quota, bypasses the shared Verboo throttle).
+  const provider = (await resolveProviderForAgentId(owner.id)) ?? undefined
+
   const capabilityGap = hasCapabilityGap(conversation.tags)
 
   const ticketText = [
@@ -234,7 +239,7 @@ export async function computeAndPersistSuggestion(
   const systemPrompt = notionHadHits
     ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied, greetingInjected)
     : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied, greetingInjected)
-  const userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail)
+  const userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail, provider)
   const messages: OpenAIMessage[] = [
     { role: "system", content: systemPrompt },
     { role: "user", content: userMessage },
@@ -242,7 +247,7 @@ export async function computeAndPersistSuggestion(
 
   let body = ""
   try {
-    for await (const chunk of streamChatCompletion(messages)) body += chunk
+    for await (const chunk of streamChatCompletion(messages, { provider })) body += chunk
   } catch {
     return { handled: false, action: "skipped", reason: "generation failed" }
   }
@@ -253,6 +258,7 @@ export async function computeAndPersistSuggestion(
     for await (const chunk of streamChatCompletion(buildDraftVerifierMessages(messages, body), {
       maxTokens: 4096,
       temperature: 0,
+      provider,
     })) {
       verifiedBody += chunk
     }
