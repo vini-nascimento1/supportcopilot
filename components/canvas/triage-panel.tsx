@@ -80,6 +80,8 @@ export function TriagePanel({
   const [keywordDraft, setKeywordDraft] = useState("")
   const [assigningId, setAssigningId] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  // Anchor conversationId for shift-click range selection.
+  const triageAnchorRef = useRef<string | null>(null)
   const [bulkAssigning, setBulkAssigning] = useState(false)
   const [sweepStatus, setSweepStatus] = useState<TriageSweepStatus | null>(null)
   // Ids the agent just claimed — hidden locally until the TTL expires, in case
@@ -346,16 +348,35 @@ export function TriagePanel({
     }
   }
 
-  const toggleSelect = useCallback((conversationId: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(conversationId)) next.delete(conversationId)
-      else next.add(conversationId)
-      return next
-    })
-  }, [])
+  const toggleSelect = useCallback(
+    (conversationId: string, shift: boolean) => {
+      const list = visibleRanked ?? []
+      const index = list.findIndex((r) => r.item.conversationId === conversationId)
+      setSelected((prev) => {
+        const next = new Set(prev)
+        const anchorIdx = triageAnchorRef.current
+          ? list.findIndex((r) => r.item.conversationId === triageAnchorRef.current)
+          : -1
+        if (shift && anchorIdx >= 0 && index >= 0) {
+          const lo = Math.min(anchorIdx, index)
+          const hi = Math.max(anchorIdx, index)
+          for (let i = lo; i <= hi; i++) {
+            const id = list[i]?.item.conversationId
+            if (id) next.add(id)
+          }
+        } else {
+          if (next.has(conversationId)) next.delete(conversationId)
+          else next.add(conversationId)
+          triageAnchorRef.current = conversationId
+        }
+        return next
+      })
+    },
+    [visibleRanked]
+  )
 
   const toggleSelectAll = useCallback(() => {
+    triageAnchorRef.current = null
     setSelected(
       selectedVisible.size > 0
         ? new Set()
@@ -478,7 +499,7 @@ export function TriagePanel({
                 disabled={assigningId !== null || bulkAssigning}
                 selected={selectedVisible.has(entry.item.conversationId)}
                 selectDisabled={bulkAssigning}
-                onToggleSelect={() => toggleSelect(entry.item.conversationId)}
+                onToggleSelect={(shift) => toggleSelect(entry.item.conversationId, shift)}
                 onAssign={() => void assignToMe(entry.item.conversationId)}
               />
             ))}
@@ -736,7 +757,7 @@ function TriageRow({
   disabled: boolean
   selected: boolean
   selectDisabled: boolean
-  onToggleSelect: () => void
+  onToggleSelect: (shift: boolean) => void
   onAssign: () => void
 }) {
   const nav = useCanvasNav()
@@ -826,7 +847,7 @@ function TriageRow({
           type="button"
           onClick={(e) => {
             e.stopPropagation()
-            onToggleSelect()
+            onToggleSelect(e.shiftKey)
           }}
           disabled={selectDisabled}
           aria-pressed={selected}

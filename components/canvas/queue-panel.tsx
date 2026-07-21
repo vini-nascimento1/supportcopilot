@@ -183,6 +183,10 @@ export function QueuePanel({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkActing, setBulkActing] = useState(false)
   const [confirmBulkSend, setConfirmBulkSend] = useState(false)
+  // Separate multi-select for the "On request" band (its own send/cancel bar).
+  const [selectedOnReq, setSelectedOnReq] = useState<Set<string>>(new Set())
+  const [onReqActing, setOnReqActing] = useState(false)
+  const [confirmOnReqSend, setConfirmOnReqSend] = useState(false)
   // Autonomous "drafting…" placeholders the agent dismissed after they got
   // stuck. Session-local (no localStorage): a reload re-evaluating them as
   // stuck-again is fine, and this avoids a persistence layer for what's really
@@ -196,8 +200,11 @@ export function QueuePanel({
   // stuck cutoff off actual drafting duration, not the customer's wait time.
   const [draftingSince, setDraftingSince] = useState<Record<string, number>>({})
   const masterRef = useRef<HTMLInputElement>(null)
-  // Anchor index for shift-click range selection (the last single-toggled row).
-  const anchorRef = useRef<number | null>(null)
+  // Anchor ID (not index) for shift-click range selection — the poll reorders
+  // the list, so an index would select the wrong range after a refresh.
+  const anchorRef = useRef<string | null>(null)
+  const onReqAnchorRef = useRef<string | null>(null)
+  const onReqMasterRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     try {
@@ -232,6 +239,13 @@ export function QueuePanel({
         let changed = false
         const next = new Set<string>()
         prev.forEach((id) => (readyIds.has(id) ? next.add(id) : (changed = true)))
+        return changed ? next : prev
+      })
+      const onReqIds = new Set(nextOnRequest.map((i) => i.id))
+      setSelectedOnReq((prev) => {
+        let changed = false
+        const next = new Set<string>()
+        prev.forEach((id) => (onReqIds.has(id) ? next.add(id) : (changed = true)))
         return changed ? next : prev
       })
     } catch {
@@ -326,8 +340,13 @@ export function QueuePanel({
         next.delete(item.conversationId)
         return next
       })
-      // Flip the card back to "Drafting…" immediately so the retry is visible.
-      setRetriedAutonomous((prev) => ({ ...prev, [item.conversationId]: Date.now() }))
+      // Flip the card back to "Drafting…" immediately AND restart the drafting
+      // clock, so it can't fall back to "stuck" while the retried generation is
+      // still legitimately running (the grace window is shorter than the stuck
+      // threshold, so without this the card falsely re-fails mid-retry).
+      const stamp = Date.now()
+      setRetriedAutonomous((prev) => ({ ...prev, [item.conversationId]: stamp }))
+      setDraftingSince((prev) => ({ ...prev, [item.conversationId]: stamp }))
       toast.success("Retrying — the draft will appear here shortly.")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't restart generation.")
@@ -413,6 +432,13 @@ export function QueuePanel({
         for (const id of autoIds) next[id] = stamp
         return next
       })
+      // Restart the drafting clock too (see retryAutonomous) so retried cards
+      // don't falsely re-fail while regeneration is still in flight.
+      setDraftingSince((prev) => {
+        const next = { ...prev }
+        for (const id of autoIds) next[id] = stamp
+        return next
+      })
       setDismissedAutonomous((prev) => {
         if (autoIds.every((id) => !prev.has(id))) return prev
         const next = new Set(prev)
@@ -452,9 +478,12 @@ export function QueuePanel({
     (index: number, shift: boolean) => {
       setSelectedIds((prev) => {
         const next = new Set(prev)
-        if (shift && anchorRef.current !== null) {
-          const lo = Math.min(anchorRef.current, index)
-          const hi = Math.max(anchorRef.current, index)
+        const anchorIdx = anchorRef.current
+          ? ready.findIndex((r) => r.id === anchorRef.current)
+          : -1
+        if (shift && anchorIdx >= 0) {
+          const lo = Math.min(anchorIdx, index)
+          const hi = Math.max(anchorIdx, index)
           for (let i = lo; i <= hi; i++) {
             const id = ready[i]?.id
             if (id) next.add(id)
@@ -465,7 +494,7 @@ export function QueuePanel({
             if (next.has(id)) next.delete(id)
             else next.add(id)
           }
-          anchorRef.current = index
+          anchorRef.current = ready[index]?.id ?? null
         }
         return next
       })
@@ -536,6 +565,98 @@ export function QueuePanel({
     if (dismissed > 0) toast.success(`Dismissed ${dismissed}`)
     if (failed > 0) toast.warning(`${failed} couldn't be dismissed`)
   }
+
+  // ── "On request" band selection + bulk send/cancel (mirrors the ready band) ──
+  const toggleOnReqAt = (index: number, shift: boolean) => {
+    setSelectedOnReq((prev) => {
+      const next = new Set(prev)
+      const anchorIdx = onReqAnchorRef.current
+        ? onRequestSorted.findIndex((r) => r.id === onReqAnchorRef.current)
+        : -1
+      if (shift && anchorIdx >= 0) {
+        const lo = Math.min(anchorIdx, index)
+        const hi = Math.max(anchorIdx, index)
+        for (let i = lo; i <= hi; i++) {
+          const id = onRequestSorted[i]?.id
+          if (id) next.add(id)
+        }
+      } else {
+        const id = onRequestSorted[index]?.id
+        if (id) {
+          if (next.has(id)) next.delete(id)
+          else next.add(id)
+        }
+        onReqAnchorRef.current = onRequestSorted[index]?.id ?? null
+      }
+      return next
+    })
+  }
+
+  const toggleAllOnReq = () => {
+    onReqAnchorRef.current = null
+    setSelectedOnReq((prev) =>
+      prev.size === onRequestSorted.length
+        ? new Set()
+        : new Set(onRequestSorted.map((r) => r.id))
+    )
+  }
+
+  const clearOnReqSelection = () => {
+    setSelectedOnReq(new Set())
+    setConfirmOnReqSend(false)
+    onReqAnchorRef.current = null
+  }
+
+  const bulkSendOnReq = async () => {
+    const targets = onRequestSorted.filter((i) => selectedOnReq.has(i.id))
+    if (targets.length === 0) return
+    setOnReqActing(true)
+    let sent = 0
+    let failed = 0
+    let resolveFailed = false
+    for (const item of targets) {
+      const result = await postSendAndResolve(item, item.body)
+      if (result.ok) {
+        sent++
+        if (!result.resolvedOk) resolveFailed = true
+        remove(item.id)
+      } else {
+        failed++
+      }
+    }
+    setConfirmOnReqSend(false)
+    setOnReqActing(false)
+    if (sent > 0) toast.success(`Sent ${sent}`)
+    if (failed > 0) toast.warning(`${failed} couldn't send`)
+    if (resolveFailed) void load()
+  }
+
+  const bulkCancelOnReq = async () => {
+    const targets = onRequestSorted.filter((i) => selectedOnReq.has(i.id))
+    if (targets.length === 0) return
+    setOnReqActing(true)
+    let dismissed = 0
+    let failed = 0
+    for (const item of targets) {
+      const result = await postReject(item)
+      if (result.ok) {
+        dismissed++
+        remove(item.id)
+      } else {
+        failed++
+      }
+    }
+    setOnReqActing(false)
+    if (dismissed > 0) toast.success(`Dismissed ${dismissed}`)
+    if (failed > 0) toast.warning(`${failed} couldn't be dismissed`)
+  }
+
+  const allOnReqSelected =
+    onRequestSorted.length > 0 && selectedOnReq.size === onRequestSorted.length
+  const someOnReqSelected = selectedOnReq.size > 0 && !allOnReqSelected
+  useEffect(() => {
+    if (onReqMasterRef.current) onReqMasterRef.current.indeterminate = someOnReqSelected
+  }, [someOnReqSelected])
 
   // Ctrl/Cmd+A toggles select-all (ready band); Ctrl/Cmd+Enter arms the
   // "Approve & send" confirm, then a second press sends — a send is an
@@ -643,7 +764,7 @@ export function QueuePanel({
               >
                 {ready.map((i, index) => (
                   <QueueRow
-                    key={i.id}
+                    key={i.intercomConversationId}
                     item={i}
                     onDone={remove}
                     onRefresh={load}
@@ -661,7 +782,7 @@ export function QueuePanel({
                 count={needsCheck.length}
               >
                 {needsCheck.map((i) => (
-                  <QueueRow key={i.id} item={i} onDone={remove} onRefresh={load} />
+                  <QueueRow key={i.intercomConversationId} item={i} onDone={remove} onRefresh={load} />
                 ))}
               </Band>
             )}
@@ -676,14 +797,101 @@ export function QueuePanel({
                   >
                     {onRequestSorted.length}
                   </Badge>
+                  <input
+                    ref={onReqMasterRef}
+                    type="checkbox"
+                    checked={allOnReqSelected}
+                    onChange={toggleAllOnReq}
+                    aria-label="Select all on-request drafts"
+                    title="Select all on request"
+                    className="ml-auto size-3.5 shrink-0 cursor-pointer rounded border-muted-foreground/40 accent-primary"
+                  />
                 </div>
                 <p className="px-1 text-[11px] leading-snug text-muted-foreground">
                   Drafts you generated from the Inbox — including tickets you&apos;ve already
                   replied to. Send or dismiss right here.
                 </p>
+                {selectedOnReq.size > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-2 py-2">
+                    <span className="text-xs font-medium tabular-nums">
+                      {selectedOnReq.size} selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={clearOnReqSelection}
+                      className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                    {confirmOnReqSend ? (
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground">
+                          Approve &amp; send {selectedOnReq.size}?
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2.5 text-[11px]"
+                          onClick={() => setConfirmOnReqSend(false)}
+                          disabled={onReqActing}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="h-7 gap-1.5 px-2.5 text-[11px]"
+                          onClick={() => void bulkSendOnReq()}
+                          disabled={onReqActing}
+                        >
+                          {onReqActing ? (
+                            <Loader2Icon className="size-3.5 animate-spin" />
+                          ) : (
+                            <SendIcon className="size-3.5" />
+                          )}
+                          Confirm
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1.5 px-2.5 text-[11px]"
+                          onClick={() => void bulkCancelOnReq()}
+                          disabled={onReqActing}
+                        >
+                          {onReqActing ? (
+                            <Loader2Icon className="size-3.5 animate-spin" />
+                          ) : (
+                            <XIcon className="size-3.5" />
+                          )}
+                          Cancel {selectedOnReq.size}
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="h-7 gap-1.5 px-2.5 text-[11px]"
+                          onClick={() => setConfirmOnReqSend(true)}
+                          disabled={onReqActing}
+                          title="Send is an irreversible outbound message to the customer"
+                        >
+                          <SendIcon className="size-3.5" />
+                          Approve &amp; send {selectedOnReq.size}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="flex flex-col gap-1.5">
-                  {onRequestSorted.map((i) => (
-                    <QueueRow key={i.id} item={i} onDone={remove} onRefresh={load} />
+                  {onRequestSorted.map((i, index) => (
+                    <QueueRow
+                      key={i.intercomConversationId}
+                      item={i}
+                      onDone={remove}
+                      onRefresh={load}
+                      selectable
+                      selected={selectedOnReq.has(i.id)}
+                      onToggleSelect={(shift) => toggleOnReqAt(index, shift)}
+                    />
                   ))}
                 </div>
               </section>
