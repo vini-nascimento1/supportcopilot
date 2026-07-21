@@ -68,27 +68,26 @@ type DraftingItem = {
 const byOldest = (a: QueueItem, b: QueueItem) =>
   new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
 
-// The autonomous backfill (app/api/reply-queue/route.ts) only retries a given
-// conversation once per BACKFILL_WINDOW_MS (5 min), so a threshold shorter than
-// that would flag something as "stuck" before it ever got a real second try.
-// 8 minutes gives it a full retry cycle plus margin before we tell the agent
-// generation is likely failing outright (not just slow).
-const AUTONOMOUS_STUCK_AFTER_MS = 8 * 60 * 1000
+// How long a conversation may sit in the "drafting" list (no ready row yet)
+// before we treat generation as likely failed rather than just slow. Measured
+// from when WE first observed it drafting (client-side), NOT the customer's
+// Intercom waiting_since — an old triage ticket has been "waiting" for ages, but
+// its draft only just started, so the customer clock produced instant false
+// failures. The backfill retries a conversation once per BACKFILL_WINDOW_MS
+// (5 min), so this must be longer than one retry cycle.
+const AUTONOMOUS_STUCK_AFTER_MS = 6 * 60 * 1000
 
 // After the agent hits Retry on a stuck autonomous card, treat it as freshly
 // drafting for this long — the card flips back to the "Drafting…" spinner
 // instead of staying red, giving visible feedback while the recompute runs. A
 // successful recompute lands within a poll or two and the card moves to "Ready";
-// if it fails again, the card returns to stuck once this window elapses. (The
-// stuck state is derived from waiting_since, which Retry can't change, so we
-// need this client-side timer — mirrors how the manual retry resets its own
-// placeholder timestamp.)
+// if it fails again, the card returns to stuck once this window elapses.
 const AUTONOMOUS_RETRY_GRACE_MS = 4 * 60 * 1000
 
-function isAutonomousDraftingStuck(item: DraftingItem, nowMs: number): boolean {
-  if (!item.waitingSince) return false
-  const since = Date.parse(item.waitingSince)
-  return Number.isFinite(since) && nowMs - since > AUTONOMOUS_STUCK_AFTER_MS
+// stuck when it has been continuously in the drafting list longer than the
+// threshold (draftingSinceMs = when we first saw it there, undefined = brand new).
+function isAutonomousDraftingStuck(draftingSinceMs: number | undefined, nowMs: number): boolean {
+  return draftingSinceMs != null && nowMs - draftingSinceMs > AUTONOMOUS_STUCK_AFTER_MS
 }
 
 // Single source of truth for the audited send path — POST /api/draft/send then
@@ -193,6 +192,9 @@ export function QueuePanel({
   // AUTONOMOUS_RETRY_GRACE_MS, the card renders as "Drafting…" again instead of
   // stuck (session-local; expires by time).
   const [retriedAutonomous, setRetriedAutonomous] = useState<Record<string, number>>({})
+  // conversationId → when we FIRST observed it in the drafting list. Drives the
+  // stuck cutoff off actual drafting duration, not the customer's wait time.
+  const [draftingSince, setDraftingSince] = useState<Record<string, number>>({})
   const masterRef = useRef<HTMLInputElement>(null)
   // Anchor index for shift-click range selection (the last single-toggled row).
   const anchorRef = useRef<number | null>(null)
@@ -207,6 +209,16 @@ export function QueuePanel({
       setItems(nextItems)
       setDrafting(nextDrafting)
       setOnRequest(nextOnRequest)
+      // Track first-seen-drafting: keep the timestamp for conversations still
+      // drafting, stamp new ones now, drop those that resolved/left.
+      setDraftingSince((prev) => {
+        const nowMs = Date.now()
+        const next: Record<string, number> = {}
+        for (const d of nextDrafting) {
+          next[d.conversationId] = prev[d.conversationId] ?? nowMs
+        }
+        return next
+      })
       removePendingOnRequestDrafts(
         [...nextItems, ...nextOnRequest].map((item) => item.intercomConversationId)
       )
@@ -359,12 +371,14 @@ export function QueuePanel({
   }
   const autonomousStuck = drafting.filter(
     (item) =>
-      isAutonomousDraftingStuck(item, now) &&
+      isAutonomousDraftingStuck(draftingSince[item.conversationId], now) &&
       !isRetrying(item.conversationId) &&
       !dismissedAutonomous.has(item.conversationId)
   )
   const autonomousFresh = drafting.filter(
-    (item) => !isAutonomousDraftingStuck(item, now) || isRetrying(item.conversationId)
+    (item) =>
+      !isAutonomousDraftingStuck(draftingSince[item.conversationId], now) ||
+      isRetrying(item.conversationId)
   )
   const draftingVisible: DraftingItem[] = [
     ...autonomousFresh,
@@ -377,6 +391,48 @@ export function QueuePanel({
   ]
   const stuckCount = manualStuck.length + autonomousStuck.length
   const total = (items?.length ?? 0) + draftingVisible.length + stuckCount + onRequest.length
+
+  // Retry every stuck card at once (autonomous + manual) in a single generate
+  // call. Mirrors the per-card retries: re-kick generation, reset the autonomous
+  // grace timer, un-dismiss, and reset the manual placeholder timers.
+  const retryAll = async () => {
+    const autoIds = autonomousStuck.map((i) => i.conversationId)
+    const manualItems = manualStuck
+    const allIds = [...autoIds, ...manualItems.map((i) => i.conversationId)]
+    if (allIds.length === 0) return
+    try {
+      const res = await fetch("/api/reply-queue/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationIds: allIds }),
+      })
+      if (!res.ok) throw new Error(await readApiError(res, `Failed (${res.status})`))
+      const stamp = Date.now()
+      setRetriedAutonomous((prev) => {
+        const next = { ...prev }
+        for (const id of autoIds) next[id] = stamp
+        return next
+      })
+      setDismissedAutonomous((prev) => {
+        if (autoIds.every((id) => !prev.has(id))) return prev
+        const next = new Set(prev)
+        for (const id of autoIds) next.delete(id)
+        return next
+      })
+      if (manualItems.length > 0) {
+        addPendingOnRequestDrafts(
+          manualItems.map((i) => ({
+            conversationId: i.conversationId,
+            customerName: i.customerName,
+            subject: i.subject,
+          }))
+        )
+      }
+      toast.success(`Retrying ${allIds.length} draft${allIds.length > 1 ? "s" : ""}…`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't restart generation.")
+    }
+  }
 
   useEffect(() => {
     onCount?.((items?.length ?? 0) + draftingVisible.length + stuckCount + onRequest.length)
@@ -532,6 +588,17 @@ export function QueuePanel({
                   >
                     {stuckCount}
                   </Badge>
+                  {stuckCount > 1 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="ml-auto h-6 gap-1 px-2 text-[11px]"
+                      onClick={() => void retryAll()}
+                    >
+                      <RotateCwIcon className="size-3" />
+                      Retry all
+                    </Button>
+                  )}
                 </div>
                 <p className="px-1 text-[11px] leading-snug text-muted-foreground">
                   Generation didn&apos;t finish (often a temporary rate-limit hiccup). Retry, or
