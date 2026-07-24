@@ -10,10 +10,7 @@ import "server-only"
 // unavailable" and falls back to the literal keywords only
 // (lib/triage/match.ts filterAndRank already gates expandedTerms on `expand`).
 
-import { withVerbooSlot } from "@/lib/verboo-throttle"
-
-const VERBOO_API_KEY = process.env.VERBOO_API_KEY
-const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
+import { withVerbooSlot, verbooFetch, verbooApiKey } from "@/lib/verboo-throttle"
 
 const MAX_TERMS = 40
 const MAX_TERM_LENGTH = 40
@@ -42,13 +39,12 @@ function extractJsonArray(text: string): unknown[] | null {
  * persist "expansion unavailable" and keep filtering on the literal keywords.
  */
 export async function expandKeywords(keywords: string[]): Promise<string[]> {
-  if (!VERBOO_API_KEY || keywords.length === 0) return []
+  if (!verbooApiKey() || keywords.length === 0) return []
 
   try {
     const content = await withVerbooSlot(async () => {
-      const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
+      const res = await verbooFetch("chat/completions", {
         method: "POST",
-        headers: { Authorization: `Bearer ${VERBOO_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "deepseek-v4-flash",
           temperature: 0,

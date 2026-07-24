@@ -1,6 +1,5 @@
 import { type NextRequest } from "next/server"
-import { getSupabaseAdminClient } from "@/lib/supabase-admin"
-import { getSignedInEmail } from "@/lib/auth"
+import { getSignedInEmail, getAgentNameAndAdminId } from "@/lib/auth"
 import { getConversationDetail, searchArticles } from "@/lib/intercom"
 import { getPlaybooksDashboardData, getResponsesForPlaybookIds } from "@/lib/playbooks"
 import {
@@ -17,20 +16,6 @@ import type { OpenAIMessage } from "@/lib/draft-ai"
 import { encodeImageAttachments } from "@/lib/attachments"
 import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
 import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
-
-async function getAgent(email: string): Promise<{ name: string; intercomAdminId: string | null }> {
-  const supabase = getSupabaseAdminClient()
-  if (!supabase) return { name: "the support team", intercomAdminId: null }
-  const { data } = await supabase
-    .from("agents")
-    .select("name, intercom_admin_id")
-    .eq("email", email)
-    .maybeSingle()
-  return {
-    name: data?.name?.split(" ")[0] ?? "the support team",
-    intercomAdminId: (data?.intercom_admin_id as string | undefined) ?? null,
-  }
-}
 
 // ── Route handler ──────────────────────────────────────────────────────────
 
@@ -82,7 +67,7 @@ export async function POST(req: NextRequest) {
     ? ((await getResponsesForPlaybookIds([playbookId])).get(playbookId) ?? [])
     : []
 
-  const { name: agentName, intercomAdminId } = await getAgent(email)
+  const { name: agentName, intercomAdminId } = await getAgentNameAndAdminId(email)
   // Route through this agent's personal AI key if they've set one.
   const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
 

@@ -116,3 +116,30 @@ export function parseRetryAfterMs(raw: string | null | undefined): number | null
   if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now())
   return null
 }
+
+// ── Shared Verboo router fetch ──────────────────────────────────────────────
+
+const VERBOO_API_KEY = process.env.VERBOO_API_KEY
+const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
+
+export function verbooBaseUrl(): string {
+  return VERBOO_BASE_URL
+}
+
+export function verbooApiKey(): string | undefined {
+  return VERBOO_API_KEY
+}
+
+/** Thin wrapper around fetch() that adds the Verboo auth header and base URL.
+    Returns a plain Response; the caller reads the body as needed. */
+export function verbooFetch(path: string, init?: RequestInit): Promise<Response> {
+  const url = `${VERBOO_BASE_URL.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
+  return fetch(url, {
+    ...init,
+    headers: {
+      ...init?.headers,
+      Authorization: `Bearer ${VERBOO_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+  })
+}

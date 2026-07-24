@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
-import { getSignedInEmail } from "@/lib/auth"
+import { getSignedInEmail, getAgentNameAndAdminId } from "@/lib/auth"
 import { getConversationDetail } from "@/lib/intercom"
 import {
   buildMacroAdaptSystemPrompt,
@@ -10,20 +10,6 @@ import {
 } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
 import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
-
-async function getAgent(email: string): Promise<{ name: string; intercomAdminId: string | null }> {
-  const supabase = getSupabaseAdminClient()
-  if (!supabase) return { name: "the support team", intercomAdminId: null }
-  const { data } = await supabase
-    .from("agents")
-    .select("name, intercom_admin_id")
-    .eq("email", email)
-    .maybeSingle()
-  return {
-    name: data?.name?.split(" ")[0] ?? "the support team",
-    intercomAdminId: (data?.intercom_admin_id as string | undefined) ?? null,
-  }
-}
 
 // Minimal server-side HTML → plain-text strip (DOMParser is client-only).
 // Fallback when a macro has no body_text.
@@ -111,7 +97,7 @@ export async function POST(req: NextRequest) {
     return new Response("Conversation not found in Intercom", { status: 404 })
   }
 
-  const { name: agentName, intercomAdminId } = await getAgent(email)
+  const { name: agentName, intercomAdminId } = await getAgentNameAndAdminId(email)
   const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
   const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, intercomAdminId)
   const systemPrompt = buildMacroAdaptSystemPrompt(macroText, agentName, hasAgentReplied)

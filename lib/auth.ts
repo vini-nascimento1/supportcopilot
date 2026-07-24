@@ -71,6 +71,37 @@ export async function getSignedInEmail(): Promise<string | null> {
   return email
 }
 
+// Resolve a signed-in agent's Intercom admin ID from the agents table, falling
+// back to the shared env var. Returns null when neither is available.
+export async function resolveIntercomAdminId(email: string): Promise<string | null> {
+  const adminClient = getSupabaseAdminClient()
+  if (!adminClient) return process.env.INTERCOM_ADMIN_ID ?? null
+
+  const { data } = await adminClient
+    .from("agents")
+    .select("intercom_admin_id")
+    .eq("email", email)
+    .maybeSingle()
+
+  return data?.intercom_admin_id ?? process.env.INTERCOM_ADMIN_ID ?? null
+}
+
+// One-stop lookup for both the agent's given name and Intercom admin id. Used
+// by the draft routes that need the "written by X" label alongside the admin id.
+export async function getAgentNameAndAdminId(email: string): Promise<{ name: string; intercomAdminId: string | null }> {
+  const adminClient = getSupabaseAdminClient()
+  if (!adminClient) return { name: "the support team", intercomAdminId: null }
+  const { data } = await adminClient
+    .from("agents")
+    .select("name, intercom_admin_id")
+    .eq("email", email)
+    .maybeSingle()
+  return {
+    name: data?.name?.split(" ")[0] ?? "the support team",
+    intercomAdminId: (data?.intercom_admin_id as string | undefined) ?? null,
+  }
+}
+
 export type AgentTokens = {
   email: string | null
   name: string | null

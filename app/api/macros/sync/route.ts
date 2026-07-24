@@ -32,7 +32,6 @@ export async function POST() {
     body_text: m.bodyText,
     visibility: m.visibility,
     intercom_updated_at: m.intercomUpdatedAt,
-    raw: m.raw,
   }))
 
   const { error } = await supabase

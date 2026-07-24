@@ -10,10 +10,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getConversationDetail, type ConversationDetail } from "@/lib/intercom"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
 import { hasAgentPersonallyReplied } from "@/lib/draft-ai"
-import { withVerbooSlot } from "@/lib/verboo-throttle"
-
-const VERBOO_API_KEY = process.env.VERBOO_API_KEY
-const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
+import { withVerbooSlot, verbooFetch, verbooApiKey } from "@/lib/verboo-throttle"
 
 // "Has THIS case's owning agent personally replied" — not "has any admin/bot
 // replied". Previously this prompt unconditionally forced the greeting every
@@ -65,9 +62,8 @@ async function generate(system: string, user: string): Promise<string> {
   // Shares the process-wide Verboo throttle with the gate + reply-queue pipeline
   // so automation prestage can't contribute to a 429 stampede.
   return withVerbooSlot(async () => {
-    const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
+    const res = await verbooFetch("chat/completions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${VERBOO_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "deepseek-v4-flash",
         max_tokens: 1024,
@@ -140,7 +136,7 @@ async function persistDraft(conversationId: string, replyBody: string): Promise<
  * to the action runner.
  */
 export async function prestageDraft(conversationId: string | null): Promise<PrestageResult> {
-  if (!VERBOO_API_KEY) return { applied: false, detail: "VERBOO_API_KEY not set" }
+  if (!verbooApiKey()) return { applied: false, detail: "VERBOO_API_KEY not set" }
   if (!conversationId) return { applied: false, detail: "no conversation id" }
   const db = getSupabaseAdminClient()
   if (!db) return { applied: false, detail: "no admin client" }

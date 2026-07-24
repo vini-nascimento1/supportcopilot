@@ -8,6 +8,8 @@ import {
   acquireVerbooSlot,
   releaseVerbooSlot,
   parseRetryAfterMs,
+  verbooBaseUrl,
+  verbooApiKey,
 } from "@/lib/verboo-throttle"
 import type { AiProvider } from "@/lib/ai-provider"
 
@@ -24,8 +26,6 @@ export type OpenAIMessage = {
   content: string | OpenAIContentPart[]
 }
 
-const VERBOO_API_KEY = process.env.VERBOO_API_KEY
-const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
 const DEFAULT_TEXT_MODEL = "deepseek-v4-flash"
 const DEFAULT_VISION_MODEL = "qwen3.6-27b"
 const DEFAULT_DRAFT_TEMPERATURE = 0.2
@@ -768,8 +768,8 @@ async function openVerbooStream(
   signal?: AbortSignal,
   endpoint?: StreamEndpoint
 ): Promise<Response> {
-  const baseUrl = endpoint?.baseUrl ?? VERBOO_BASE_URL
-  const apiKey = endpoint?.apiKey ?? VERBOO_API_KEY
+  const baseUrl = endpoint?.baseUrl ?? verbooBaseUrl()
+  const apiKey = endpoint?.apiKey ?? verbooApiKey()
   let attempt = 0
   for (;;) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError")

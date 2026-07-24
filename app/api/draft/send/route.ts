@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-import { getSignedInEmail } from "@/lib/auth"
+import { getSignedInEmail, resolveIntercomAdminId } from "@/lib/auth"
 import { mdToHtml } from "@/lib/md-to-html"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { sendIntercomReply } from "./intercom-reply"
@@ -42,20 +42,14 @@ export async function POST(req: NextRequest) {
     return errorResponse("Server misconfigured", 500)
   }
 
-  const { data: agent } = await supabase
-    .from("agents")
-    .select("intercom_admin_id")
-    .eq("email", email)
-    .maybeSingle()
-
-  const adminId = agent?.intercom_admin_id ?? process.env.INTERCOM_ADMIN_ID
+  const adminId = await resolveIntercomAdminId(email)
   if (!adminId) {
     return errorResponse("No Intercom admin ID found for your account", 400)
   }
 
   const htmlBody = html ? body : mdToHtml(body)
   const replyPayload = buildIntercomReplyPayload({
-    adminId: String(adminId),
+    adminId,
     htmlBody,
     attachmentFiles,
   })

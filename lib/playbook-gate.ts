@@ -73,9 +73,6 @@ export function parseGateResponse(
   }
 }
 
-const VERBOO_API_KEY = process.env.VERBOO_API_KEY
-const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
-
 // Use the playbook only when the classifier is at least this confident.
 // Below it → "no playbook applies" (the tail Phase 2 routes to Notion).
 export const GATE_CONFIDENCE_THRESHOLD = 0.6
@@ -86,24 +83,20 @@ export async function classifyPlaybookMatch(
   caseText: string,
   playbooks: PlaybookListItem[]
 ): Promise<PlaybookGateResult> {
-  if (!VERBOO_API_KEY || playbooks.length === 0) {
+  // Dynamic import keeps pure functions free of server-only dependency chain.
+  const { withVerbooSlot, verbooFetch, verbooApiKey } = await import("@/lib/verboo-throttle")
+
+  // Without the API key there's nothing to call — fall through to keyword match.
+  if (!verbooApiKey() || playbooks.length === 0) {
     return { playbookId: null, confidence: 0, reason: "error" }
   }
 
   // Route through the shared Verboo throttle so the gate can't add to a 429
-  // stampede alongside the generation/verifier/backfill calls. Dynamic import
-  // keeps this module's pure functions (buildGatePrompt/parseGateResponse) free
-  // of the server-only dependency chain so they stay unit-testable anywhere.
-  const { withVerbooSlot } = await import("@/lib/verboo-throttle")
-
+  // stampede alongside the generation/verifier/backfill calls.
   try {
     return await withVerbooSlot(async () => {
-      const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
+      const res = await verbooFetch("chat/completions", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${VERBOO_API_KEY}`,
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({
           model: "deepseek-v4-flash",
           // 512, not 200: a smoke test showed 200 truncated the JSON verdict

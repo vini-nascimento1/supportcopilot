@@ -751,6 +751,8 @@ function toSweepConversation(c: IntercomSearchConversation): {
 // getOpenCasesQueue uses. Without a cap, one call on an abnormally large queue
 // paginates unbounded and blows past the route's maxDuration, which is what
 // made the triage sweep fail wholesale on big queues (and leave a stale pool).
+// ponytail: one cap for all pagination loops. 40 pages × 150 rows = 6 000 per
+// poll. Per-query tuning if a specific endpoint ever needs less.
 const MAX_SWEEP_PAGES = 40
 
 /**
@@ -990,8 +992,6 @@ async function fetchMetricsWindow(
   let total = 0
   let startingAfter: string | undefined
   let pageCount = 0
-  const MAX_PAGES = 50
-
   do {
     pageCount++
     const body: Record<string, unknown> = {
@@ -1042,7 +1042,7 @@ async function fetchMetricsWindow(
     }
 
     startingAfter = payload.pages?.next?.starting_after
-  } while (startingAfter && pageCount < MAX_PAGES)
+  } while (startingAfter && pageCount < MAX_QUEUE_PAGES)
 
   return { total, frtValues, resolveValues, assignmentCounts, reopenCounts, csatScores }
 }
@@ -1133,7 +1133,6 @@ export interface IntercomMacro {
   bodyText: string | null
   visibility: string
   intercomUpdatedAt: string | null
-  raw: unknown
 }
 
 /** Fetch all macros from Intercom (follows cursor pagination). */
@@ -1170,7 +1169,6 @@ export async function listIntercomMacros(): Promise<IntercomMacro[]> {
         bodyText: typeof m.body_text === "string" ? m.body_text : null,
         visibility: typeof m.visible_to === "string" ? m.visible_to : "everyone",
         intercomUpdatedAt: toDate(m.updated_at),
-        raw: m,
       })
     }
     const next = json.pages?.next?.starting_after

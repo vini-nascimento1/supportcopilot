@@ -1,6 +1,5 @@
 import { type NextRequest } from "next/server"
-import { getSignedInEmail } from "@/lib/auth"
-import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { getSignedInEmail, resolveIntercomAdminId } from "@/lib/auth"
 import { closeConversation } from "@/lib/intercom"
 
 export const dynamic = "force-dynamic"
@@ -14,16 +13,7 @@ export async function POST(req: NextRequest) {
   const { conversationId } = (await req.json()) as { conversationId?: string }
   if (!conversationId) return new Response("Missing conversationId", { status: 400 })
 
-  const supabase = getSupabaseAdminClient()
-  if (!supabase) return new Response("Server misconfigured", { status: 500 })
-
-  const { data: agent } = await supabase
-    .from("agents")
-    .select("intercom_admin_id")
-    .eq("email", email)
-    .maybeSingle()
-
-  const adminId = agent?.intercom_admin_id ?? process.env.INTERCOM_ADMIN_ID
+  const adminId = await resolveIntercomAdminId(email)
   if (!adminId) {
     return new Response("No Intercom admin ID found for your account", { status: 400 })
   }

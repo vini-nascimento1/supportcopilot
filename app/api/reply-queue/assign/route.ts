@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 
+import { resolveIntercomAdminId } from "@/lib/auth"
 import { getAgentContext } from "@/lib/automation/rules"
 import { assignConversationToAdmin } from "@/lib/intercom"
 import { assignSuggestion } from "@/lib/reply-queue-store"
@@ -36,13 +37,7 @@ export async function POST(req: Request) {
   }
 
   // Resolve the signing-in agent's Intercom admin ID
-  const { data: agent } = await db
-    .from("agents")
-    .select("intercom_admin_id")
-    .eq("email", email)
-    .maybeSingle()
-
-  const adminId = agent?.intercom_admin_id ?? process.env.INTERCOM_ADMIN_ID
+  const adminId = await resolveIntercomAdminId(email)
   if (!adminId) {
     return NextResponse.json(
       { error: "No Intercom admin ID found for your account" },

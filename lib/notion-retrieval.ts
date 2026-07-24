@@ -51,6 +51,8 @@ const BUG_TERMS = [
   "workaround",
 ]
 
+import { isRecord } from "@/lib/notion-mcp-oauth"
+
 // A Notion "page" is first-class support knowledge we can paraphrase from.
 // Everything else (google-drive, slack, linear, github, jira, teams,
 // sharepoint, onedrive...) is connector/external content — flagged internal so
@@ -92,10 +94,6 @@ export function classifyNotionSnippetUse(
   }
 
   return snippet.isInternalSource ? "internalOnly" : "customerSafe"
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null
 }
 
 // Maps a raw notion-search response into snippets, capped at `limit`.
