@@ -175,6 +175,16 @@ When a **new** account fails verification because the creator already has an exi
   - **Real (non-AI) creator:** only one verified account is allowed per person, full stop. The path forward is **recovering access to the original account**, not creating a new one — the ID cannot be reused across two separate real-creator accounts.
 - **Never suggest changing the email** on either the existing or the new account as the fix for this — it does not resolve anything and just sends the customer down a dead end.
 
+## 4h.1. Gmail dot/plus-alias "wrong email" — check this BEFORE treating it as a real email-change need
+
+Gmail ignores dots in the local part and anything after a `+` — `alinatransom@gmail.com`, `alina.transom@gmail.com`, and `alinatransom+anything@gmail.com` are **all the same mailbox**. Only Gmail behaves this way (don't assume it for Outlook/Yahoo/etc).
+
+If a creator wants their registered email "corrected" and the two addresses are both `gmail.com` differing only by dots/a plus-alias, **they have not actually lost access and nothing is misdelivering** — every other Fanvue email has already been reaching them fine (often provable with a screenshot). A missed payout confirmation in this situation is almost always a one-off delivery hiccup (spam/promotions) or a provider-side issue, not the dot itself.
+
+- **Don't** default to "we can't change the email, delete and recreate your account" — delete+recreate doesn't even solve the real problem (it doesn't move the existing balance to the new account).
+- **Do** explain the Gmail dot/plus fact, ask them to check spam/promotions/All Mail for the missed email, and have them simply retry the payout request (or whichever action failed) — the confirmation reaches the same inbox regardless of dots.
+- Only escalate to Payments for a delivery-log check if a clean retry still genuinely fails.
+
 ## 4i. KYC mismatch dispute — creator insists content is AI-generated, not real
 
 When a creator's content got flagged as a KYC/content mismatch and they push back insisting the flagged media is **100% AI-generated**, not real footage of a person, this needs proof — not a Support judgment call. Support does not make the final AI/non-AI call; it goes to moderation.
