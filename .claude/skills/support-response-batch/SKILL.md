@@ -113,6 +113,12 @@ If any part of a person's presence on Fanvue was banned, **the person is banned*
 - We will keep enforcing bans. Depending on severity, repeat or serious violations (fraud, chargebacks, abuse, etc.) can escalate to legal action against the person, not just another account restriction.
 - If a ticket looks like "my account/email X is banned, how do I get a new one going" — do not give account-creation troubleshooting steps. Treat it as a ban question, and if unsure whether the person themself (not just the email) is banned, escalate/flag rather than assume it's a simple new-signup case.
 
+### Fraud/AML ban pushback — no further communication, ever
+
+For a manual fraud/AML ban (SCC, ATL, LND, FID, SCM, ATO, SNC, etc. — see the Ban Reason Glossary), send the approved template **verbatim** and nothing else: "We regularly audit our creators' information at Fanvue and after reviewing your case we're sorry to say we'll no longer be able to offer you an account, effective immediately. There may be several reasons why we might close an account, all of which can be found within our Terms & Conditions, outlined in section 16." Never say "fraud"/"AML"/"money laundering", never disclose the specific signal.
+
+**If the customer pushes back — including by quoting our own Terms & Conditions at us** (e.g. "Section 16.7 says you'll provide reasons for enforcement decisions, tell me the reason") — that is **not an exception**. The template's reference to "reasons... found within our T&Cs, section 16" already satisfies that. Never draft an "I'll check/investigate and share the reason/policy category" reply under any framing. Per the source SOP: no communication besides the approved template — if they keep arguing, that's a **block**, flagged to a human to action, not a topic to keep engaging on.
+
 ## 4e. Account warnings are permanent — never say they can be removed
 
 Warnings on a Fanvue account (e.g. stolen content, compliance flags) are **not removed**, even if the flagged content is deleted or time passes.
