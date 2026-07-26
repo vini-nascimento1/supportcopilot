@@ -36,6 +36,7 @@ import {
   type SuggestionSource,
 } from "@/lib/reply-queue-store"
 import { resolveProviderForAgentId } from "@/lib/ai-provider"
+import { resolveToneInstructionForAgentId } from "@/lib/agent-tone"
 
 // The always-on reply-queue pipeline — runs off the Intercom webhook (in the
 // background via `after()`). Composes the existing brain: gate -> Notion
@@ -182,6 +183,8 @@ export async function computeAndPersistSuggestion(
   // If this agent has set a personal AI key, route their autonomous drafts
   // through it (own quota, bypasses the shared Verboo throttle).
   const provider = (await resolveProviderForAgentId(owner.id)) ?? undefined
+  // Personal reply-tone preference (Settings → Reply tone), if set.
+  const toneInstruction = await resolveToneInstructionForAgentId(owner.id)
 
   const capabilityGap = hasCapabilityGap(conversation.tags)
 
@@ -244,8 +247,8 @@ export async function computeAndPersistSuggestion(
   // model is told NOT to write its own greeting and never double up.
   const greetingInjected = !hasAgentReplied
   let systemPrompt = notionHadHits
-    ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied, greetingInjected)
-    : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied, greetingInjected)
+    ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied, greetingInjected, toneInstruction)
+    : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied, greetingInjected, toneInstruction)
   // Steer any model away from emitting its action plan as a checklist and
   // asking to proceed — output just the reply. (Most pronounced on the OpenAI
   // gpt-5 family, but good hygiene for the shared model too.)

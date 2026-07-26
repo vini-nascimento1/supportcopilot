@@ -21,6 +21,7 @@ import { refreshTokenExpired } from "@/lib/notion-mcp-auth"
 import { CaseToolsSettings } from "@/components/case-tools-settings"
 import { CanvasModeSettings } from "@/components/canvas-mode-settings"
 import { PersonalAiKeySettings } from "@/components/personal-ai-key-settings"
+import { ReplyToneSettings } from "@/components/reply-tone-settings"
 import { SettingsForm } from "./settings-form"
 
 export const dynamic = "force-dynamic"
@@ -188,6 +189,8 @@ export default async function SettingsPage({
         <CaseToolsSettings tools={caseTools} />
 
         <CanvasModeSettings />
+
+        <ReplyToneSettings />
 
         <PersonalAiKeySettings />
 

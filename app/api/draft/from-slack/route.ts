@@ -9,6 +9,7 @@ import {
 } from "@/lib/draft-ai"
 import type { OpenAIMessage, SlackThreadReply } from "@/lib/draft-ai"
 import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
+import { resolveToneInstructionForAgentEmail } from "@/lib/agent-tone"
 
 export async function POST(req: NextRequest) {
   if (!process.env.VERBOO_API_KEY) {
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest) {
     return new Response("Authentication required", { status: 401 })
   }
   const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
+  const toneInstruction = await resolveToneInstructionForAgentEmail(email)
 
   // Fetch conversation for context and Slack thread
   const [conversation, tokens] = await Promise.all([
@@ -70,7 +72,8 @@ export async function POST(req: NextRequest) {
   // Use focused translation prompt — no playbooks, no KB articles, no examples
   const systemPrompt = buildSlackTranslationPrompt(
     channelName ?? "unknown",
-    slackReplies
+    slackReplies,
+    toneInstruction
   )
 
   const userMessage = `The customer's name is ${conversation.customer}.

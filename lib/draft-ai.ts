@@ -188,13 +188,24 @@ const POLICY_INTEGRITY_RULES = `## Policy integrity — do not invent exceptions
 
 // ── System prompt builder ──────────────────────────────────────────────────
 
+// An agent's personal reply-tone preference (Settings → Reply tone), injected
+// as its own section. Shapes voice/phrasing only — never overrides a rule
+// above it (identity checks, no invented promises, playbook/policy).
+function toneInstructionSection(toneInstruction?: string): string {
+  if (!toneInstruction) return ""
+  return `\n\n## This agent's personal tone preference
+${toneInstruction}
+This shapes HOW you write — voice, phrasing, formality — it never overrides any rule above: still no invented promises or fake account checks, still verify identity before sensitive actions, still follow the playbook/policy exactly.`
+}
+
 export function buildSystemPrompt(
   playbook: PlaybookListItem | undefined,
   examples: ResponseItem[],
   agentName: string,
   articles: IntercomArticle[],
   hasAgentReplied = false,
-  greetingInjected = false
+  greetingInjected = false,
+  toneInstruction?: string
 ): string {
   const parts: string[] = []
 
@@ -237,7 +248,7 @@ ${CAPABILITY_BOUNDARY_RULES}
 
 ${POLICY_INTEGRITY_RULES}
 
-${AGENT_IDENTITY_RULES}
+${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
 ## Closing the conversation
 - If the customer has already been answered per the knowledge base articles (policy, steps, or procedures already explained in the thread) and they keep insisting or asking the same thing: **be firm but polite, restate the policy one last time, and signal that the conversation is being closed**.
 - Do not keep re-explaining the same thing. One final clear summary + close.
@@ -332,7 +343,8 @@ export function buildNotionAwareSystemPrompt(
   articles: IntercomArticle[],
   notionSnippets: NotionSnippet[],
   hasAgentReplied = false,
-  greetingInjected = false
+  greetingInjected = false,
+  toneInstruction?: string
 ): string {
   const base = buildSystemPrompt(
     playbook,
@@ -340,7 +352,8 @@ export function buildNotionAwareSystemPrompt(
     agentName,
     articles,
     hasAgentReplied,
-    greetingInjected
+    greetingInjected,
+    toneInstruction
   )
   if (notionSnippets.length === 0) return base
 
@@ -502,7 +515,7 @@ export async function buildGroundedDraftUserMessage(
 
 // ── Improve-an-existing-draft builders ─────────────────────────────────────
 
-export function buildImproveSystemPrompt(agentName: string): string {
+export function buildImproveSystemPrompt(agentName: string, toneInstruction?: string): string {
   return `You are a support copilot for ${agentName}, a senior support agent at Fanvue.
 
 Your task: IMPROVE the existing customer-facing reply draft provided below — do not write a new reply from scratch.
@@ -524,7 +537,7 @@ ${CAPABILITY_BOUNDARY_RULES}
 
 ${POLICY_INTEGRITY_RULES}
 
-${AGENT_IDENTITY_RULES}`
+${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}`
 }
 
 export function buildImproveUserMessage(
@@ -591,7 +604,8 @@ export function buildMacroAdaptUserMessage(
 
 export function buildSlackTranslationPrompt(
   channelName: string,
-  replies: SlackThreadReply[]
+  replies: SlackThreadReply[],
+  toneInstruction?: string
 ): string {
   const threadLines = replies.map((r) => `${r.userName}: ${r.text}`)
 
@@ -617,7 +631,7 @@ ${CAPABILITY_BOUNDARY_RULES}
 
 ${POLICY_INTEGRITY_RULES}
 
-${AGENT_IDENTITY_RULES}
+${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
 ## Internal Slack thread (from #${channelName})
 ${threadLines.join("\n")}
 
@@ -635,7 +649,8 @@ Write the customer-facing reply now:`
 export function buildMacroAdaptSystemPrompt(
   macroBodyText: string,
   agentName: string,
-  hasAgentReplied = false
+  hasAgentReplied = false,
+  toneInstruction?: string
 ): string {
   return `You are a support copilot for ${agentName}, a senior support agent at Fanvue — a creator subscription platform (AI creators and human creators both use it).
 
@@ -666,7 +681,7 @@ ${CAPABILITY_BOUNDARY_RULES}
 
 ${POLICY_INTEGRITY_RULES}
 
-${AGENT_IDENTITY_RULES}
+${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
 ## Approved macro to adapt
 ${macroBodyText}`
 }

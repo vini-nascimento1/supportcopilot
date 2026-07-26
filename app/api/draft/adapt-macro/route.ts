@@ -10,6 +10,7 @@ import {
 } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
 import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
+import { resolveToneInstructionForAgentEmail } from "@/lib/agent-tone"
 
 // Minimal server-side HTML → plain-text strip (DOMParser is client-only).
 // Fallback when a macro has no body_text.
@@ -99,8 +100,9 @@ export async function POST(req: NextRequest) {
 
   const { name: agentName, intercomAdminId } = await getAgentNameAndAdminId(email)
   const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
+  const toneInstruction = await resolveToneInstructionForAgentEmail(email)
   const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, intercomAdminId)
-  const systemPrompt = buildMacroAdaptSystemPrompt(macroText, agentName, hasAgentReplied)
+  const systemPrompt = buildMacroAdaptSystemPrompt(macroText, agentName, hasAgentReplied, toneInstruction)
   const userMessage = buildMacroAdaptUserMessage(conversation, Boolean(conversation.email))
 
   const encoder = new TextEncoder()
