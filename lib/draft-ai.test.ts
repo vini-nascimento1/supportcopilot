@@ -7,6 +7,7 @@ import {
   buildMacroAdaptSystemPrompt,
   buildMacroAdaptUserMessage,
   buildDraftVerifierMessages,
+  buildVerifierGroundingContext,
   buildNotionAwareSystemPrompt,
   buildSlackTranslationPrompt,
   buildSystemPrompt,
@@ -16,6 +17,8 @@ import {
 } from "./draft-ai"
 import type { OpenAIMessage } from "./draft-ai"
 import type { NotionSnippet } from "./notion-retrieval"
+import type { PlaybookListItem } from "./playbooks"
+import type { IntercomArticle } from "./intercom"
 
 const snippet = (over: Partial<NotionSnippet>): NotionSnippet => ({
   id: "id",
@@ -117,6 +120,59 @@ describe("grounding and capability boundaries", () => {
     expect(out[0].content).toContain("strict grounding verifier")
     expect(out[0].content).toContain("Remove or soften any claim")
     expect(out[1].content).toContain("I've checked your account")
+  })
+})
+
+describe("buildVerifierGroundingContext", () => {
+  const playbook: PlaybookListItem = {
+    id: "pb-1",
+    caseType: "Payout delayed",
+    source: "test",
+    status: "reviewed",
+    aliases: [],
+    lastValidated: null,
+    recognize: "Creator asks why payout is delayed",
+    checks: "Check Fadmin.",
+    resolution: "Explain the standard pending window.",
+    dosDonts: "Don't promise a specific date.",
+    requiresManualAction: false,
+  }
+  const article: IntercomArticle = {
+    id: "art-1",
+    title: "How payouts work",
+    description: "Overview",
+    bodySnippet: "Payouts settle after 7 days.",
+  }
+
+  it("includes the playbook resolution and dos/donts, and KB articles", () => {
+    const out = buildVerifierGroundingContext(playbook, [article])
+    expect(out).toContain("Payout delayed")
+    expect(out).toContain("Explain the standard pending window.")
+    expect(out).toContain("Don't promise a specific date.")
+    expect(out).toContain("How payouts work")
+    expect(out).toContain("Payouts settle after 7 days.")
+  })
+
+  it("includes only customer-safe Notion snippets, not internal-only ones", () => {
+    const safe = snippet({ title: "Public KB", text: "Safe fact", isInternalSource: false })
+    const internal = snippet({ title: "Internal note", text: "Secret internal detail", isInternalSource: true })
+    const out = buildVerifierGroundingContext(undefined, [], [safe, internal])
+    expect(out).toContain("Safe fact")
+    expect(out).not.toContain("Secret internal detail")
+  })
+
+  it("omits the instructional/behavioral rules that the generation prompt needs", () => {
+    const out = buildVerifierGroundingContext(playbook, [article])
+    // These are the big instructional blocks unique to the generation system
+    // prompt — the whole point of this function is to leave them out.
+    expect(out).not.toContain("AGENT_IDENTITY_RULES")
+    expect(out).not.toContain("You ARE the agent handling this")
+    expect(out).not.toContain("Tone rules")
+    expect(out).not.toContain("Capability boundaries")
+  })
+
+  it("returns an empty string when there is nothing to ground on", () => {
+    expect(buildVerifierGroundingContext(undefined, [])).toBe("")
   })
 })
 

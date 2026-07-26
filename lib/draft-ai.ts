@@ -497,7 +497,7 @@ export async function buildGroundedDraftUserMessage(
   let imageEvidence = ""
   try {
     for await (const chunk of streamChatCompletion(buildVisionEvidenceMessages(conversation, images), {
-      model: provider ? provider.visionModel : getVisionDraftModel(),
+      model: provider ? provider.auxModel : getVisionDraftModel(),
       maxTokens: 1536,
       temperature: 0,
       provider,
@@ -686,6 +686,43 @@ ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
 ${macroBodyText}`
 }
 
+// Minimal factual grounding for the verifier: playbook resolution + KB
+// articles + citable Notion snippets — WITHOUT the instructional/behavioral
+// rules (identity, tone, capability-boundary, policy-integrity, personal tone
+// preference) that the generation prompt needs but a grounding check doesn't.
+// Those rules are ~half the original system prompt's tokens and irrelevant to
+// "is this claim supported by the source material" — passing them to the
+// verifier every call was pure waste, since the verifier re-sends its whole
+// input as "source context" on top of the draft itself.
+export function buildVerifierGroundingContext(
+  playbook: PlaybookListItem | undefined,
+  articles: IntercomArticle[],
+  notionSnippets: NotionSnippet[] = []
+): string {
+  const sections: string[] = []
+
+  if (playbook) {
+    const parts: string[] = [`## Playbook: ${playbook.caseType}`]
+    if (playbook.resolution) parts.push(`Resolution guidance:\n${playbook.resolution}`)
+    if (playbook.dosDonts) parts.push(`Do not:\n${playbook.dosDonts}`)
+    sections.push(parts.join("\n\n"))
+  }
+
+  if (articles.length > 0) {
+    const parts = [`## Knowledge base articles`]
+    for (const art of articles) parts.push(`### ${art.title}\n${art.bodySnippet}`)
+    sections.push(parts.join("\n\n"))
+  }
+
+  const citable = notionSnippets.filter((s) => classifyNotionSnippetUse(s) === "customerSafe")
+  if (citable.length > 0) {
+    const lines = citable.map((s, i) => `[${i + 1}] ${s.title}: ${s.text}`)
+    sections.push(`## Notion knowledge\n${lines.join("\n")}`)
+  }
+
+  return sections.join("\n\n")
+}
+
 export function buildDraftVerifierMessages(
   sourceMessages: OpenAIMessage[],
   draft: string
@@ -856,7 +893,7 @@ export async function* streamChatCompletion(
     options?.model ??
     (provider
       ? messagesHaveImage(messages)
-        ? provider.visionModel
+        ? provider.auxModel
         : provider.textModel
       : selectModel(messages))
 

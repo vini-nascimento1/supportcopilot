@@ -11,7 +11,10 @@ export type AiProvider = {
   baseUrl: string // OpenAI-compatible, includes the /v1 suffix
   apiKey: string
   textModel: string
-  visionModel: string
+  // Model for narrow, non-creative auxiliary calls (vision-evidence extraction,
+  // the draft verifier) that don't need the primary model's reasoning — falls
+  // back to textModel when the agent hasn't set a separate one.
+  auxModel: string
   // false = personal key (own quota; the shared-key throttle is bypassed).
   shared: boolean
 }
@@ -26,6 +29,7 @@ type PersonalRow = {
   personal_ai_key_enc: string | null
   personal_ai_base_url: string | null
   personal_ai_model: string | null
+  personal_ai_aux_model: string | null
   personal_ai_enabled: boolean | null
 }
 
@@ -37,17 +41,18 @@ function providerFromRow(row: PersonalRow | null): AiProvider | null {
   const apiKey = decryptSecret(enc)
   if (!apiKey) return null // bad master key / tampered value → fall back to shared
   const model = row?.personal_ai_model?.trim() || DEFAULT_PERSONAL_MODEL
+  const auxModel = row?.personal_ai_aux_model?.trim() || model
   return {
     baseUrl: (row?.personal_ai_base_url?.trim() || DEFAULT_PERSONAL_BASE_URL).replace(/\/+$/, ""),
     apiKey,
     textModel: model,
-    visionModel: model,
+    auxModel,
     shared: false,
   }
 }
 
 const SELECT_COLS =
-  "personal_ai_key_enc, personal_ai_base_url, personal_ai_model, personal_ai_enabled"
+  "personal_ai_key_enc, personal_ai_base_url, personal_ai_model, personal_ai_aux_model, personal_ai_enabled"
 
 /** Personal provider for the agent with this email, or null to use the shared key. */
 export async function resolveProviderForAgentEmail(

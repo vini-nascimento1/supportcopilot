@@ -16,6 +16,7 @@ import {
   buildNotionAwareSystemPrompt,
   buildGroundedDraftUserMessage,
   buildDraftVerifierMessages,
+  buildVerifierGroundingContext,
   buildAgentGreeting,
   hasAgentPersonallyReplied,
   streamChatCompletion,
@@ -271,9 +272,19 @@ export async function computeAndPersistSuggestion(
 
   let verifiedBody = ""
   try {
-    for await (const chunk of streamChatCompletion(buildDraftVerifierMessages(messages, body), {
+    // The verifier only needs the conversation thread + factual grounding
+    // (playbook/KB/Notion), not the full instructional system prompt (identity,
+    // tone, capability-boundary, policy-integrity rules) — those are irrelevant
+    // to a grounding check and were roughly doubling this call's input cost,
+    // since the verifier re-sends its whole input as "source context."
+    const verifierSourceMessages: OpenAIMessage[] = [
+      { role: "system", content: buildVerifierGroundingContext(matched ?? undefined, articles, snippets) },
+      { role: "user", content: userMessage },
+    ]
+    for await (const chunk of streamChatCompletion(buildDraftVerifierMessages(verifierSourceMessages, body), {
       maxTokens: 4096,
       temperature: 0,
+      model: provider?.auxModel,
       provider,
     })) {
       verifiedBody += chunk

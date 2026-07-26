@@ -14,6 +14,7 @@ type Status = {
   enabled: boolean
   baseUrl: string | null
   model: string | null
+  auxModel: string | null
   defaults: { baseUrl: string; model: string }
   cryptoAvailable: boolean
 }
@@ -26,6 +27,7 @@ export function PersonalAiKeySettings() {
   const [status, setStatus] = useState<Status | null>(null)
   const [apiKey, setApiKey] = useState("")
   const [model, setModel] = useState("")
+  const [auxModel, setAuxModel] = useState("")
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -37,6 +39,7 @@ export function PersonalAiKeySettings() {
       const data = (await res.json()) as Status
       setStatus(data)
       setModel(data.model ?? "")
+      setAuxModel(data.auxModel ?? "")
     } catch {
       // best-effort; leave the card in its default state
     }
@@ -57,6 +60,7 @@ export function PersonalAiKeySettings() {
         body: JSON.stringify({
           apiKey: apiKey.trim() || undefined,
           model: model.trim() || undefined,
+          auxModel: auxModel.trim() || undefined,
         }),
       })
       if (!res.ok) {
@@ -106,6 +110,7 @@ export function PersonalAiKeySettings() {
       }
       setApiKey("")
       setModel("")
+      setAuxModel("")
       await load()
     } catch {
       setError("Couldn't remove the key — please try again.")
@@ -217,6 +222,24 @@ export function PersonalAiKeySettings() {
           <p className="text-xs text-muted-foreground">
             Multimodal model for both text and images. Defaults to{" "}
             <span className="font-medium">{defaultModel}</span> if left blank.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="personal-ai-aux-model">Verifier / vision model (optional)</Label>
+          <Input
+            id="personal-ai-aux-model"
+            value={auxModel}
+            onChange={(e) => {
+              setAuxModel(e.target.value)
+              setSaved(false)
+            }}
+            placeholder="Same as Model above"
+          />
+          <p className="text-xs text-muted-foreground">
+            Used for the draft-grounding check and reading screenshots — narrower tasks that don&apos;t
+            need the main model&apos;s reasoning. Leave blank to use the same model as above, or set a
+            cheaper one here to cut cost without affecting the actual reply generation.
           </p>
         </div>
 

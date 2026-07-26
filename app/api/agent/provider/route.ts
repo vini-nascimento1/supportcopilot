@@ -20,7 +20,7 @@ export async function GET() {
 
   const { data } = await db
     .from("agents")
-    .select("personal_ai_key_enc, personal_ai_base_url, personal_ai_model, personal_ai_enabled")
+    .select("personal_ai_key_enc, personal_ai_base_url, personal_ai_model, personal_ai_aux_model, personal_ai_enabled")
     .eq("email", email)
     .maybeSingle()
 
@@ -29,6 +29,7 @@ export async function GET() {
     enabled: (data?.personal_ai_enabled as boolean | null) ?? true,
     baseUrl: (data?.personal_ai_base_url as string | null) ?? null,
     model: (data?.personal_ai_model as string | null) ?? null,
+    auxModel: (data?.personal_ai_aux_model as string | null) ?? null,
     defaults: PERSONAL_AI_DEFAULTS,
     cryptoAvailable: providerCryptoAvailable(),
   })
@@ -61,15 +62,16 @@ export async function PATCH(request: Request) {
   return NextResponse.json({ ok: true, enabled: body.enabled })
 }
 
-// POST { apiKey?, baseUrl?, model? } → set/rotate the key and/or update config.
-// apiKey is required the first time (nothing to attach config to otherwise).
+// POST { apiKey?, baseUrl?, model?, auxModel? } → set/rotate the key and/or
+// update config. apiKey is required the first time (nothing to attach config
+// to otherwise).
 export async function POST(request: Request) {
   const email = await getSignedInEmail()
   if (!email) return NextResponse.json({ error: "Authentication required" }, { status: 401 })
   const db = getSupabaseAdminClient()
   if (!db) return NextResponse.json({ error: "Storage unavailable" }, { status: 503 })
 
-  let body: { apiKey?: string; baseUrl?: string; model?: string }
+  let body: { apiKey?: string; baseUrl?: string; model?: string; auxModel?: string }
   try {
     body = (await request.json()) as typeof body
   } catch {
@@ -79,10 +81,12 @@ export async function POST(request: Request) {
   const apiKey = body.apiKey?.trim()
   const baseUrl = body.baseUrl?.trim() || null
   const model = body.model?.trim() || null
+  const auxModel = body.auxModel?.trim() || null
 
   const patch: Record<string, string | boolean | null> = {
     personal_ai_base_url: baseUrl,
     personal_ai_model: model,
+    personal_ai_aux_model: auxModel,
   }
 
   if (apiKey) {
@@ -122,7 +126,12 @@ export async function DELETE() {
 
   const { error } = await db
     .from("agents")
-    .update({ personal_ai_key_enc: null, personal_ai_base_url: null, personal_ai_model: null })
+    .update({
+      personal_ai_key_enc: null,
+      personal_ai_base_url: null,
+      personal_ai_model: null,
+      personal_ai_aux_model: null,
+    })
     .eq("email", email)
   if (error) return NextResponse.json({ error: "Failed to clear" }, { status: 500 })
 
