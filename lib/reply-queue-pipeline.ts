@@ -36,7 +36,8 @@ import {
   type SuggestionSource,
 } from "@/lib/reply-queue-store"
 import { resolveProviderForAgentId } from "@/lib/ai-provider"
-import { resolveToneInstructionForAgentId } from "@/lib/agent-tone"
+import { resolveToneForAgentId } from "@/lib/agent-tone"
+import { stripEmDashes } from "@/lib/tone-presets"
 
 // The always-on reply-queue pipeline — runs off the Intercom webhook (in the
 // background via `after()`). Composes the existing brain: gate -> Notion
@@ -184,7 +185,8 @@ export async function computeAndPersistSuggestion(
   // through it (own quota, bypasses the shared Verboo throttle).
   const provider = (await resolveProviderForAgentId(owner.id)) ?? undefined
   // Personal reply-tone preference (Settings → Reply tone), if set.
-  const toneInstruction = await resolveToneInstructionForAgentId(owner.id)
+  const { instruction: toneInstruction, stripEmDashes: shouldStripEmDashes } =
+    await resolveToneForAgentId(owner.id)
 
   const capabilityGap = hasCapabilityGap(conversation.tags)
 
@@ -281,6 +283,12 @@ export async function computeAndPersistSuggestion(
     // Keep the original draft if the verifier is unavailable; generation still
     // remains draft-only and reviewable before send.
   }
+
+  // Deterministic backstop for tones that ban em dashes (e.g. "Human") — the
+  // prompt instruction alone isn't reliable enough; models reach for the
+  // character habitually. Only safe here because this path buffers the full
+  // response before persisting, unlike a live token-stream to the client.
+  if (shouldStripEmDashes) body = stripEmDashes(body)
 
   // Prepend the mandated opening greeting (with the agent's name) when this
   // agent hasn't spoken in the thread yet. Injected here, after the verifier,

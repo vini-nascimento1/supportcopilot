@@ -16,7 +16,7 @@ import type { OpenAIMessage } from "@/lib/draft-ai"
 import { encodeImageAttachments } from "@/lib/attachments"
 import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
 import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
-import { resolveToneInstructionForAgentEmail } from "@/lib/agent-tone"
+import { resolveToneForAgentEmail } from "@/lib/agent-tone"
 
 // ── Route handler ──────────────────────────────────────────────────────────
 
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
   // Route through this agent's personal AI key if they've set one.
   const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
   // Personal reply-tone preference (Settings → Reply tone), if set.
-  const toneInstruction = await resolveToneInstructionForAgentEmail(email)
+  const { instruction: toneInstruction } = await resolveToneForAgentEmail(email)
 
   let systemPrompt: string
   let userMessage: OpenAIMessage["content"]

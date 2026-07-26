@@ -45,7 +45,7 @@ export const TONE_PRESETS: TonePreset[] = [
     examplePreview:
       "I hear you, waiting on money is never fun. Right now your payout's still processing, which is normal, and it should clear within the usual window. I'll keep an eye on it and come back to you the moment it's done.",
     instruction:
-      "Tone: Human. Write exactly like a real person typing to another person, not an AI assistant. Avoid em dashes and other stock AI phrasing or sentence patterns. Be explanatory but not excessive — no padding, no restating the same point twice, no corporate filler.",
+      "Tone: Human. Write exactly like a real person typing to another person, not an AI assistant. NEVER use an em dash anywhere in the reply, under any circumstance. Split the thought into two sentences, or use a comma, instead. It is one of the most obvious AI writing tells and must not appear even once, not even in a bulleted list or a bolded line. Also avoid other stock AI phrasing or sentence patterns (e.g. opening with 'Good question' or leading every paragraph with a bolded restatement of the request). Be explanatory but not excessive: no padding, no restating the same point twice, no corporate filler.",
   },
 ]
 
@@ -67,4 +67,38 @@ export function toneInstructionFor(
   }
   const preset = TONE_PRESETS.find((p) => p.id === presetId)
   return preset?.instruction ?? null
+}
+
+/**
+ * Whether this preset's contract requires a deterministic em-dash cleanup pass
+ * after generation. The "avoid em dashes" instruction alone isn't reliable —
+ * models reach for the character habitually — so callers that can buffer the
+ * full response (the autonomous pipeline; not a live token-stream to the
+ * client) should run stripEmDashes() on the final text as a backstop.
+ */
+export function presetStripsEmDashes(presetId: string | null | undefined): boolean {
+  return presetId === "human"
+}
+
+/**
+ * Deterministic cleanup for text that must not contain an em dash. Splits the
+ * common "clause — clause" pattern into two sentences (capitalizing the next
+ * word) rather than just swapping in a comma, since that reads more like a
+ * real sentence and less like a comma splice.
+ */
+export function stripEmDashes(text: string): string {
+  return text
+    // "clause — [**]Word" -> "clause. [**]Word" — split into two sentences and
+    // capitalize what follows (tolerating a leading markdown bold marker),
+    // since that reads far more natural than swapping in a comma.
+    .replace(/\s*—\s*(\*{0,2})(\w)/g, (_match, stars: string, ch: string) => `. ${stars}${ch.toUpperCase()}`)
+    // Any remaining em dash with no following word char (end of string, next
+    // to punctuation, etc.) -> a comma join as a safe fallback.
+    .replace(/\s*—\s*/g, ", ")
+    // Collapse artifacts the substitutions above can leave behind.
+    .replace(/\.\s*\./g, ".")
+    .replace(/,\s*,/g, ",")
+    .replace(/,\s*\./g, ".")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+$/g, "")
 }
