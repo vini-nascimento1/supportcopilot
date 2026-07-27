@@ -257,6 +257,7 @@ ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
   if (playbook) {
     const sections: string[] = [`\n## Playbook: ${playbook.caseType}`]
     if (playbook.recognize) sections.push(`**When to use:** ${playbook.recognize}`)
+    if (playbook.checks) sections.push(`**Checks to do before replying (mandatory, do not skip):**\n${playbook.checks}`)
     if (playbook.resolution) sections.push(`**Resolution guidance:**\n${playbook.resolution}`)
     if (playbook.dosDonts) sections.push(`**Important — do not:** ${playbook.dosDonts}`)
     parts.push(sections.join("\n\n"))
@@ -703,6 +704,7 @@ export function buildVerifierGroundingContext(
 
   if (playbook) {
     const parts: string[] = [`## Playbook: ${playbook.caseType}`]
+    if (playbook.checks) parts.push(`Required checks:\n${playbook.checks}`)
     if (playbook.resolution) parts.push(`Resolution guidance:\n${playbook.resolution}`)
     if (playbook.dosDonts) parts.push(`Do not:\n${playbook.dosDonts}`)
     sections.push(parts.join("\n\n"))
