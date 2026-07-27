@@ -102,6 +102,16 @@ function customerPrivacyHeader(hasKnownEmail: boolean): string {
   return `Customer identity: withheld for privacy. Never address the customer by name, never guess or invent a name, and never repeat any real name or email that appears inside the thread.${emailNote}`
 }
 
+// Without this, the model has no way to compute elapsed time from a date the
+// customer mentions (e.g. "paid on July 12") against a playbook's stated
+// window (e.g. 7/28-day payout pending) — it can only recite the policy in
+// the abstract and then defer ("I'll check the status") instead of directly
+// concluding whether the window has actually been exceeded.
+function todaysDateLine(): string {
+  const today = new Date().toISOString().slice(0, 10)
+  return `Today's date: ${today}. Use this to compute elapsed time (e.g. days since a payment/date the customer mentions) against any playbook window — don't defer to "checking" something you can work out yourself from a stated date.`
+}
+
 // ── Greeting logic ──────────────────────────────────────────────────────────
 // "Has an agent replied" is not the right question — most threads already carry
 // a reply from SOME teammate (another agent's holding message, or the bot's
@@ -405,7 +415,7 @@ export function buildUserMessage(
   hasAgentReplied = false,
   hasKnownEmail = false
 ): string | OpenAIContentPart[] {
-  const parts = [customerPrivacyHeader(hasKnownEmail)]
+  const parts = [customerPrivacyHeader(hasKnownEmail), todaysDateLine()]
 
   // Include the full conversation thread so the AI has complete context
   parts.push(`\nConversation thread:`)
