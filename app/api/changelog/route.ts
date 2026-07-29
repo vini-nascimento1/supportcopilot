@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-07-29-h",
+    date: "2026-07-29",
+    title: "Canvas sidebar button restored",
+    description:
+      "The standalone Canvas now has the same sidebar button as the rest of the workspace, so you can reopen or collapse the navigation without leaving the page.",
+  },
+  {
     id: "seed-2026-07-29-g",
     date: "2026-07-29",
     title: "AI Assistant can now draft the customer reply too",

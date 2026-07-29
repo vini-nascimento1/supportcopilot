@@ -16,7 +16,7 @@ Each case's central card is `components/canvas/case-info-node.tsx` — it shows 
 
 ## Left sidebar
 
-`components/canvas/canvas-left-sidebar.tsx` is a collapsible rail with three tabs, switched via `components/canvas/canvas-tabs.tsx`:
+`components/canvas/canvas-left-sidebar.tsx` is a collapsible rail with three tabs, switched via `components/canvas/canvas-tabs.tsx`. The case Canvas and standalone Canvas headers both expose the shared workspace sidebar trigger so agents can reopen or collapse navigation without leaving the board:
 
 - **Inbox** — the agent's assigned + open Intercom conversations.
 - **Queue** — pending suggested replies awaiting approval/send.

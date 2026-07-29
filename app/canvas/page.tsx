@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { redirect } from "next/navigation"
 
 import { WorkspaceLayout } from "@/components/workspace-layout"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 import { CanvasTabs } from "@/components/canvas/canvas-tabs"
 import { CaseCanvas } from "@/components/canvas/case-canvas"
 import { CanvasModeGuard } from "@/components/canvas/canvas-mode-guard"
@@ -31,7 +32,8 @@ export default async function CanvasPage({
     <WorkspaceLayout>
       <div className="flex h-svh w-full flex-col">
         <CanvasModeGuard workspaceId={`adhoc:${c}`} />
-        <div className="flex h-10 shrink-0 items-center border-b px-3">
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
+          <SidebarTrigger />
           <CanvasTabs current={{ id: `adhoc:${c}`, title: "Canvas" }} />
         </div>
         <div className="min-h-0 flex-1">
