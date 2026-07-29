@@ -88,5 +88,15 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL("/", origin))
+  const response = NextResponse.redirect(new URL("/", origin))
+  // Remember that this browser has completed Google consent at least once,
+  // so /api/auth/login can skip forcing `prompt=consent` on future logins.
+  response.cookies.set("gauth_consented", "1", {
+    maxAge: 60 * 60 * 24 * 365,
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+  })
+  return response
 }

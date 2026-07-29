@@ -56,3 +56,8 @@ names, emails, and financial figures accordingly — least detail necessary, no 
 no widening visibility beyond what a task actually needs. Sign-in is deliberately Google Workspace
 SSO only (`@fanvue.com`, see `Auth and Session.md`) — never add a bypass or alternate login path,
 even for local dev convenience.
+
+## This file vs. AGENTS.md
+
+`AGENTS.md` at the repo root carries the same orchestrator content for tools that read that
+convention instead of `CLAUDE.md`. Keep the two in sync when either changes.

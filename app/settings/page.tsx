@@ -8,12 +8,14 @@ import {
   InfoIcon,
   MessageSquareIcon,
   PlugIcon,
+  SettingsIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getSignedInEmail } from "@/lib/auth"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getAllCaseTools } from "@/lib/case-tools-db"
@@ -167,11 +169,22 @@ export default async function SettingsPage({
         <h1 className="text-sm font-semibold">Settings</h1>
       </header>
 
-      <main className="mx-auto flex max-w-2xl flex-col gap-6 p-4 lg:p-6">
+      <main className="mx-auto max-w-4xl p-4 lg:p-6">
+        <div className="mb-6 flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <SettingsIcon className="size-5" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">Settings</h2>
+            <p className="text-sm text-muted-foreground">
+              Configure your profile, canvas behavior, AI drafting voice, and connected integrations.
+            </p>
+          </div>
+        </div>
 
         {notice && (
           <div
-            className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+            className={`mb-6 flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
               notice.tone === "ok"
                 ? "border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-300"
                 : notice.tone === "error"
@@ -184,144 +197,161 @@ export default async function SettingsPage({
           </div>
         )}
 
-        <SettingsForm email={email ?? ""} agent={agent ? { name: agent.name, timezone: agent.timezone, working_days: agent.working_days } : null} />
+        <Tabs defaultValue="profile">
+          <TabsList variant="line" className="mb-2 h-auto w-full justify-start gap-6 border-b pb-0">
+            <TabsTrigger value="profile">Profile</TabsTrigger>
+            <TabsTrigger value="canvas">Canvas</TabsTrigger>
+            <TabsTrigger value="ai">AI &amp; Drafting</TabsTrigger>
+            <TabsTrigger value="integrations">Integrations</TabsTrigger>
+          </TabsList>
 
-        <CaseToolsSettings tools={caseTools} />
+          {/* Profile — who you are, when you work, session control */}
+          <TabsContent value="profile" className="flex flex-col gap-6 pt-6">
+            <SettingsForm email={email ?? ""} agent={agent ? { name: agent.name, timezone: agent.timezone, working_days: agent.working_days } : null} />
 
-        <CanvasModeSettings />
-
-        <ReplyToneSettings />
-
-        <PersonalAiKeySettings />
-
-        {/* Connected integrations */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Connected integrations</CardTitle>
-            <CardDescription>
-              Google connects automatically when you sign in. Connect the rest
-              once and they appear on your dashboard.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col divide-y">
-            {/* Google — connected automatically via the sign-in OAuth */}
-            <IntegrationRow
-              icon={<GlobeIcon className="size-4 text-muted-foreground" />}
-              name="Google"
-              blurb="Calendar · Gmail — connected automatically with your sign-in"
-              connected={Boolean(email)}
-              action={
-                !email ? (
-                  <Button size="sm" variant="outline" asChild>
-                    <a href="/api/auth/login">
-                      <PlugIcon className="size-3.5" />
-                      Sign in
-                    </a>
+            <Card className="border-destructive/20">
+              <CardHeader>
+                <CardTitle className="text-base">Sign out</CardTitle>
+                <CardDescription>Sign out of this device.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form action="/api/auth/logout" method="post">
+                  <Button type="submit" variant="destructive" size="sm">
+                    Sign out
                   </Button>
-                ) : undefined
-              }
-            />
+                </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-            <Separator />
+          {/* Canvas — how the case workspace behaves and what tools it embeds */}
+          <TabsContent value="canvas" className="flex flex-col gap-6 pt-6">
+            <CanvasModeSettings />
+            <CaseToolsSettings tools={caseTools} />
+          </TabsContent>
 
-            {/* Intercom — connected once for the whole workspace */}
-            <IntegrationRow
-              icon={<MessageSquareIcon className="size-4 text-muted-foreground" />}
-              name="Intercom"
-              blurb={
-                intercomConnected
-                  ? "Case queue · conversations — managed by your workspace"
-                  : "Case queue · conversations — ask your workspace admin to connect it"
-              }
-              connected={intercomConnected}
-            />
+          {/* AI & Drafting — voice and model behind generated replies */}
+          <TabsContent value="ai" className="flex flex-col gap-6 pt-6">
+            <ReplyToneSettings />
+            <PersonalAiKeySettings />
+          </TabsContent>
 
-            <Separator />
-
-            {/* Slack — per-user OAuth: each agent connects their own account */}
-            <IntegrationRow
-              icon={<MessageSquareIcon className="size-4 text-muted-foreground" />}
-              name="Slack"
-              blurb={
-                agent?.slack_token
-                  ? "Your personal Slack account — send, reply, and react as yourself"
-                  : slackOAuthReady
-                    ? "Connect your Slack account to read and send messages as you"
-                    : "Slack OAuth not configured — contact your workspace admin"
-              }
-              connected={slackConnected}
-              action={
-                agent?.slack_token ? (
-                  <form action={disconnectIntegration}>
-                    <input type="hidden" name="email" value={email ?? ""} />
-                    <input type="hidden" name="integration" value="slack" />
-                    <Button size="sm" variant="ghost" type="submit">
-                      Disconnect
-                    </Button>
-                  </form>
-                ) : slackOAuthReady ? (
-                  <Button size="sm" variant="outline" asChild>
-                    <a href="/api/auth/slack">
-                      <PlugIcon className="size-3.5" />
-                      Connect
-                    </a>
-                  </Button>
-                ) : undefined
-              }
-            />
-
-            <Separator />
-
-            {/* Notion — per-agent hosted-MCP OAuth (live AI-search retrieval) */}
-            <IntegrationRow
-              icon={<BookOpenIcon className="size-4 text-muted-foreground" />}
-              name="Notion"
-              blurb={
-                notionNeedsReconsent
-                  ? "Connection expired — reconnect to keep grounding drafts in your Notion knowledge"
-                  : notionConnected
-                    ? "Knowledge base · live AI-search retrieval for tail cases"
-                    : "Connect Notion to ground drafts in your knowledge base"
-              }
-              connected={notionConnected}
-              action={
-                <div className="flex items-center gap-2">
-                  {notionConnected ? (
-                    <form action={disconnectIntegration}>
-                      <input type="hidden" name="email" value={email ?? ""} />
-                      <input type="hidden" name="integration" value="notion" />
-                      <Button size="sm" variant="ghost" type="submit">
-                        Disconnect
+          {/* Integrations — connected third-party accounts */}
+          <TabsContent value="integrations" className="pt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Connected integrations</CardTitle>
+                <CardDescription>
+                  Google connects automatically when you sign in. Connect the rest
+                  once and they appear on your dashboard.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col divide-y">
+                {/* Google — connected automatically via the sign-in OAuth */}
+                <IntegrationRow
+                  icon={<GlobeIcon className="size-4 text-muted-foreground" />}
+                  name="Google"
+                  blurb="Calendar · Gmail — connected automatically with your sign-in"
+                  connected={Boolean(email)}
+                  action={
+                    !email ? (
+                      <Button size="sm" variant="outline" asChild>
+                        <a href="/api/auth/login">
+                          <PlugIcon className="size-3.5" />
+                          Sign in
+                        </a>
                       </Button>
-                    </form>
-                  ) : (
-                    <Button size="sm" variant={notionNeedsReconsent ? "default" : "outline"} asChild>
-                      <a href="/api/auth/notion">
-                        <PlugIcon className="size-3.5" />
-                        {notionNeedsReconsent ? "Reconnect" : "Connect"}
-                      </a>
-                    </Button>
-                  )}
-                </div>
-              }
-            />
-          </CardContent>
-        </Card>
+                    ) : undefined
+                  }
+                />
 
-        {/* Sign out */}
-        <Card className="border-destructive/20">
-          <CardHeader>
-            <CardTitle className="text-base">Sign out</CardTitle>
-            <CardDescription>Sign out of this device.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form action="/api/auth/logout" method="post">
-              <Button type="submit" variant="destructive" size="sm">
-                Sign out
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+                <Separator />
+
+                {/* Intercom — connected once for the whole workspace */}
+                <IntegrationRow
+                  icon={<MessageSquareIcon className="size-4 text-muted-foreground" />}
+                  name="Intercom"
+                  blurb={
+                    intercomConnected
+                      ? "Case queue · conversations — managed by your workspace"
+                      : "Case queue · conversations — ask your workspace admin to connect it"
+                  }
+                  connected={intercomConnected}
+                />
+
+                <Separator />
+
+                {/* Slack — per-user OAuth: each agent connects their own account */}
+                <IntegrationRow
+                  icon={<MessageSquareIcon className="size-4 text-muted-foreground" />}
+                  name="Slack"
+                  blurb={
+                    agent?.slack_token
+                      ? "Your personal Slack account — send, reply, and react as yourself"
+                      : slackOAuthReady
+                        ? "Connect your Slack account to read and send messages as you"
+                        : "Slack OAuth not configured — contact your workspace admin"
+                  }
+                  connected={slackConnected}
+                  action={
+                    agent?.slack_token ? (
+                      <form action={disconnectIntegration}>
+                        <input type="hidden" name="email" value={email ?? ""} />
+                        <input type="hidden" name="integration" value="slack" />
+                        <Button size="sm" variant="ghost" type="submit">
+                          Disconnect
+                        </Button>
+                      </form>
+                    ) : slackOAuthReady ? (
+                      <Button size="sm" variant="outline" asChild>
+                        <a href="/api/auth/slack">
+                          <PlugIcon className="size-3.5" />
+                          Connect
+                        </a>
+                      </Button>
+                    ) : undefined
+                  }
+                />
+
+                <Separator />
+
+                {/* Notion — per-agent hosted-MCP OAuth (live AI-search retrieval) */}
+                <IntegrationRow
+                  icon={<BookOpenIcon className="size-4 text-muted-foreground" />}
+                  name="Notion"
+                  blurb={
+                    notionNeedsReconsent
+                      ? "Connection expired — reconnect to keep grounding drafts in your Notion knowledge"
+                      : notionConnected
+                        ? "Knowledge base · live AI-search retrieval for tail cases"
+                        : "Connect Notion to ground drafts in your knowledge base"
+                  }
+                  connected={notionConnected}
+                  action={
+                    <div className="flex items-center gap-2">
+                      {notionConnected ? (
+                        <form action={disconnectIntegration}>
+                          <input type="hidden" name="email" value={email ?? ""} />
+                          <input type="hidden" name="integration" value="notion" />
+                          <Button size="sm" variant="ghost" type="submit">
+                            Disconnect
+                          </Button>
+                        </form>
+                      ) : (
+                        <Button size="sm" variant={notionNeedsReconsent ? "default" : "outline"} asChild>
+                          <a href="/api/auth/notion">
+                            <PlugIcon className="size-3.5" />
+                            {notionNeedsReconsent ? "Reconnect" : "Connect"}
+                          </a>
+                        </Button>
+                      )}
+                    </div>
+                  }
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   )

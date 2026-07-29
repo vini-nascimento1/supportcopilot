@@ -23,14 +23,21 @@ export async function GET(request: Request) {
     }
   )
 
+  // Force the full Google consent screen only the first time this browser
+  // signs in (or after a revoke) — that's the only case where we actually
+  // need it to guarantee a refresh_token comes back. Once `gauth_consented`
+  // is set (see callback route), skip `prompt` entirely so returning agents
+  // aren't re-shown the same permission screen on every login.
+  const hasConsentedBefore = cookieStore.get("gauth_consented")?.value === "1"
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo: `${origin}/api/auth/callback`,
       queryParams: {
         access_type: "offline",
-        prompt: "consent",
         hd: "fanvue.com",
+        ...(hasConsentedBefore ? {} : { prompt: "consent" }),
       },
       scopes: "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.modify",
     },
