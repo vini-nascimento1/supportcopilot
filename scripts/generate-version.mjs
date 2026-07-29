@@ -7,11 +7,18 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, "..")
 
-let sha = ""
-try {
-  sha = execSync("git rev-parse --short HEAD", { encoding: "utf-8" }).trim()
-} catch {
-  sha = "unknown"
+// Vercel's build sandbox doesn't reliably expose a working .git checkout, so
+// `git rev-parse` silently fails there and every deploy fell back to the same
+// "unknown" sha — which broke the update banner (it only flips on when the
+// sha changes). Vercel injects the real commit sha as an env var regardless;
+// prefer that, and only shell out to git for local dev where it's unset.
+let sha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || ""
+if (!sha) {
+  try {
+    sha = execSync("git rev-parse --short HEAD", { encoding: "utf-8" }).trim()
+  } catch {
+    sha = "unknown"
+  }
 }
 
 const version = {
