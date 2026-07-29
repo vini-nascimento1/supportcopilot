@@ -30,6 +30,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { CardHandles } from "@/components/canvas/card-handles"
 import { PinButton } from "@/components/canvas/pin-button"
 import { useCanvasActive } from "@/components/canvas/active-context"
 import { useAnchorLayer } from "@/components/canvas/anchor-layer"
@@ -233,6 +234,7 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
           selected && "ring-2 ring-ring",
         )}
       >
+        <CardHandles />
         <ToolIcon name={data.icon} className="size-8 text-muted-foreground" />
         <p className="text-sm font-medium">{data.label}</p>
         <p className="text-xs text-muted-foreground">
@@ -263,6 +265,7 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
         minWidth={280}
         minHeight={minimized ? 40 : 200}
       />
+      <CardHandles />
       <div className="flex h-10 shrink-0 cursor-grab items-center gap-2 border-b bg-muted/50 px-3 active:cursor-grabbing">
         {loading ? (
           <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />

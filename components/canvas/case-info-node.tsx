@@ -15,6 +15,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { CardHandles } from "@/components/canvas/card-handles"
 import { PinButton } from "@/components/canvas/pin-button"
 import { SlackThreadFinder } from "@/components/slack-thread-finder"
 import { cn } from "@/lib/utils"
@@ -179,6 +180,7 @@ export function CaseInfoNode({ id, data, selected }: NodeProps<CaseInfoNodeType>
   return (
     <div className="flex h-full w-full cursor-grab flex-col gap-3 overflow-y-auto rounded-xl border bg-card p-4 shadow-md active:cursor-grabbing">
       <NodeResizer isVisible={selected} minWidth={280} minHeight={260} />
+      <CardHandles />
       <div className="flex items-center gap-2">
         <UserIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm font-semibold">{name}</span>

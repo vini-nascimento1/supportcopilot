@@ -3,6 +3,7 @@
 import { useReactFlow, NodeResizer, type Node, type NodeProps } from "@xyflow/react"
 import { StickyNoteIcon, XIcon } from "lucide-react"
 
+import { CardHandles } from "@/components/canvas/card-handles"
 import { PinButton } from "@/components/canvas/pin-button"
 
 export type NotesData = {
@@ -19,6 +20,7 @@ export function NotesNode({ id, data, selected }: NodeProps<NotesNodeType>) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border bg-amber-50 shadow-md dark:bg-amber-950/40">
       <NodeResizer isVisible={selected} minWidth={200} minHeight={140} />
+      <CardHandles />
       <div className="flex h-8 shrink-0 cursor-grab items-center gap-2 border-b border-amber-200/60 px-3 active:cursor-grabbing dark:border-amber-900/60">
         <StickyNoteIcon className="size-3.5 text-amber-600 dark:text-amber-500" />
         <span className="text-xs font-medium">Notes</span>

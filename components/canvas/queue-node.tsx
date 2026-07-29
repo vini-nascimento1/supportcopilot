@@ -8,6 +8,7 @@ import { InboxIcon, Loader2Icon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useCanvasActive } from "@/components/canvas/active-context"
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
+import { CardHandles } from "@/components/canvas/card-handles"
 import { onCanvasRefresh } from "@/lib/canvas-refresh"
 import { cn, relativeTime } from "@/lib/utils"
 
@@ -65,6 +66,7 @@ export function QueueNode({ selected }: NodeProps<QueueNodeType>) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border bg-card shadow-md">
       <NodeResizer isVisible={selected} minWidth={260} minHeight={200} />
+      <CardHandles />
       <div className="flex h-9 shrink-0 cursor-grab items-center gap-2 border-b bg-muted/50 px-3 active:cursor-grabbing">
         <InboxIcon className="size-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">Case queue</span>

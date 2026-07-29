@@ -15,6 +15,7 @@ import {
   RefreshCwIcon,
 } from "lucide-react"
 
+import { CardHandles } from "@/components/canvas/card-handles"
 import { PinButton } from "@/components/canvas/pin-button"
 import { ComposerBar } from "@/components/canvas/composer-bar"
 import { CopilotPanel } from "@/components/canvas/copilot-panel"
@@ -189,6 +190,7 @@ export function ConversationReplyNode({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border bg-card shadow-md">
       <NodeResizer isVisible={selected} minWidth={340} minHeight={360} />
+      <CardHandles />
       <div className="flex h-9 shrink-0 cursor-grab items-center gap-2 border-b bg-muted/50 px-3 active:cursor-grabbing">
         <MessageSquareIcon className="size-3.5 text-muted-foreground" />
         <span className="truncate text-xs font-medium">
