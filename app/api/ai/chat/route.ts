@@ -826,10 +826,15 @@ type PendingState = {
   index: number
   assistantContent: string | null
   round: number
+  // Every tool name actually executed so far this turn (across rounds and
+  // across a confirm/decline pause) — surfaced to the client at the end so
+  // the agent can see what the assistant actually looked at, not just its
+  // final prose. Not deduped here; the client/response layer dedupes for display.
+  toolsUsed: string[]
 }
 
 type ProcessOutcome =
-  | { done: true; messages: Array<Record<string, unknown>>; round: number }
+  | { done: true; messages: Array<Record<string, unknown>>; round: number; toolsUsed: string[] }
   | {
       done: false
       confirmation: { toolCallId: string; name: string; args: Record<string, unknown>; summary: string }
@@ -849,6 +854,7 @@ async function processToolCalls(
 ): Promise<ProcessOutcome> {
   const { toolCalls, resolved } = state
   let index = state.index
+  const toolsUsed = [...state.toolsUsed]
 
   if (decision) {
     const tc = toolCalls[index]
@@ -866,9 +872,10 @@ async function processToolCalls(
           content: JSON.stringify({ error: "The AI generated an invalid response. Please try again." }),
         })
         index++
-        return processToolCalls({ ...state, index }, ctx)
+        return processToolCalls({ ...state, index, toolsUsed }, ctx)
       }
       const result = await handleToolCall(tc.function.name, args, ctx)
+      toolsUsed.push(tc.function.name)
       resolved.push({
         role: "tool",
         tool_call_id: tc.id,
@@ -910,11 +917,12 @@ async function processToolCalls(
           args,
           summary: summarizeToolCall(tc.function.name, args),
         },
-        pendingState: { ...state, index },
+        pendingState: { ...state, index, toolsUsed },
       }
     }
 
     const result = await handleToolCall(tc.function.name, args, ctx)
+    toolsUsed.push(tc.function.name)
     resolved.push({
       role: "tool",
       tool_call_id: tc.id,
@@ -926,6 +934,7 @@ async function processToolCalls(
   return {
     done: true,
     round: state.round,
+    toolsUsed,
     messages: [
       ...state.messages,
       { role: "assistant", content: state.assistantContent, tool_calls: state.toolCalls },
@@ -937,19 +946,28 @@ async function processToolCalls(
 // Drives the actual Verboo round-trip loop once `messages` has no pending
 // confirmation in flight — either a fresh user turn, or resumed right after
 // a confirm/decline resolved the previous round's tool calls.
+function dedupeToolsUsed(names: string[]): string[] {
+  return Array.from(new Set(names))
+}
+
 async function continueConversation(
   messages: Array<Record<string, unknown>>,
   startRound: number,
-  ctx: AgentCtx
+  ctx: AgentCtx,
+  initialToolsUsed: string[] = []
 ): Promise<Response> {
   let rounds = startRound
+  let toolsUsed = initialToolsUsed
 
   while (rounds < MAX_TOOL_ROUNDS) {
     rounds++
     const response = await callVerboo(messages)
 
     if (!response.tool_calls || response.tool_calls.length === 0) {
-      return NextResponse.json({ message: response.content ?? "I'm not sure how to respond." })
+      return NextResponse.json({
+        message: response.content ?? "I'm not sure how to respond.",
+        toolsUsed: dedupeToolsUsed(toolsUsed),
+      })
     }
 
     const outcome = await processToolCalls(
@@ -960,6 +978,7 @@ async function continueConversation(
         index: 0,
         assistantContent: response.content ?? null,
         round: rounds,
+        toolsUsed,
       },
       ctx
     )
@@ -972,6 +991,7 @@ async function continueConversation(
     }
 
     messages = outcome.messages
+    toolsUsed = outcome.toolsUsed
   }
 
   // Max tool rounds reached — ask for a final summary without tool access.
@@ -979,10 +999,12 @@ async function continueConversation(
     const finalResponse = await callVerboo(messages, { tool_choice: "none" })
     return NextResponse.json({
       message: finalResponse.content ?? "I completed the actions but couldn't generate a summary.",
+      toolsUsed: dedupeToolsUsed(toolsUsed),
     })
   } catch {
     return NextResponse.json({
       message: `I ran out of steps for this turn. The AI couldn't summarise the results — try asking "what did you just do?" to get a recap.`,
+      toolsUsed: dedupeToolsUsed(toolsUsed),
     })
   }
 }
@@ -1016,7 +1038,7 @@ export async function POST(req: Request) {
       if (!outcome.done) {
         return NextResponse.json({ confirmation: outcome.confirmation, pendingState: outcome.pendingState })
       }
-      return await continueConversation(outcome.messages, outcome.round, ctx)
+      return await continueConversation(outcome.messages, outcome.round, ctx, outcome.toolsUsed)
     }
 
     // Fresh user turn.

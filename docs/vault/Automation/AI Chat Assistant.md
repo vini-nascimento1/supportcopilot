@@ -19,6 +19,17 @@ below. If a request falls outside them, the model will say so rather than improv
 - `components/ai-chat.tsx` — the floating panel, message list, and the Yes/No confirmation card
 - `app/api/ai/chat/route.ts` — system prompt, tool definitions, tool handlers, the pause/resume loop
 
+## Transparency: what did it actually check?
+
+Every tool name actually executed this turn is tracked in `PendingState.toolsUsed` — accumulated
+across rounds and across a confirm/decline pause (see below), deduped, and returned alongside the
+final `message` as `toolsUsed: string[]`. The client renders it as a small "🔎 Checked: …" line under
+the reply (`TOOL_LABELS` in `ai-chat.tsx` maps tool names to human-readable labels). This is an
+end-of-response summary, not live progress — true "Searching Notion now…" step-by-step status would
+need the route to stream (like `/api/draft` already does), which wasn't done here to keep the
+confirmation-pause protocol (a plain JSON request/response) simple; worth reconsidering if research
+requests are common enough that the silent wait matters more than it does today.
+
 ## Tools
 
 Read-only (execute immediately, no confirmation):

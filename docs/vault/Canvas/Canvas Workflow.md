@@ -28,8 +28,8 @@ Tab selection and sidebar collapse state persist across the app via `lib/canvas-
 
 - `lib/canvas-hotkeys.ts` — keyboard shortcuts shared across all three sidebar tabs: Ctrl/Cmd+A toggles select-all, Ctrl/Cmd+Enter fires the active tab's primary bulk action (Inbox: Generate/Assign, Queue: Approve & send, Triage: Assign+draft). Suppressed while the focus is inside a text input.
 - `lib/canvas-tabs-store.ts` — tab + collapse state, `localStorage`-backed, cross-pane sync via custom events.
-- `lib/canvas-bounds.ts` — positioning logic for pinned cards so they stay fixed on screen instead of moving with the React Flow pan/zoom transform.
-- `lib/canvas-pins.ts` — persistence for which cards are pinned.
+- `lib/canvas-bounds.ts` — positioning logic for pinned cards so they stay fixed on screen instead of moving with the React Flow pan/zoom transform. Also `clampPinnedScreenRect()`: a pinned card's screen rect is captured once and replayed on every canvas (pins are global by design, see below), so it can be stale relative to the CURRENT window/sidebar state — this clamps it to the live pane size every render. Without it, a native tool view positioned at an oversized/offset rect paints over the whole app, since native `WebContentsView`s are an OS-level layer that ignores CSS/z-index entirely (2026-07-29 incident: a stale Fadmin pin rendered full-bleed over the app chrome).
+- `lib/canvas-pins.ts` — persistence for which cards are pinned. Deliberately **global**, keyed by the tool's stable id (`tool:<uuid>`) — pinning Fadmin on one case pins it on every case. `clearAllPins()` is the escape hatch, wired to an "Unpin all tool cards" button in the canvas toolbox — needed because `resetLayout()` only clears a case's own layout, not the global pins registry, so a bad pin used to have no reliable way to undo short of clearing `localStorage` by hand.
 
 ## Data flow
 

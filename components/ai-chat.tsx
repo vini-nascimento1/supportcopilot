@@ -10,6 +10,30 @@ type Message = {
   id: string
   role: "user" | "assistant"
   content: string
+  toolsUsed?: string[]
+}
+
+// Human-readable labels for the tools the assistant may have actually run —
+// shown under a reply so the agent can see what it looked at, not just the
+// prose. Falls back to the raw tool name for anything not listed here.
+const TOOL_LABELS: Record<string, string> = {
+  list_rules: "Automation rules",
+  get_rule: "Automation rules",
+  create_rule: "Automation rules",
+  update_rule: "Automation rules",
+  delete_rule: "Automation rules",
+  test_rule: "Live conversation test",
+  get_insights: "Rules & queue stats",
+  search_playbooks: "Playbooks",
+  search_cases: "Your open cases",
+  research_ticket: "Ticket thread + Notion/Slack/Linear/Drive",
+  draft_reply: "Draft generation",
+}
+
+function formatToolsUsed(toolsUsed: string[] | undefined): string | null {
+  if (!toolsUsed || toolsUsed.length === 0) return null
+  const labels = Array.from(new Set(toolsUsed.map((t) => TOOL_LABELS[t] ?? t)))
+  return labels.join(" · ")
 }
 
 type Confirmation = {
@@ -107,7 +131,12 @@ export function AIChat() {
       scrollToBottom()
       return
     }
-    const assistantMsg: Message = { id: nextId(), role: "assistant", content: data.message }
+    const assistantMsg: Message = {
+      id: nextId(),
+      role: "assistant",
+      content: data.message,
+      toolsUsed: data.toolsUsed,
+    }
     setMessages((prev) => [...prev, assistantMsg].slice(-MAX_MESSAGES))
     stopLoading()
     scrollToBottom()
@@ -210,24 +239,31 @@ export function AIChat() {
               </div>
             )}
 
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
-                  m.role === "user"
-                    ? "ml-auto bg-primary text-primary-foreground"
-                    : "mr-auto bg-muted"
-                }`}
-              >
-                {m.role === "assistant" ? (
-                  <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_code]:rounded [&_code]:bg-muted-foreground/20 [&_code]:px-1 [&_code]:text-xs">
-                    <ReactMarkdown>{m.content}</ReactMarkdown>
+            {messages.map((m) => {
+              const toolsLine = m.role === "assistant" ? formatToolsUsed(m.toolsUsed) : null
+              return (
+                <div key={m.id} className={`max-w-[85%] ${m.role === "user" ? "ml-auto" : "mr-auto"}`}>
+                  <div
+                    className={`rounded-xl px-3 py-2 text-sm leading-relaxed ${
+                      m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
+                    }`}
+                  >
+                    {m.role === "assistant" ? (
+                      <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_code]:rounded [&_code]:bg-muted-foreground/20 [&_code]:px-1 [&_code]:text-xs">
+                        <ReactMarkdown>{m.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      m.content
+                    )}
                   </div>
-                ) : (
-                  m.content
-                )}
-              </div>
-            ))}
+                  {toolsLine && (
+                    <p className="mt-1 truncate px-1 text-[11px] text-muted-foreground" title={toolsLine}>
+                      🔎 Checked: {toolsLine}
+                    </p>
+                  )}
+                </div>
+              )
+            })}
 
             {confirmation && (
               <div className="mr-auto max-w-[90%] rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm">

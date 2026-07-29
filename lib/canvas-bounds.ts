@@ -53,3 +53,23 @@ export function clipToolBounds(
     height: Math.round(height),
   }
 }
+
+// Pinned cards replay a screen rect captured once, on whatever window/pane
+// size existed at pin time (see lib/canvas-pins.ts — it's deliberately
+// global, the same pin follows the agent to every case). If that geometry
+// no longer fits the CURRENT pane (a smaller window, a sidebar that's now
+// expanded, a stale rect from weeks ago), a native view rendered at it paints
+// over everything — it's an OS-level layer that ignores CSS entirely, so an
+// oversized/offset rect isn't just visually wrong, it can cover chrome that
+// should be on top. Clamp every time it's applied rather than trusting it.
+export function clampPinnedScreenRect(
+  screen: { left: number; top: number; width: number; height: number },
+  paneWidth: number,
+  paneHeight: number,
+): { left: number; top: number; width: number; height: number } {
+  const width = Math.max(MIN_VISIBLE, Math.min(screen.width, paneWidth))
+  const height = Math.max(MIN_VISIBLE, Math.min(screen.height, paneHeight))
+  const left = Math.min(Math.max(screen.left, 0), Math.max(paneWidth - width, 0))
+  const top = Math.min(Math.max(screen.top, 0), Math.max(paneHeight - height, 0))
+  return { left, top, width, height }
+}

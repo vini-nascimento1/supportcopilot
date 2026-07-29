@@ -81,6 +81,16 @@ export function removePin(id: string) {
   write(pins)
 }
 
+// Escape hatch: pins are global and can end up with stale geometry from a
+// different window/pane size (see clampPinnedScreenRect in canvas-bounds.ts
+// for the render-time guard) — but a pinned card's own header/pin-toggle can
+// itself be hard to reach if something's gone wrong with it visually. This
+// gives every canvas a guaranteed way out that doesn't depend on that card
+// rendering correctly first.
+export function clearAllPins() {
+  write({})
+}
+
 export function subscribePins(cb: () => void) {
   window.addEventListener(PINS_EVENT, cb)
   window.addEventListener("storage", cb)

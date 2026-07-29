@@ -54,7 +54,7 @@ import { Separator } from "@/components/ui/separator"
 import { ToolIcon } from "@/lib/tool-icons"
 import { cn } from "@/lib/utils"
 import { getCanvasHost } from "@/lib/canvas-host"
-import { getPins } from "@/lib/canvas-pins"
+import { getPins, clearAllPins } from "@/lib/canvas-pins"
 import { broadcastCanvasRefresh } from "@/lib/canvas-refresh"
 import {
   FALLBACK_TOOLS,
@@ -820,8 +820,13 @@ function CanvasInner(props: CaseCanvasProps) {
     <CanvasActiveContext.Provider value={active}>
       {/* data-canvas-pane marks the safe region for native tool views — they're
         clipped to it (minus the docked chrome below) so they never overlay the
-        sidebars or toolbox. See lib/canvas-bounds.ts. */}
-      <div data-canvas-pane className="relative h-full w-full">
+        sidebars or toolbox. See lib/canvas-bounds.ts. overflow-hidden matters
+        here specifically: a pinned card portals in via anchor-layer at a
+        screen rect that can end up a few px past this pane's edge (stale
+        measurement, a resize mid-drag, etc.) — without a clip here that
+        oversized absolute-positioned child pushes the WHOLE window into
+        scrolling, not just this pane. */}
+      <div data-canvas-pane className="relative h-full w-full overflow-hidden">
         <CanvasLeftSidebar />
 
         {/* Toolbox — right-docked chrome; native tool views are clipped to its left edge */}
@@ -937,6 +942,19 @@ function CanvasInner(props: CaseCanvasProps) {
               onClick={resetLayout}
             >
               Reset layout
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 justify-start gap-2 text-xs text-muted-foreground"
+              title="Pinned cards keep one fixed position/size across every canvas — use this if one ever looks wrong or covers the screen"
+              onClick={() => {
+                if (window.confirm("Unpin every pinned tool card? This clears their fixed position everywhere, not just this canvas.")) {
+                  clearAllPins()
+                }
+              }}
+            >
+              Unpin all tool cards
             </Button>
           </div>
         </div>

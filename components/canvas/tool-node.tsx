@@ -35,7 +35,7 @@ import { PinButton } from "@/components/canvas/pin-button"
 import { useCanvasActive } from "@/components/canvas/active-context"
 import { useAnchorLayer } from "@/components/canvas/anchor-layer"
 import { getCanvasHost } from "@/lib/canvas-host"
-import { clipToolBounds } from "@/lib/canvas-bounds"
+import { clipToolBounds, clampPinnedScreenRect } from "@/lib/canvas-bounds"
 import {
   getPinScreen,
   isPinned,
@@ -482,14 +482,25 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
   )
 
   if (pinned && anchorLayer && screenRect) {
+    // screenRect was captured once, possibly on a different window/pane size
+    // (pins are deliberately global — see lib/canvas-pins.ts) and never
+    // re-validated since. Clamp it to the CURRENT pane every render: a native
+    // view positioned at a stale, oversized rect paints over the whole app
+    // (it's an OS-level layer, CSS/z-index don't contain it — see
+    // lib/canvas-bounds.ts).
+    const clamped = clampPinnedScreenRect(
+      screenRect,
+      anchorLayer.clientWidth,
+      anchorLayer.clientHeight,
+    )
     return createPortal(
       <div
         className="pointer-events-auto absolute"
         style={{
-          left: screenRect.left,
-          top: screenRect.top,
-          width: screenRect.width,
-          height: screenRect.height,
+          left: clamped.left,
+          top: clamped.top,
+          width: clamped.width,
+          height: clamped.height,
         }}
       >
         {card}

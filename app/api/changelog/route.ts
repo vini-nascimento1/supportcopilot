@@ -16,6 +16,20 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-07-29-j",
+    date: "2026-07-29",
+    title: "AI Assistant shows what it actually checked",
+    description:
+      "Replies from the AI Assistant now end with a short \"Checked:\" line listing what it actually looked at (playbooks, your open cases, a ticket + knowledge base, etc.) — so you know it's grounded, not just prose.",
+  },
+  {
+    id: "seed-2026-07-29-i",
+    date: "2026-07-29",
+    title: "Fixed a pinned tool card covering the whole Canvas",
+    description:
+      "A pinned card (Fadmin, ONDATO, etc.) could end up sized from an old window/sidebar state and cover the entire Canvas, with no visible way to undo it. Pinned cards now always fit the current screen, and there's a new \"Unpin all tool cards\" option in the canvas toolbox as a guaranteed way out if one ever looks wrong.",
+  },
+  {
     id: "seed-2026-07-29-h",
     date: "2026-07-29",
     title: "Canvas sidebar button restored",
