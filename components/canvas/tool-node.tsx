@@ -53,6 +53,13 @@ export type ToolNodeData = {
   /** Suggested-but-unconfirmed: render translucent, load nothing until the
       agent clicks "Open" (nothing loads without confirmation). */
   ghost?: boolean
+  /** Template this card's url was resolved from — lets the canvas re-resolve
+      it if the agent later corrects the case's email/name. */
+  urlTemplate?: string
+  /** A fresher url is available (case email/name changed) but hasn't been
+      applied yet — an already-loaded card is never yanked to a new page
+      without the agent clicking Refresh. */
+  pendingUrl?: string
 }
 
 export type ToolNodeType = Node<ToolNodeData, "tool">
@@ -329,6 +336,25 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
           </Button>
         </div>
       </div>
+
+      {!minimized && data.pendingUrl && data.pendingUrl !== data.url && (
+        <div className="nodrag flex h-7 shrink-0 items-center gap-2 border-b bg-amber-500/10 px-2 text-[11px] text-amber-700 dark:text-amber-400">
+          <span className="truncate">Case email/name changed — this card is stale.</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto h-5 shrink-0 px-2 text-[11px] hover:bg-amber-500/20"
+            onClick={() => {
+              const next = data.pendingUrl!
+              host?.navigateTool(id, next)
+              setLiveUrl(next)
+              updateNodeData(id, { url: next, pendingUrl: undefined })
+            }}
+          >
+            Refresh
+          </Button>
+        </div>
+      )}
 
       {!minimized && host && (
         <div className="nodrag flex h-7 shrink-0 items-center gap-1 border-b bg-muted/30 px-2">

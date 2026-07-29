@@ -7,6 +7,7 @@ import {
   ExternalLinkIcon,
   Loader2Icon,
   PencilIcon,
+  RotateCcwIcon,
   UserIcon,
   XCircleIcon,
 } from "lucide-react"
@@ -41,16 +42,25 @@ export type CaseInfoNodeType = Node<CaseInfoData, "case-info">
 
 // One field row: click copies the value; fields with onSave are editable
 // (pencil → inline input → Enter/blur saves into the node's overrides).
+// `overridden` + `originalValue` surface a corrected value clearly instead of
+// hiding it behind a hover-only pencil — the agent needs to see at a glance
+// that this differs from what Intercom actually has on file.
 function Field({
   label,
   value,
   mono = false,
   onSave,
+  overridden = false,
+  originalValue,
+  onRevert,
 }: {
   label: string
   value: string
   mono?: boolean
   onSave?: (next: string) => void
+  overridden?: boolean
+  originalValue?: string
+  onRevert?: () => void
 }) {
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -71,7 +81,17 @@ function Field({
 
   return (
     <div className="group/field flex flex-col gap-0.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {label}
+        {overridden && (
+          <span
+            className="cursor-help rounded-sm bg-amber-500/15 px-1 py-px text-[10px] font-medium leading-none text-amber-600 dark:text-amber-400"
+            title={`Corrected by you — Intercom has "${originalValue || "—"}"`}
+          >
+            edited
+          </span>
+        )}
+      </span>
       {editing ? (
         <Input
           autoFocus
@@ -100,16 +120,25 @@ function Field({
             {value}
           </button>
           {copied && <CheckIcon className="size-3 shrink-0 text-emerald-500" />}
-          {onSave && !copied && (
+          {!copied && onSave && (
             <button
-              className="nodrag shrink-0 opacity-0 transition-opacity group-hover/field:opacity-100"
+              className="nodrag shrink-0 text-muted-foreground/40 opacity-60 transition-opacity hover:text-foreground hover:opacity-100"
               title={`Edit ${label.toLowerCase()}`}
               onClick={() => {
                 setDraft(value)
                 setEditing(true)
               }}
             >
-              <PencilIcon className="size-3 text-muted-foreground" />
+              <PencilIcon className="size-3" />
+            </button>
+          )}
+          {!copied && overridden && onRevert && (
+            <button
+              className="nodrag shrink-0 text-muted-foreground/60 hover:text-foreground"
+              title={`Revert to Intercom's value ("${originalValue || "—"}")`}
+              onClick={onRevert}
+            >
+              <RotateCcwIcon className="size-3" />
             </button>
           )}
         </span>
@@ -151,6 +180,12 @@ export function CaseInfoNode({ id, data, selected }: NodeProps<CaseInfoNodeType>
     updateNodeData(id, {
       overrides: { ...data.overrides, [key]: value },
     })
+
+  const revertOverride = (key: "customerName" | "customerEmail") => {
+    const next = { ...data.overrides }
+    delete next[key]
+    updateNodeData(id, { overrides: next })
+  }
 
   const closeCase = async () => {
     if (
@@ -197,12 +232,18 @@ export function CaseInfoNode({ id, data, selected }: NodeProps<CaseInfoNodeType>
         label="Name"
         value={name}
         onSave={(v) => saveOverride("customerName", v)}
+        overridden={Boolean(data.overrides?.customerName)}
+        originalValue={data.customerName}
+        onRevert={() => revertOverride("customerName")}
       />
       <Field
         label="Email"
         value={email ?? "—"}
         mono
         onSave={(v) => saveOverride("customerEmail", v)}
+        overridden={Boolean(data.overrides?.customerEmail)}
+        originalValue={data.customerEmail ?? "—"}
+        onRevert={() => revertOverride("customerEmail")}
       />
       {data.topic && <Field label="Topic" value={data.topic} />}
       {data.tags.length > 0 && (

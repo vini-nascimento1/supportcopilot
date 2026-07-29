@@ -64,7 +64,7 @@ import {
 } from "@/lib/canvas-tools"
 import { CanvasActiveContext } from "@/components/canvas/active-context"
 import { AnchorLayerContext } from "@/components/canvas/anchor-layer"
-import { ToolNode } from "@/components/canvas/tool-node"
+import { ToolNode, type ToolNodeData } from "@/components/canvas/tool-node"
 import {
   CaseInfoNode,
   type CaseInfoData,
@@ -178,7 +178,9 @@ function toolNode(
     position,
     width: 640,
     height: 520,
-    data: { label: tool.name, icon: tool.icon, url, ghost },
+    // urlTemplate is kept alongside the resolved url so the canvas can
+    // re-resolve it later if the agent corrects the case's email/name.
+    data: { label: tool.name, icon: tool.icon, url, urlTemplate: tool.urlTemplate, ghost },
   }
 }
 
@@ -396,6 +398,61 @@ function CanvasInner(props: CaseCanvasProps) {
     }
     window.dispatchEvent(new Event(EDGES_EVENT))
   }
+
+  // Keep tool cards (Fadmin, ONDATO, MassPay…) in sync when the agent
+  // corrects the case's email/name in the Case Info card. Without this,
+  // already-built tool cards would keep pointing at whatever Intercom had on
+  // file at the moment the canvas was opened, forever — even after the agent
+  // fixes a wrong/secondary email.
+  const caseInfoData = nodes.find((n) => n.type === "case-info")?.data as
+    | CaseInfoData
+    | undefined
+  const resolvedEmail =
+    caseInfoData?.overrides?.customerEmail ?? caseInfoData?.customerEmail ?? null
+  const resolvedName =
+    caseInfoData?.overrides?.customerName ?? caseInfoData?.customerName ?? null
+  const prevResolvedRef = useRef<{ email: string | null; name: string | null } | null>(
+    null
+  )
+  useEffect(() => {
+    const prev = prevResolvedRef.current
+    prevResolvedRef.current = { email: resolvedEmail, name: resolvedName }
+    // First render: tool URLs were already built with these values — nothing
+    // to reconcile yet.
+    if (!prev) return
+    if (prev.email === resolvedEmail && prev.name === resolvedName) return
+
+    let changed = 0
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type !== "tool") return n
+        const data = n.data as ToolNodeData
+        if (!data.urlTemplate) return n
+        const freshUrl = resolveToolUrl(data.urlTemplate, {
+          email: resolvedEmail,
+          name: resolvedName,
+        })
+        if (!freshUrl || freshUrl === data.url) return n
+        changed++
+        // Ghost (unopened) cards have nothing loaded yet — safe to just swap.
+        // An already-open card is never yanked to a new page automatically;
+        // ToolNode shows a one-click "Refresh" banner instead.
+        return {
+          ...n,
+          data: data.ghost
+            ? { ...data, url: freshUrl }
+            : { ...data, pendingUrl: freshUrl },
+        }
+      })
+    )
+    if (changed > 0) {
+      toast.info(
+        `Case ${prev.email !== resolvedEmail ? "email" : "name"} updated — ${changed} tool card${changed === 1 ? "" : "s"} ${changed === 1 ? "has" : "have"} a refreshed link ready.`
+      )
+    }
+    // Only the resolved values should retrigger this — setNodes/toast are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedEmail, resolvedName])
 
   // Debounced persistence of geometry + notes + edges
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)

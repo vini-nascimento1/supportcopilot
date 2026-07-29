@@ -1,21 +1,20 @@
-import Link from "next/link"
 import { revalidatePath } from "next/cache"
 import {
-  ArrowLeftIcon,
   BookOpenIcon,
   CheckCircle2Icon,
   GlobeIcon,
   InfoIcon,
   MessageSquareIcon,
   PlugIcon,
-  SettingsIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { WorkspaceLayout } from "@/components/workspace-layout"
 import { getSignedInEmail } from "@/lib/auth"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getAllCaseTools } from "@/lib/case-tools-db"
@@ -157,31 +156,17 @@ export default async function SettingsPage({
   const notionNeedsReconsent = notionHasToken && notionWindowExpired
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-10 flex min-h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur lg:px-6">
-        <Link
-          href="/"
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          title="Back to dashboard"
-        >
-          <ArrowLeftIcon className="size-4" />
-        </Link>
-        <h1 className="text-sm font-semibold">Settings</h1>
+    <WorkspaceLayout>
+      <header className="flex min-h-14 items-center gap-3 border-b px-4 lg:px-6">
+        <SidebarTrigger />
+        <Separator orientation="vertical" className="min-h-6" />
+        <h1 className="text-base font-medium">Settings</h1>
+        <span className="text-sm text-muted-foreground">
+          Profile, canvas behavior, AI drafting voice, and connected integrations
+        </span>
       </header>
 
-      <main className="mx-auto max-w-4xl p-4 lg:p-6">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <SettingsIcon className="size-5" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold">Settings</h2>
-            <p className="text-sm text-muted-foreground">
-              Configure your profile, canvas behavior, AI drafting voice, and connected integrations.
-            </p>
-          </div>
-        </div>
-
+      <main className="mx-auto w-full max-w-4xl p-4 lg:p-6">
         {notice && (
           <div
             className={`mb-6 flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
@@ -353,6 +338,6 @@ export default async function SettingsPage({
           </TabsContent>
         </Tabs>
       </main>
-    </div>
+    </WorkspaceLayout>
   )
 }

@@ -33,6 +33,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
@@ -101,27 +102,20 @@ export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser, is
                 const isGmail = item.label === "Gmail"
                 return (
                   <SidebarMenuItem key={item.label}>
-                    <div className="flex items-center">
-                      <SidebarMenuButton asChild isActive={isActive} className="flex-1">
-                        <Link href={item.href}>
-                          <item.icon />
-                          <span>{item.label}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                      {isGmail && isGmailTemplateUser && (
-                        <button
-                          onClick={() => setGmailExpanded(!gmailExpanded)}
-                          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mr-1"
-                          title={gmailExpanded ? "Collapse" : "Expand"}
-                        >
-                          {gmailExpanded ? (
-                            <ChevronDownIcon className="size-3.5" />
-                          ) : (
-                            <ChevronRightIcon className="size-3.5" />
-                          )}
-                        </button>
-                      )}
-                    </div>
+                    <SidebarMenuButton asChild isActive={isActive}>
+                      <Link href={item.href}>
+                        <item.icon />
+                        <span>{item.label}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                    {isGmail && isGmailTemplateUser && (
+                      <SidebarMenuAction
+                        onClick={() => setGmailExpanded(!gmailExpanded)}
+                        title={gmailExpanded ? "Collapse" : "Expand"}
+                      >
+                        {gmailExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                      </SidebarMenuAction>
+                    )}
                     {isGmail && isGmailTemplateUser && gmailExpanded && (
                       <SidebarMenu className="mt-0.5 gap-0 pl-4">
                         {[
