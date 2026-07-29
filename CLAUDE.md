@@ -35,6 +35,7 @@ Quick map (see the index for the full list):
 | Database schema | `Database/Database Schema Reference.md` | Supabase (remote project, no local migrations folder) |
 | Settings page | `Settings/Settings and Profile.md` | `app/settings/`, `components/*-settings.tsx` |
 | Automation rules | `Automation/Automation Rules Engine.md` | `lib/automation/` |
+| AI Chat assistant | `Automation/AI Chat Assistant.md` | `components/ai-chat.tsx`, `app/api/ai/chat/route.ts` |
 | Notifications | `Automation/Notifications.md` | `lib/notifications-store.ts`, `components/notifications/` |
 
 Other docs outside the vault: `docs/intercom-admins.md` (Fanvue staff Intercom admin-ID roster —
@@ -47,6 +48,25 @@ existing one, **update or add its page in `docs/vault/`** before considering the
 just the code. Follow the existing vault conventions (YAML frontmatter, `[[wikilinks]]` between
 pages, a "Key files" section, English prose). Don't leave a page that describes behavior you just
 changed — a stale doc is worse than no doc, so correct it in the same pass.
+
+## Standing policy — log every shipped feature in "New Features"
+
+Whenever you ship a user-facing feature or fix a bug a user would actually notice, add an entry to
+`SEED_ENTRIES` in `app/api/changelog/route.ts` — this feeds the in-app "New Features" dialog
+(bell/megaphone icon in the sidebar). Do this **without being asked** every time; it's a standing
+requirement, not a one-off. Rules:
+
+- Match the existing tone: plain, benefit-oriented, no file paths or code jargon. Write for the
+  support agent using the app, not for another engineer.
+- One entry per distinct user-visible change — don't bundle unrelated fixes into one title.
+- Skip anything purely internal (refactors, dev docs, CI, this vault) — the changelog is for things
+  an agent using the app would notice or care about.
+- `id`: `"seed-YYYY-MM-DD-<letter>"` matching the entry's ship date; `date`: same date, `"YYYY-MM-DD"`.
+- Add new entries near the top of `SEED_ENTRIES` (the array is re-sorted by date at request time,
+  so exact position doesn't matter, but keep it readable).
+- This is a fallback data source — if the `changelog` Supabase table is live and takes precedence
+  (see the comment at the top of the file), prefer inserting there instead; check before assuming
+  the seed array is still authoritative.
 
 ## Handling real user/financial data
 

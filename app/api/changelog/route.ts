@@ -16,6 +16,55 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-07-29-g",
+    date: "2026-07-29",
+    title: "AI Assistant can now draft the customer reply too",
+    description:
+      "After looking into a ticket, ask it to draft the reply — it runs through the same generation and fact-checking pipeline as the rest of the app, so it's grounded and safe to review. It never sends anything on its own; you still copy it in and send it yourself.",
+  },
+  {
+    id: "seed-2026-07-29-f",
+    date: "2026-07-29",
+    title: "AI Assistant can now research a specific ticket for you",
+    description:
+      "Paste an Intercom ticket into the AI Assistant and ask it to look into something — it reads the full thread and searches your connected Notion, Slack, Linear, and Drive for anything relevant, citing what it finds. This is deliberately slower than its other answers, since it's doing real research instead of a quick lookup.",
+  },
+  {
+    id: "seed-2026-07-29-e",
+    date: "2026-07-29",
+    title: "AI Assistant can now look up playbooks and your open cases",
+    description:
+      "Beyond building automation rules, ask it things like \"what playbook covers a stuck KYC?\" or \"how many of my open cases are missing SLA?\". It also now asks for a plain Yes/No confirmation before it actually creates, edits, or deletes a rule — nothing writes without you approving it first.",
+  },
+  {
+    id: "seed-2026-07-29-a",
+    date: "2026-07-29",
+    title: "Google sign-in now only asks for permission once",
+    description:
+      "Every login used to re-show Google's full permissions screen, even after you'd already approved it. Now that only happens the first time you sign in on a device — after that, signing back in skips straight past it.",
+  },
+  {
+    id: "seed-2026-07-29-b",
+    date: "2026-07-29",
+    title: "A real notification bell, not just fading toasts",
+    description:
+      "New bell icon in the top-right corner of every page. New notifications pop up briefly and fade on their own, but nothing's lost — click the bell any time to see recent history, dismiss one, or clear them all.",
+  },
+  {
+    id: "seed-2026-07-29-c",
+    date: "2026-07-29",
+    title: "Settings reorganized into tabs",
+    description:
+      "Settings was one long scroll. It's now split into four tabs — Profile, Canvas, AI & Drafting, and Integrations — so it's easier to find the one setting you actually came to change.",
+  },
+  {
+    id: "seed-2026-07-29-d",
+    date: "2026-07-29",
+    title: "Correcting a case's email now updates every tool card, not just the one",
+    description:
+      "If a customer messages from the wrong email and you correct it on the case card, already-open Fadmin/ONDATO/MassPay cards now show a one-click Refresh instead of silently staying on the old email. The corrected field also gets a visible \"edited\" badge with a way to revert to what Intercom actually has on file.",
+  },
+  {
     id: "seed-2026-07-09-a",
     date: "2026-07-09",
     title: "The app is noticeably faster — Canvas, Gmail, and page switching",

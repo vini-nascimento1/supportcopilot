@@ -2,10 +2,33 @@ import { NextResponse } from "next/server"
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getAgentContext, createRule, updateRule, deleteRule, listRules, testRule } from "@/lib/automation/rules"
-import { searchOpenConversationsForAdmin } from "@/lib/intercom"
+import { searchOpenConversations, searchOpenConversationsForAdmin, getConversationDetail, searchArticles } from "@/lib/intercom"
+import { getPlaybooksDashboardData, getResponsesForPlaybookIds } from "@/lib/playbooks"
+import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
+import { classifyNotionSnippetUse } from "@/lib/notion-retrieval"
+import { getAgentNameAndAdminId } from "@/lib/auth"
+import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
+import { resolveToneForAgentEmail } from "@/lib/agent-tone"
+import {
+  buildSystemPrompt,
+  buildNotionAwareSystemPrompt,
+  buildUserMessage,
+  hasAgentPersonallyReplied,
+  streamChatCompletion,
+  buildVerifierGroundingContext,
+  buildDraftVerifierMessages,
+  REPLY_STYLE_NUDGE,
+  type OpenAIMessage,
+} from "@/lib/draft-ai"
 import type { ConditionTree } from "@/lib/automation/types"
 
 export const dynamic = "force-dynamic"
+// research_ticket can chain an Intercom fetch + a Notion MCP search + a
+// multi-round tool-calling reply inside one request — well past the ~15s a
+// quick automation reply needs. Vercel hard-caps this per plan regardless of
+// the number here (Hobby ~60s, Pro up to 300s by default); raise the plan's
+// function timeout too if research requests still get cut off in prod.
+export const maxDuration = 90
 
 // ── Error handling contract ──────────────────────────────────────────────────
 //
@@ -25,8 +48,11 @@ export const dynamic = "force-dynamic"
 
 const VERBOO_API_KEY = process.env.VERBOO_API_KEY
 const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
-const MAX_TOOL_ROUNDS = 3
-const AI_TIMEOUT_MS = 15_000
+// Research (research_ticket + a couple of follow-up lookups + synthesis) needs
+// more rounds and more per-call thinking time than a quick "create this rule"
+// exchange — both were previously tuned only for the latter.
+const MAX_TOOL_ROUNDS = 6
+const AI_TIMEOUT_MS = 45_000
 
 // ── Tool definitions ───────────────────────────────────────────────────────
 
@@ -145,11 +171,115 @@ const TOOLS: ToolDef[] = [
       parameters: { type: "object", properties: {}, required: [] },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "search_playbooks",
+      description: "Search support playbooks by keyword (matches case type, aliases, and recognition text). Use this to find a playbook's real ID before referencing one in case.suggest_playbook, or to answer 'what playbook covers X?'",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: 'Keyword or phrase, e.g. "payout on hold" or "KYC stuck"' },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_cases",
+      description: "Search open Intercom conversations by keyword (matches subject/tags) and/or SLA status. Use for questions like 'how many open payout cases am I missing SLA on?' or 'show me my urgent tickets'. Searches OPEN conversations only.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Optional keyword to match against the conversation subject or tags" },
+          slaStatus: { type: "string", enum: ["active", "hit", "missed", "cancelled", "none"], description: "Optional exact SLA status filter" },
+          scope: {
+            type: "string",
+            enum: ["mine", "workspace"],
+            description: '"mine" (default) searches only the agent\'s own assigned open conversations. "workspace" searches every open conversation — slower, only use when the user explicitly asks about the whole team/queue.',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "research_ticket",
+      description: "Deep research on ONE specific Intercom ticket: fetches its full conversation thread, then searches the agent's connected knowledge (Notion pages, plus Slack/Linear/Google Drive via the Notion connector) for anything relevant to the question. This is deliberately slower and more thorough than the other tools — use it when the agent pastes an Intercom conversation ID/URL, or explicitly asks you to look into, research, or dig into a specific ticket. Requires Notion connected in Settings for the knowledge search to return anything; the ticket thread itself works regardless.",
+      parameters: {
+        type: "object",
+        properties: {
+          conversationId: {
+            type: "string",
+            description: "The Intercom conversation ID. If the agent pasted a full Intercom URL (e.g. https://app.intercom.com/.../conversation/12345), extract the numeric/alphanumeric ID from it.",
+          },
+          question: {
+            type: "string",
+            description: "What the agent actually wants to know or resolve about this ticket — used as the knowledge-base search query alongside the ticket's own content.",
+          },
+        },
+        required: ["conversationId", "question"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "draft_reply",
+      description: "Generate an actual customer-facing reply draft for one Intercom ticket, using the same grounded-generation and grounding-verifier pipeline the rest of the app uses (customer-safe knowledge only — internal Slack/Linear/Drive context, if any, is firewalled out of the customer text). Returns a draft to show the agent — it is NEVER sent automatically, no confirmation needed since nothing goes out. Call search_playbooks first and pass its id as playbookId if a playbook clearly applies; omit it otherwise.",
+      parameters: {
+        type: "object",
+        properties: {
+          conversationId: { type: "string", description: "The Intercom conversation ID to draft a reply for." },
+          playbookId: { type: "string", description: "A playbook id from search_playbooks, if one clearly applies to this ticket. Omit if none does — never invent one." },
+          guidance: { type: "string", description: "Optional extra instruction specific to this draft, e.g. \"mention we'll follow up within 48h\" or \"keep it to two sentences\"." },
+        },
+        required: ["conversationId"],
+      },
+    },
+  },
 ]
+
+// Write tools mutate real automation rules — the client must get explicit
+// user confirmation before these actually run (see processToolCalls below).
+// Every other tool is read-only and executes immediately.
+const WRITE_TOOLS = new Set(["create_rule", "update_rule", "delete_rule"])
+
+function summarizeToolCall(name: string, args: Record<string, unknown>): string {
+  switch (name) {
+    case "create_rule":
+      return `Create a new ${(args.kind as string) ?? ""} rule "${(args.name as string) ?? "Untitled"}"`
+    case "update_rule":
+      return `Update rule ${(args.id as string) ?? "?"}${
+        args.patch && typeof args.patch === "object" && (args.patch as Record<string, unknown>).name
+          ? ` → "${(args.patch as Record<string, unknown>).name}"`
+          : ""
+      }`
+    case "delete_rule":
+      return `Delete rule ${(args.id as string) ?? "?"}`
+    default:
+      return `Run ${name}`
+  }
+}
 
 // ── System prompt ──────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are a support automation assistant inside the Fanvue Support Copilot. Users ask you in natural language to create, edit, or explain automation rules. You use the available tools to do so. Keep responses concise and friendly — think Slack-style, not formal docs.
+const SYSTEM_PROMPT = `You are the support assistant inside the Fanvue Support Copilot. You can look up playbooks and open cases, and you can create, edit, test, and explain automation rules — all in natural language. You use the available tools to do so. Keep responses concise and friendly — think Slack-style, not formal docs.
+
+## Looking things up (read-only, no confirmation needed)
+
+- **search_playbooks(query)** — find a playbook by keyword. ALWAYS call this before using the case.suggest_playbook action so you have a real playbook id — never invent or guess one.
+- **search_cases(query?, slaStatus?, scope?)** — search open conversations for questions like "how many open payout cases am I missing SLA on?" or "show me my urgent tickets". Defaults to the agent's own queue (scope: "mine"); only use scope: "workspace" if the user explicitly asks about the whole team.
+- **research_ticket(conversationId, question)** — the deep-dive tool. Use it when the agent pastes an Intercom conversation ID or URL and asks you to look into it, or asks something that needs the ticket's actual thread plus your Notion/Slack/Linear/Drive knowledge to answer well — not for quick automation questions. This is allowed to take longer than the other tools: read the full thread it returns, actually use the knowledge results (cite each one by title and source, e.g. "per the Notion page 'Payout SLAs'" or "a Slack thread from #payments mentions..."), and say plainly when nothing relevant turned up rather than filling the gap with a guess. If the agent hasn't given a conversation ID but is clearly asking about a specific ticket, ask for the ID/URL first instead of guessing one.
+- **draft_reply(conversationId, playbookId?, guidance?)** — once you (or the agent) know enough about a ticket to actually respond to the customer, offer to draft the reply and call this on request (or proactively ask "want me to draft a reply?" after researching a ticket — don't assume yes). It runs the same grounded generation + grounding-verifier pipeline the rest of the app uses, so the result is already customer-safe (internal sources are firewalled out during generation, not by you). Call search_playbooks first and pass its id as playbookId ONLY if one clearly applies; never invent an id. When the tool returns, present the draft field back to the agent VERBATIM in a quoted block — do not paraphrase, shorten, or "clean up" wording the verifier already checked — and always say plainly that it's a draft they still need to review and send themselves. Never claim or imply that it was sent.
+
+## Creating, editing, or deleting a rule requires user confirmation
+
+create_rule, update_rule, and delete_rule do NOT execute immediately — the user sees a Yes/No confirmation card with exactly what you're about to do before it runs. You'll get the result (confirmed or declined) as the tool's response. This means you don't need to over-hedge in your own text before calling them — the app itself gates the actual write — but you should still gather the right details first (see below) so the confirmation card is accurate and the user isn't confirming something half-specified.
 
 ## TRIGGER vs MONITOR — choose the right kind
 
@@ -243,7 +373,7 @@ fired alerts after the admin had already replied.
 Rules WITHOUT a teammate condition apply to ALL agents' queues.
 Rules WITH "teammate is <intercom_admin_id>" are scoped to that specific agent.
 
-Always explain what you're about to do, ask clarifying questions first, then confirm before creating/updating. After creating or updating, summarise what was done.`
+Ask clarifying questions first so the conditions/actions you propose are fully specified — the user still confirms the actual write via the Yes/No card, but a vague or half-guessed rule makes that confirmation meaningless. After a create/update/delete tool result comes back, tell the user plainly whether they confirmed or declined it, and summarise what happened.`
 
 // ── Tool result type ────────────────────────────────────────────────────────
 
@@ -277,12 +407,22 @@ function validateRuleInput(args: Record<string, unknown>): string | null {
 
 // ── Tool handlers ──────────────────────────────────────────────────────────
 
+// Shared per-request context threaded through handleToolCall/processToolCalls/
+// continueConversation — bundled once here rather than growing an ever-longer
+// positional parameter list as tools need more than just (agentId, db).
+type AgentCtx = {
+  agentId: string
+  db: NonNullable<ReturnType<typeof getSupabaseAdminClient>>
+  email: string
+  origin: string
+}
+
 async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
-  agentId: string,
-  db: NonNullable<ReturnType<typeof getSupabaseAdminClient>>
+  ctx: AgentCtx
 ): Promise<ToolResult> {
+  const { agentId, db, email, origin } = ctx
   try {
     switch (name) {
       case "list_rules": {
@@ -357,6 +497,241 @@ async function handleToolCall(
           enabledTriggers: triggerCount,
           openConversations: openConvs,
           ...(intercomError ? { _warnings: [intercomError] } : {}),
+        })
+      }
+
+      case "search_playbooks": {
+        const { query } = args as { query: string }
+        const q = (query ?? "").trim().toLowerCase()
+        if (!q) return toolError("Give me a keyword to search playbooks with.", "Empty query")
+        const { allRows } = await getPlaybooksDashboardData()
+        const matches = allRows
+          .filter(
+            (p) =>
+              p.caseType.toLowerCase().includes(q) ||
+              p.aliases.some((a) => a.toLowerCase().includes(q)) ||
+              (p.recognize?.toLowerCase().includes(q) ?? false)
+          )
+          .slice(0, 10)
+        if (matches.length === 0) {
+          return toolSuccess({ matches: [], note: "No playbook matched that keyword — try a different word, or tell the user none exists rather than guessing an ID." })
+        }
+        return toolSuccess({
+          matches: matches.map((p) => ({
+            id: p.id,
+            caseType: p.caseType,
+            source: p.source,
+            aliases: p.aliases,
+            recognize: p.recognize,
+          })),
+        })
+      }
+
+      case "search_cases": {
+        const { query, slaStatus, scope } = args as {
+          query?: string
+          slaStatus?: string
+          scope?: "mine" | "workspace"
+        }
+        let adminId: string | undefined
+        if (scope !== "workspace") {
+          const { data: agent } = await db
+            .from("agents")
+            .select("intercom_admin_id")
+            .eq("id", agentId)
+            .maybeSingle()
+          adminId = agent?.intercom_admin_id ? String(agent.intercom_admin_id) : undefined
+          if (!adminId) {
+            return toolError(
+              "This agent doesn't have an Intercom admin ID on file, so I can't search their personal queue. Try again with scope: workspace.",
+              "No intercom_admin_id for agent"
+            )
+          }
+        }
+        const { conversations, complete } = await searchOpenConversations(
+          scope === "workspace" ? {} : { adminId }
+        )
+        const q = query?.trim().toLowerCase()
+        const filtered = conversations.filter((c) => {
+          if (slaStatus && c.slaStatus !== slaStatus) return false
+          if (q) {
+            const haystack = `${c.subject ?? ""} ${c.tags.join(" ")}`.toLowerCase()
+            if (!haystack.includes(q)) return false
+          }
+          return true
+        })
+        return toolSuccess({
+          matchCount: filtered.length,
+          totalOpenSearched: conversations.length,
+          resultsTruncated: !complete,
+          cases: filtered.slice(0, 15).map((c) => ({
+            id: c.id,
+            customer: c.customerName,
+            subject: c.subject,
+            tags: c.tags,
+            slaStatus: c.slaStatus,
+            priority: c.priority,
+          })),
+        })
+      }
+
+      case "research_ticket": {
+        const { conversationId, question } = args as { conversationId?: string; question?: string }
+        const id = conversationId?.trim()
+        if (!id) {
+          return toolError(
+            "I need an Intercom conversation ID to research a ticket — paste the conversation ID or its Intercom URL.",
+            "Missing conversationId"
+          )
+        }
+        if (!question?.trim()) {
+          return toolError("Tell me what you actually want to know about this ticket.", "Missing question")
+        }
+
+        const convo = await getConversationDetail(id)
+        if (!convo) {
+          return toolError(
+            `I couldn't find an Intercom conversation with ID "${id}". Double-check the ID, or paste the full Intercom conversation URL.`,
+            "Conversation not found"
+          )
+        }
+
+        // Cap how much thread text feeds the knowledge-base search query —
+        // this is a search query, not the model's actual reading of the
+        // thread (the full thread goes back in ticketSummary below).
+        const threadForSearch = [convo.subject, convo.firstMessage, ...convo.messages.map((m) => m.body)]
+          .filter(Boolean)
+          .join("\n\n")
+          .slice(0, 4000)
+
+        let knowledge: Awaited<ReturnType<typeof retrieveNotionSnippets>> = []
+        let notionWarning: string | null = null
+        try {
+          knowledge = await retrieveNotionSnippets(email, origin, `${question}\n\n${threadForSearch}`, 12)
+          if (knowledge.length === 0) {
+            notionWarning =
+              "No Notion/Slack/Linear/Drive results — either nothing matched, Notion isn't connected for this agent (Settings → Integrations), or the connection needs re-consent."
+          }
+        } catch {
+          notionWarning = "The knowledge-base search failed — answer from the ticket thread alone and say so."
+        }
+
+        return toolSuccess({
+          ticket: {
+            id: convo.id,
+            subject: convo.subject,
+            customer: convo.customer,
+            email: convo.email,
+            state: convo.state,
+            tags: convo.tags,
+            intercomUrl: convo.intercomUrl,
+            messages: convo.messages.map((m) => ({ role: m.role, author: m.author, body: m.body, createdAt: m.createdAt })),
+          },
+          knowledgeResults: knowledge.map((s) => ({
+            title: s.title,
+            source: s.source,
+            url: s.url,
+            excerpt: s.text,
+          })),
+          ...(notionWarning ? { _warnings: [notionWarning] } : {}),
+        })
+      }
+
+      case "draft_reply": {
+        const { conversationId, playbookId, guidance } = args as {
+          conversationId?: string
+          playbookId?: string
+          guidance?: string
+        }
+        const id = conversationId?.trim()
+        if (!id) {
+          return toolError("I need an Intercom conversation ID to draft a reply.", "Missing conversationId")
+        }
+
+        const convo = await getConversationDetail(id)
+        if (!convo) {
+          return toolError(
+            `I couldn't find an Intercom conversation with ID "${id}". Double-check the ID or paste the full Intercom conversation URL.`,
+            "Conversation not found"
+          )
+        }
+
+        const [playbooksData, agentInfo, provider, toneResolution] = await Promise.all([
+          getPlaybooksDashboardData(),
+          getAgentNameAndAdminId(email),
+          resolveProviderForAgentEmail(email),
+          resolveToneForAgentEmail(email),
+        ])
+        const { name: agentName, intercomAdminId } = agentInfo
+        const playbook = playbookId ? playbooksData.allRows.find((p) => p.id === playbookId) : undefined
+        const responseTemplates = playbookId
+          ? (await getResponsesForPlaybookIds([playbookId])).get(playbookId) ?? []
+          : []
+
+        const searchQuery = [convo.subject, convo.firstMessage].filter(Boolean).join(" ")
+        const [articles, snippets] = await Promise.all([
+          searchArticles(searchQuery),
+          retrieveNotionSnippets(email, origin, searchQuery),
+        ])
+
+        const hasAgentReplied = hasAgentPersonallyReplied(convo.messages, intercomAdminId)
+        const hasKnownEmail = Boolean(convo.email)
+
+        let systemPrompt =
+          snippets.length > 0
+            ? buildNotionAwareSystemPrompt(playbook, responseTemplates, agentName, articles, snippets, hasAgentReplied, false, toneResolution.instruction)
+            : buildSystemPrompt(playbook, responseTemplates, agentName, articles, hasAgentReplied, false, toneResolution.instruction)
+        if (guidance?.trim()) {
+          systemPrompt += `\n\n## Extra instruction for this specific draft\n${guidance.trim()}`
+        }
+        systemPrompt += `\n\n${REPLY_STYLE_NUDGE}`
+
+        const userMessage = buildUserMessage(convo, undefined, null, hasAgentReplied, hasKnownEmail)
+        const draftMessages: OpenAIMessage[] = [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ]
+
+        let draft = ""
+        try {
+          for await (const chunk of streamChatCompletion(draftMessages, { provider: provider ?? undefined })) {
+            draft += chunk
+          }
+        } catch (e) {
+          return toolError("Draft generation failed — try again in a moment.", (e as Error).message)
+        }
+        if (!draft.trim()) {
+          return toolError("The model returned an empty draft — try again, maybe with more guidance.", "Empty generation")
+        }
+
+        // Same grounding-verifier pass the autonomous reply-queue pipeline runs
+        // before a draft is ever shown for send — strips claims the source
+        // material doesn't actually support (e.g. "I've checked your account").
+        try {
+          const verifierSourceMessages: OpenAIMessage[] = [
+            { role: "system", content: buildVerifierGroundingContext(playbook, articles, snippets) },
+            { role: "user", content: userMessage },
+          ]
+          let verified = ""
+          for await (const chunk of streamChatCompletion(buildDraftVerifierMessages(verifierSourceMessages, draft), {
+            maxTokens: 4096,
+            temperature: 0,
+            model: provider?.auxModel,
+            provider: provider ?? undefined,
+          })) {
+            verified += chunk
+          }
+          if (verified.trim()) draft = verified.trim()
+        } catch {
+          // Verifier is best-effort — keep the unverified draft rather than failing the tool.
+        }
+
+        return toolSuccess({
+          conversationId: convo.id,
+          draft,
+          groundedOnPlaybook: playbook?.caseType ?? null,
+          customerSafeSourcesUsed: snippets.filter((s) => classifyNotionSnippetUse(s) === "customerSafe").length,
+          note: "This is a DRAFT ONLY — it has not been sent. Present it to the agent verbatim (don't paraphrase it), clearly marked as a draft to review before they send it themselves.",
         })
       }
 
@@ -435,102 +810,222 @@ async function callVerboo(
   }
 }
 
+// ── Resumable tool-call processing (write tools pause for confirmation) ────
+
+type RawToolCall = { id: string; type: "function"; function: { name: string; arguments: string } }
+
+// Serialized across the pause/resume round-trip — the client holds this
+// opaquely and sends it back verbatim on confirm/decline. Nothing here is
+// secret (it's the same messages the client already saw plus in-flight tool
+// scaffolding), so it's fine to round-trip through the client rather than
+// keeping server-side session state.
+type PendingState = {
+  messages: Array<Record<string, unknown>>
+  toolCalls: RawToolCall[]
+  resolved: Array<Record<string, unknown>>
+  index: number
+  assistantContent: string | null
+  round: number
+}
+
+type ProcessOutcome =
+  | { done: true; messages: Array<Record<string, unknown>>; round: number }
+  | {
+      done: false
+      confirmation: { toolCallId: string; name: string; args: Record<string, unknown>; summary: string }
+      pendingState: PendingState
+    }
+
+// Walks `state.toolCalls` from `state.index`, executing read-only tools
+// immediately and stopping (without executing) the moment it reaches one in
+// WRITE_TOOLS — the caller returns that as a confirmation request. Passing
+// `decision` resumes from a paused write tool: applies the user's yes/no,
+// then keeps walking (which may pause again on a second write tool later in
+// the same round).
+async function processToolCalls(
+  state: PendingState,
+  ctx: AgentCtx,
+  decision?: { toolCallId: string; confirmed: boolean }
+): Promise<ProcessOutcome> {
+  const { toolCalls, resolved } = state
+  let index = state.index
+
+  if (decision) {
+    const tc = toolCalls[index]
+    if (!tc || tc.id !== decision.toolCallId) {
+      throw new Error("Stale or out-of-order confirmation — please retry your message.")
+    }
+    if (decision.confirmed) {
+      let args: Record<string, unknown> = {}
+      try {
+        args = JSON.parse(tc.function.arguments)
+      } catch {
+        resolved.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({ error: "The AI generated an invalid response. Please try again." }),
+        })
+        index++
+        return processToolCalls({ ...state, index }, ctx)
+      }
+      const result = await handleToolCall(tc.function.name, args, ctx)
+      resolved.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify(result.success ? result.data : { error: result.friendly }),
+      })
+    } else {
+      resolved.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify({
+          error: "The user declined this action in the confirmation card. Do not retry it — ask what they'd like to do instead.",
+        }),
+      })
+    }
+    index++
+  }
+
+  while (index < toolCalls.length) {
+    const tc = toolCalls[index]
+    let args: Record<string, unknown> = {}
+    try {
+      args = JSON.parse(tc.function.arguments)
+    } catch {
+      resolved.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify({ error: "The AI generated an invalid response. Please try again." }),
+      })
+      index++
+      continue
+    }
+
+    if (WRITE_TOOLS.has(tc.function.name)) {
+      return {
+        done: false,
+        confirmation: {
+          toolCallId: tc.id,
+          name: tc.function.name,
+          args,
+          summary: summarizeToolCall(tc.function.name, args),
+        },
+        pendingState: { ...state, index },
+      }
+    }
+
+    const result = await handleToolCall(tc.function.name, args, ctx)
+    resolved.push({
+      role: "tool",
+      tool_call_id: tc.id,
+      content: JSON.stringify(result.success ? result.data : { error: result.friendly }),
+    })
+    index++
+  }
+
+  return {
+    done: true,
+    round: state.round,
+    messages: [
+      ...state.messages,
+      { role: "assistant", content: state.assistantContent, tool_calls: state.toolCalls },
+      ...resolved,
+    ],
+  }
+}
+
+// Drives the actual Verboo round-trip loop once `messages` has no pending
+// confirmation in flight — either a fresh user turn, or resumed right after
+// a confirm/decline resolved the previous round's tool calls.
+async function continueConversation(
+  messages: Array<Record<string, unknown>>,
+  startRound: number,
+  ctx: AgentCtx
+): Promise<Response> {
+  let rounds = startRound
+
+  while (rounds < MAX_TOOL_ROUNDS) {
+    rounds++
+    const response = await callVerboo(messages)
+
+    if (!response.tool_calls || response.tool_calls.length === 0) {
+      return NextResponse.json({ message: response.content ?? "I'm not sure how to respond." })
+    }
+
+    const outcome = await processToolCalls(
+      {
+        messages,
+        toolCalls: response.tool_calls,
+        resolved: [],
+        index: 0,
+        assistantContent: response.content ?? null,
+        round: rounds,
+      },
+      ctx
+    )
+
+    if (!outcome.done) {
+      return NextResponse.json({
+        confirmation: outcome.confirmation,
+        pendingState: outcome.pendingState,
+      })
+    }
+
+    messages = outcome.messages
+  }
+
+  // Max tool rounds reached — ask for a final summary without tool access.
+  try {
+    const finalResponse = await callVerboo(messages, { tool_choice: "none" })
+    return NextResponse.json({
+      message: finalResponse.content ?? "I completed the actions but couldn't generate a summary.",
+    })
+  } catch {
+    return NextResponse.json({
+      message: `I ran out of steps for this turn. The AI couldn't summarise the results — try asking "what did you just do?" to get a recap.`,
+    })
+  }
+}
+
 // ── Route ──────────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-  const { db, agentId } = await getAgentContext()
+  const { db, agentId, email } = await getAgentContext()
   if (!db || !agentId) return NextResponse.json({ error: "Authentication required" }, { status: 401 })
 
   const body = (await req.json().catch(() => null)) as {
-    messages: Array<{ role: string; content: string }>
+    messages?: Array<{ role: string; content: string }>
+    pendingState?: PendingState
+    toolCallId?: string
+    confirmed?: boolean
   } | null
-  if (!body?.messages) return NextResponse.json({ error: "messages required" }, { status: 400 })
+  if (!body) return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
 
   if (!VERBOO_API_KEY) return NextResponse.json({ error: "VERBOO_API_KEY not configured" }, { status: 500 })
 
+  const { origin } = new URL(req.url)
+  const ctx: AgentCtx = { db, agentId, email: email ?? "", origin }
+
   try {
+    // Resuming after the user clicked Yes/No on a write-tool confirmation card.
+    if (body.pendingState && body.toolCallId && typeof body.confirmed === "boolean") {
+      const outcome = await processToolCalls(body.pendingState, ctx, {
+        toolCallId: body.toolCallId,
+        confirmed: body.confirmed,
+      })
+      if (!outcome.done) {
+        return NextResponse.json({ confirmation: outcome.confirmation, pendingState: outcome.pendingState })
+      }
+      return await continueConversation(outcome.messages, outcome.round, ctx)
+    }
+
+    // Fresh user turn.
+    if (!body.messages) return NextResponse.json({ error: "messages required" }, { status: 400 })
     const messages: Array<Record<string, unknown>> = [
       { role: "system", content: SYSTEM_PROMPT },
       ...body.messages.map((m) => ({ role: m.role, content: m.content })),
     ]
-
-    // Track what tools ran across rounds so we can report them even if the
-    // final summary call fails.
-    let totalToolsRun = 0
-    let totalToolErrors = 0
-
-    let rounds = 0
-    while (rounds < MAX_TOOL_ROUNDS) {
-      rounds++
-
-      const response = await callVerboo(messages)
-
-      if (!response.tool_calls || response.tool_calls.length === 0) {
-        // No more tools — return the final answer.
-        const reply = response.content ?? "I'm not sure how to respond."
-        return NextResponse.json({ message: reply })
-      }
-
-      // Execute each tool call.
-      const toolResults: Array<Record<string, unknown>> = []
-      for (const tc of response.tool_calls) {
-        let args: Record<string, unknown> = {}
-        try {
-          args = JSON.parse(tc.function.arguments)
-        } catch {
-          totalToolErrors++
-          toolResults.push({
-            role: "tool",
-            tool_call_id: tc.id,
-            content: JSON.stringify({
-              error: `The AI generated an invalid response. Please try again or report this to Vinicius if it persists.`,
-            }),
-          })
-          continue
-        }
-
-        const result = await handleToolCall(tc.function.name, args, agentId, db)
-
-        if (result.success) {
-          totalToolsRun++
-          toolResults.push({
-            role: "tool",
-            tool_call_id: tc.id,
-            content: JSON.stringify(result.data),
-          })
-        } else {
-          totalToolErrors++
-          toolResults.push({
-            role: "tool",
-            tool_call_id: tc.id,
-            content: JSON.stringify({
-              error: result.friendly,
-            })
-          })
-        }
-      }
-
-      // Append assistant message + tool results for the next round.
-      messages.push({
-        role: "assistant",
-        content: response.content ?? null,
-        tool_calls: response.tool_calls,
-      })
-      messages.push(...toolResults)
-    }
-
-    // Max tool rounds reached — ask for a final summary without tool access.
-    // If this fails, we still report what was already executed.
-    try {
-      const finalResponse = await callVerboo(messages, { tool_choice: "none" })
-      const reply = finalResponse.content ?? "I completed the actions but couldn't generate a summary."
-      return NextResponse.json({ message: reply })
-    } catch {
-      return NextResponse.json({
-        message: `I completed ${totalToolsRun} action(s) with ${totalToolErrors} error(s). The AI couldn't summarise the results — try asking "what did you just do?" to get a recap.`,
-      })
-    }
-
+    return await continueConversation(messages, 0, ctx)
   } catch (e) {
     const err = e as Error & { name: string }
     if (err.name === "AbortError" || err.name === "TimeoutError") {
@@ -539,7 +1034,9 @@ export async function POST(req: Request) {
       }, { status: 504 })
     }
     return NextResponse.json({
-      error: "Something went wrong with the AI assistant. Please try again or report this to Vinicius if it persists.",
+      error: err.message?.startsWith("Stale or out-of-order")
+        ? err.message
+        : "Something went wrong with the AI assistant. Please try again or report this to Vinicius if it persists.",
     }, { status: 500 })
   }
 }
