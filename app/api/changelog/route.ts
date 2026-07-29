@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-07-29-l",
+    date: "2026-07-29",
+    title: "Clearer error when the AI Assistant can't reach Notion",
+    description:
+      "If a ticket research or draft request can't search your knowledge base, the AI Assistant now says specifically why (not connected, connection expired, or the search itself failed) instead of a generic \"couldn't reach it.\"",
+  },
+  {
     id: "seed-2026-07-29-k",
     date: "2026-07-29",
     title: "Start a new AI Assistant conversation",

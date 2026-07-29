@@ -4,8 +4,9 @@ import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getAgentContext, createRule, updateRule, deleteRule, listRules, testRule } from "@/lib/automation/rules"
 import { searchOpenConversations, searchOpenConversationsForAdmin, getConversationDetail, searchArticles } from "@/lib/intercom"
 import { getPlaybooksDashboardData, getResponsesForPlaybookIds } from "@/lib/playbooks"
-import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
-import { classifyNotionSnippetUse } from "@/lib/notion-retrieval"
+import { getFreshNotionMcpToken } from "@/lib/notion-mcp-auth-server"
+import { searchNotionViaMcp } from "@/lib/notion-mcp-client"
+import { classifyNotionSnippetUse, type NotionSnippet } from "@/lib/notion-retrieval"
 import { getAgentNameAndAdminId } from "@/lib/auth"
 import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
 import { resolveToneForAgentEmail } from "@/lib/agent-tone"
@@ -407,6 +408,51 @@ function validateRuleInput(args: Record<string, unknown>): string | null {
 
 // ── Tool handlers ──────────────────────────────────────────────────────────
 
+// research_ticket/draft_reply need to know WHY a Notion search came back
+// empty — "nothing connected", "needs re-consent", and "the MCP call itself
+// failed" are three very different situations, but the shared
+// lib/notion-retrieval-server.ts::retrieveNotionSnippets() used by the draft
+// pipeline collapses all of them (by design, for that pipeline — a customer
+// reply must never break just because Notion is unreachable) into the same
+// empty array. That's exactly the ambiguity that made "the AI says it can't
+// reach Notion" impossible to diagnose from the chat's own output — this
+// calls the lower-level pieces directly to surface the real error instead.
+async function searchKnowledgeWithDiagnostics(
+  email: string,
+  origin: string,
+  query: string,
+  limit: number
+): Promise<{ snippets: NotionSnippet[]; warning: string | null }> {
+  try {
+    const tokenResult = await getFreshNotionMcpToken(email, origin)
+    if (!tokenResult.accessToken) {
+      if (tokenResult.needsReconsent) {
+        return {
+          snippets: [],
+          warning: "Notion's connection has expired and needs to be reconnected — Settings → Integrations → Notion → Reconnect.",
+        }
+      }
+      return {
+        snippets: [],
+        warning: `Notion isn't connected for this agent${"error" in tokenResult && tokenResult.error ? ` (${tokenResult.error})` : ""} — connect it in Settings → Integrations.`,
+      }
+    }
+    const result = await searchNotionViaMcp(tokenResult.accessToken, query, limit)
+    if (result.backend !== "ai_search") {
+      return {
+        snippets: [],
+        warning: `Notion is connected, but the search call itself failed: ${result.error ?? "unknown error"}. This is a real error, not "nothing found" — worth reporting to Vinicius if it keeps happening.`,
+      }
+    }
+    return {
+      snippets: result.snippets,
+      warning: result.snippets.length === 0 ? "The knowledge search ran successfully and found nothing relevant." : null,
+    }
+  } catch (e) {
+    return { snippets: [], warning: `Notion search threw an error: ${(e as Error).message}` }
+  }
+}
+
 // Shared per-request context threaded through handleToolCall/processToolCalls/
 // continueConversation — bundled once here rather than growing an ever-longer
 // positional parameter list as tools need more than just (agentId, db).
@@ -604,17 +650,12 @@ async function handleToolCall(
           .join("\n\n")
           .slice(0, 4000)
 
-        let knowledge: Awaited<ReturnType<typeof retrieveNotionSnippets>> = []
-        let notionWarning: string | null = null
-        try {
-          knowledge = await retrieveNotionSnippets(email, origin, `${question}\n\n${threadForSearch}`, 12)
-          if (knowledge.length === 0) {
-            notionWarning =
-              "No Notion/Slack/Linear/Drive results — either nothing matched, Notion isn't connected for this agent (Settings → Integrations), or the connection needs re-consent."
-          }
-        } catch {
-          notionWarning = "The knowledge-base search failed — answer from the ticket thread alone and say so."
-        }
+        const { snippets: knowledge, warning: notionWarning } = await searchKnowledgeWithDiagnostics(
+          email,
+          origin,
+          `${question}\n\n${threadForSearch}`,
+          12
+        )
 
         return toolSuccess({
           ticket: {
@@ -669,9 +710,9 @@ async function handleToolCall(
           : []
 
         const searchQuery = [convo.subject, convo.firstMessage].filter(Boolean).join(" ")
-        const [articles, snippets] = await Promise.all([
+        const [articles, { snippets, warning: notionWarning }] = await Promise.all([
           searchArticles(searchQuery),
-          retrieveNotionSnippets(email, origin, searchQuery),
+          searchKnowledgeWithDiagnostics(email, origin, searchQuery, 10),
         ])
 
         const hasAgentReplied = hasAgentPersonallyReplied(convo.messages, intercomAdminId)
@@ -732,6 +773,7 @@ async function handleToolCall(
           groundedOnPlaybook: playbook?.caseType ?? null,
           customerSafeSourcesUsed: snippets.filter((s) => classifyNotionSnippetUse(s) === "customerSafe").length,
           note: "This is a DRAFT ONLY — it has not been sent. Present it to the agent verbatim (don't paraphrase it), clearly marked as a draft to review before they send it themselves.",
+          ...(notionWarning ? { _warnings: [notionWarning] } : {}),
         })
       }
 
