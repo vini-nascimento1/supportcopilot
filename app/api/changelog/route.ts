@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-07-29-k",
+    date: "2026-07-29",
+    title: "Start a new AI Assistant conversation",
+    description:
+      "New icon in the AI Assistant's header clears the current conversation so you can start fresh — also doubles as a cancel button if a research reply is taking too long.",
+  },
+  {
     id: "seed-2026-07-29-j",
     date: "2026-07-29",
     title: "AI Assistant shows what it actually checked",

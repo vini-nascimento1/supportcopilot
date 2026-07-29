@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { BotIcon, SendIcon, XIcon } from "lucide-react"
+import { BotIcon, RotateCcwIcon, SendIcon, XIcon } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -93,6 +93,19 @@ export function AIChat() {
     loadingTimersRef.current.forEach(clearTimeout)
     loadingTimersRef.current = []
     setLoading(false)
+  }
+
+  // Starts a fresh conversation — also doubles as a cancel button for a
+  // stuck/slow research_ticket or draft_reply call, since it aborts whatever
+  // request is still in flight.
+  function resetConversation() {
+    abortRef.current?.abort()
+    stopLoading()
+    setMessages([])
+    setInput("")
+    setError(null)
+    setConfirmation(null)
+    setPendingState(null)
   }
 
   useEffect(() => {
@@ -219,6 +232,17 @@ export function AIChat() {
           <div className="flex items-center gap-2 border-b px-4 py-3">
             <BotIcon className="size-4 text-primary" />
             <span className="text-sm font-semibold">AI Assistant</span>
+            {messages.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="ml-auto size-7"
+                title="New conversation"
+                onClick={resetConversation}
+              >
+                <RotateCcwIcon className="size-3.5" />
+              </Button>
+            )}
           </div>
 
           {/* Messages */}
