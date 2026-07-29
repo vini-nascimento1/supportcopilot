@@ -33,6 +33,14 @@ export async function searchNotionViaMcp(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        // MCP's Streamable HTTP transport requires the client to advertise
+        // both response types the server may use — omitting this fails
+        // content negotiation entirely (406 Not Acceptable) rather than any
+        // auth/data error. This is easy to miss writing a JSON-RPC-over-fetch
+        // client by hand instead of an MCP SDK, and it silently broke every
+        // caller of this function (draft pipeline, case-chat, AI Assistant),
+        // not just Notion access — the token/connection was never the issue.
+        Accept: "application/json, text/event-stream",
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
@@ -55,7 +63,23 @@ export async function searchNotionViaMcp(
       return { snippets: [], backend: "none", error: `http_${response.status}` }
     }
 
-    const json: unknown = await response.json()
+    // The Accept header above tells the server BOTH formats are acceptable —
+    // it can legitimately answer either way, so parse whichever it picked
+    // rather than assuming a plain JSON body.
+    const contentType = response.headers.get("content-type") ?? ""
+    let json: unknown
+    if (contentType.includes("text/event-stream")) {
+      const raw = await response.text()
+      const dataLine = raw
+        .split("\n")
+        .find((line) => line.startsWith("data:"))
+      if (!dataLine) {
+        return { snippets: [], backend: "none", error: "empty_sse_response" }
+      }
+      json = JSON.parse(dataLine.slice("data:".length).trim())
+    } else {
+      json = await response.json()
+    }
     const rpcResult: unknown =
       typeof json === "object" &&
       json !== null &&

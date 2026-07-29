@@ -41,6 +41,17 @@ async function searchNotionViaMcp(
 
 Posts a `tools/call` JSON-RPC request for the `notion-search` tool (`query_type: "internal"`, `content_search_mode: "ai_search"`, `page_size: limit`) to `NOTION_MCP_URL`, then runs the raw response through the pure `mapAiSearchResults()` mapper. It **never throws** — every failure path (missing token/query, non-2xx response, malformed JSON) resolves to `{ snippets: [], backend: "none", error: "<reason>" }` instead of raising, so a Notion outage or an expired token cannot break draft generation; it just falls back to the base prompt.
 
+> **2026-07-29 incident:** this call was missing the `Accept: application/json, text/event-stream`
+> header MCP's Streamable HTTP transport requires on every request — the server rejected every call
+> with `406 Not Acceptable`. Because `retrieveNotionSnippets()` (the caller everything else goes
+> through) swallows all errors into an empty array by design, this had been silently returning zero
+> Notion grounding to the draft pipeline, case-chat, and the AI Assistant the whole time — nothing
+> about the token/OAuth connection was ever wrong. Found via the AI Assistant's `research_ticket`
+> tool, which was changed to surface the real error instead of going through the swallowing wrapper
+> (see [[AI Chat Assistant]]). The fetch now also parses the response per its actual `content-type`
+> (`text/event-stream` needs its `data:` line extracted; the server is free to answer either way
+> once both are accepted).
+
 ```typescript
 type NotionSnippet = {
   id: string

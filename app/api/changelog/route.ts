@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-07-29-m",
+    date: "2026-07-29",
+    title: "Notion grounding actually works now — it silently didn't before",
+    description:
+      "Every AI draft, the Case copilot, and the AI Assistant have been searching Notion since the feature shipped, but a missing technical header made every single one of those searches fail invisibly — drafts fell back to playbook-only knowledge without any sign anything was wrong. Fixed at the root, so all three now actually pull in your live Notion knowledge base again.",
+  },
+  {
     id: "seed-2026-07-29-l",
     date: "2026-07-29",
     title: "Clearer error when the AI Assistant can't reach Notion",
