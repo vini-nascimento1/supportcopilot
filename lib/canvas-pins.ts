@@ -7,6 +7,11 @@ export interface PinnedGeometry {
   position: { x: number; y: number }
   width?: number
   height?: number
+  /** Tool cards only: screen rect (px, relative to the canvas pane) captured
+      at pin time. When present, the card renders in a fixed overlay layer
+      instead of React Flow's pannable/zoomable viewport — so panning/zooming
+      the canvas no longer resizes its embedded native view. Cleared on unpin. */
+  screen?: { left: number; top: number; width: number; height: number }
 }
 
 const PINS_KEY = "fv-canvas-pins-v1"
@@ -37,6 +42,37 @@ export function isPinned(id: string): boolean {
 
 export function setPin(id: string, geometry: PinnedGeometry) {
   write({ ...getPins(), [id]: geometry })
+}
+
+// Merges the anchor rect into an existing pin without touching the world
+// position/size (which React Flow / edges still key off of). No-op if the
+// node isn't pinned.
+export function setPinScreen(
+  id: string,
+  screen: NonNullable<PinnedGeometry["screen"]>,
+) {
+  const pins = getPins()
+  const pin = pins[id]
+  if (!pin) return
+  write({ ...pins, [id]: { ...pin, screen } })
+}
+
+// Stable-reference cache so useSyncExternalStore callers (see ToolNode) don't
+// re-render every tick — getPins() re-parses JSON on every call, which would
+// otherwise hand back a new object identity even when the value is unchanged.
+const screenCache = new Map<string, { json: string; value: PinnedGeometry["screen"] }>()
+
+export function getPinScreen(id: string): PinnedGeometry["screen"] | null {
+  const screen = getPins()[id]?.screen
+  if (!screen) {
+    screenCache.delete(id)
+    return null
+  }
+  const json = JSON.stringify(screen)
+  const cached = screenCache.get(id)
+  if (cached && cached.json === json) return cached.value ?? null
+  screenCache.set(id, { json, value: screen })
+  return screen
 }
 
 export function removePin(id: string) {

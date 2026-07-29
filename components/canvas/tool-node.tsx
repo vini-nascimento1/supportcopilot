@@ -1,6 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
+import { createPortal } from "react-dom"
 import {
   NodeResizer,
   useReactFlow,
@@ -25,8 +32,15 @@ import {
 import { Button } from "@/components/ui/button"
 import { PinButton } from "@/components/canvas/pin-button"
 import { useCanvasActive } from "@/components/canvas/active-context"
+import { useAnchorLayer } from "@/components/canvas/anchor-layer"
 import { getCanvasHost } from "@/lib/canvas-host"
 import { clipToolBounds } from "@/lib/canvas-bounds"
+import {
+  getPinScreen,
+  isPinned,
+  setPinScreen,
+  subscribePins,
+} from "@/lib/canvas-pins"
 import { hasBlockingOverlay } from "@/lib/canvas-overlay"
 import { ToolIcon } from "@/lib/tool-icons"
 import { cn } from "@/lib/utils"
@@ -54,8 +68,50 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
   // pane's tools alive at a time — no id collisions, bounded memory.
   const active = useCanvasActive()
   const bodyRef = useRef<HTMLDivElement>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
   const { deleteElements, updateNodeData } = useReactFlow()
   const store = useStoreApi()
+
+  // Pinned tool cards render in a fixed overlay outside React Flow's pan/zoom
+  // viewport (see anchor-layer.tsx) so they stop resizing on every canvas
+  // gesture — the embedded native view only reacts to real window/pane
+  // resizes. Falls back to normal in-flow rendering until a screen rect has
+  // been captured (or the overlay isn't mounted yet).
+  const pinned = useSyncExternalStore(
+    subscribePins,
+    () => isPinned(id),
+    () => false,
+  )
+  const anchorLayer = useAnchorLayer()
+  const screenRect = useSyncExternalStore(
+    subscribePins,
+    () => getPinScreen(id),
+    () => null,
+  )
+  const anchored = pinned && !!anchorLayer && !!screenRect
+  const anchoredRef = useRef(anchored)
+  useEffect(() => {
+    anchoredRef.current = anchored
+  }, [anchored])
+
+  // First render after pinning: no screen rect yet, so the card is still
+  // rendered in-flow (below) — measure it here and persist it. That write
+  // fires the pins-changed event, which the store subscription above picks
+  // up, flipping this node over to the portal render on the next tick.
+  useEffect(() => {
+    if (!pinned || screenRect) return
+    const el = cardRef.current
+    const pane = el?.closest("[data-canvas-pane]")
+    if (!el || !pane) return
+    const paneRect = pane.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    setPinScreen(id, {
+      left: Math.round(r.left - paneRect.left),
+      top: Math.round(r.top - paneRect.top),
+      width: Math.round(r.width),
+      height: Math.round(r.height),
+    })
+  }, [pinned, screenRect, id])
 
   const [minimized, setMinimized] = useState(false)
   const minimizedRef = useRef(minimized)
@@ -99,7 +155,9 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
     const tick = () => {
       const el = bodyRef.current
       if (el) {
-        const zoom = store.getState().transform[2]
+        // Anchored cards live outside the canvas's pan/zoom transform, so
+        // their content is always shown at 1:1 regardless of canvas zoom.
+        const zoom = anchoredRef.current ? 1 : store.getState().transform[2]
         // Clip the view to the canvas area minus the chrome, so a native
         // WebContentsView never paints over the sidebars or toolbox (it can't
         // respect their z-index). null → the card is fully occluded; hide it.
@@ -192,8 +250,9 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
     )
   }
 
-  return (
+  const card = (
     <div
+      ref={cardRef}
       className={cn(
         "flex h-full w-full flex-col overflow-hidden rounded-xl border bg-card shadow-md",
         selected && "ring-2 ring-ring",
@@ -392,4 +451,24 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
       )}
     </div>
   )
+
+  if (pinned && anchorLayer && screenRect) {
+    return createPortal(
+      <div
+        className="pointer-events-auto absolute"
+        style={{
+          left: screenRect.left,
+          top: screenRect.top,
+          width: screenRect.width,
+          height: screenRect.height,
+        }}
+      >
+        {card}
+      </div>,
+      anchorLayer,
+      id,
+    )
+  }
+
+  return card
 }

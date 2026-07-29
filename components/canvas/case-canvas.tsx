@@ -63,6 +63,7 @@ import {
   type CanvasTool,
 } from "@/lib/canvas-tools"
 import { CanvasActiveContext } from "@/components/canvas/active-context"
+import { AnchorLayerContext } from "@/components/canvas/anchor-layer"
 import { ToolNode } from "@/components/canvas/tool-node"
 import {
   CaseInfoNode,
@@ -611,6 +612,12 @@ function CanvasInner(props: CaseCanvasProps) {
   // (loadLayout) and don't follow props, so a reopened or closed ticket would
   // otherwise stay stale. Re-fetch the thread and patch just those two cards,
   // preserving the agent's saved overrides and all other cards' state.
+  // Portal target for pinned tool cards — sits outside React Flow's
+  // transformed viewport so anchored cards don't move/resize on pan/zoom.
+  const [anchorLayerEl, setAnchorLayerEl] = useState<HTMLDivElement | null>(
+    null
+  )
+
   const conversationId = props.caseInfo?.conversationId
   const [refreshing, setRefreshing] = useState(false)
   const refreshConversation = useCallback(async () => {
@@ -933,28 +940,36 @@ function CanvasInner(props: CaseCanvasProps) {
           </DialogContent>
         </Dialog>
 
-        <div
-          className={cn(
-            "h-full w-full",
-            !edgesVisible && "canvas-edges-hidden"
-          )}
-        >
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            nodeTypes={nodeTypes}
-            fitView
-            minZoom={0.15}
-            maxZoom={2}
+        <AnchorLayerContext.Provider value={anchorLayerEl}>
+          <div
+            className={cn(
+              "h-full w-full",
+              !edgesVisible && "canvas-edges-hidden"
+            )}
           >
-            <Background gap={24} />
-            <Controls />
-            <MiniMap pannable zoomable className="!bg-muted" />
-          </ReactFlow>
-        </div>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              nodeTypes={nodeTypes}
+              fitView
+              minZoom={0.15}
+              maxZoom={2}
+            >
+              <Background gap={24} />
+              <Controls />
+              <MiniMap pannable zoomable className="!bg-muted" />
+            </ReactFlow>
+          </div>
+          {/* Pinned tool cards portal in here — outside the pan/zoom transform
+              above, so they stay put on screen (see ToolNode + canvas-pins). */}
+          <div
+            ref={setAnchorLayerEl}
+            className="pointer-events-none absolute inset-0 z-[4]"
+          />
+        </AnchorLayerContext.Provider>
       </div>
     </CanvasActiveContext.Provider>
   )
