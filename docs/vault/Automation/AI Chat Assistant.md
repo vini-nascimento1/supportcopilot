@@ -42,14 +42,20 @@ Read-only (execute immediately, no confirmation):
 - `search_cases(query?, slaStatus?, scope?)` — keyword/SLA-status search over open Intercom
   conversations, defaulting to the agent's own queue (`scope: "mine"`); `scope: "workspace"` searches
   every open conversation instead, only used when the user asks about the whole team
-- `research_ticket(conversationId, question)` — the deep-dive tool: fetches one Intercom
-  conversation's full thread (`lib/intercom.ts::getConversationDetail`) and searches the agent's
-  connected knowledge via `lib/notion-retrieval-server.ts::retrieveNotionSnippets` — Notion pages
-  plus Slack/Linear/Google Drive through the same hosted-MCP connector search the draft pipeline
-  uses (see [[Notion MCP Integration]]). Unlike the draft pipeline, results here are **not** filtered
-  to `customerSafe` sources — this tool is agent-facing, so Slack/Linear/Drive hits are exactly what
-  it's for, not something to hide. Requires the agent to have Notion connected (Settings →
-  Integrations); the ticket-thread half works regardless.
+- `search_knowledge(query)` — standalone knowledge-base search, no ticket required. Added after an
+  agent correctly pushed back on having to invent a ticket ID just to ask "what does the W-8BEN
+  article say about X?" — `research_ticket` originally bundled thread-reading and knowledge search
+  together with no way to do just the latter.
+- `research_ticket(conversationId, question)` — the deep-dive tool for when there IS a ticket:
+  fetches its full Intercom thread (`lib/intercom.ts::getConversationDetail`) AND searches knowledge
+  together. Both this and `search_knowledge` call `searchKnowledgeWithDiagnostics()` (defined in
+  `route.ts` itself, not the shared `lib/notion-retrieval-server.ts::retrieveNotionSnippets()` the
+  draft pipeline uses — see the 2026-07-29 incident note in [[Notion MCP Integration]] for why: that
+  shared helper swallows every failure into an empty array by design, which made a real bug
+  undiagnosable from the chat's own output). Results are **not** filtered to `customerSafe` sources
+  the way the draft pipeline's are — both tools are agent-facing, so Slack/Linear/Drive hits are
+  exactly what they're for, not something to hide. Requires Notion connected (Settings →
+  Integrations); `research_ticket`'s thread-reading half works regardless.
 - `draft_reply(conversationId, playbookId?, guidance?)` — generates an actual customer-facing reply,
   reusing [[Draft Verify Pipeline]]'s own building blocks rather than a new ad-hoc prompt:
   `buildNotionAwareSystemPrompt`/`buildSystemPrompt` + `buildUserMessage` for generation, then the

@@ -209,6 +209,20 @@ const TOOLS: ToolDef[] = [
   {
     type: "function",
     function: {
+      name: "search_knowledge",
+      description: "Search the agent's connected knowledge base (Notion pages, plus Slack/Linear/Google Drive via the Notion connector) directly — no ticket needed. Use this for a standalone question like \"what does the W-8BEN article say about submission errors?\" or \"what's our policy on X?\". Only reach for research_ticket instead when there's an actual Intercom ticket to read alongside the knowledge search.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The question or keywords to search for." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "research_ticket",
       description: "Deep research on ONE specific Intercom ticket: fetches its full conversation thread, then searches the agent's connected knowledge (Notion pages, plus Slack/Linear/Google Drive via the Notion connector) for anything relevant to the question. This is deliberately slower and more thorough than the other tools — use it when the agent pastes an Intercom conversation ID/URL, or explicitly asks you to look into, research, or dig into a specific ticket. Requires Notion connected in Settings for the knowledge search to return anything; the ticket thread itself works regardless.",
       parameters: {
@@ -275,7 +289,8 @@ const SYSTEM_PROMPT = `You are the support assistant inside the Fanvue Support C
 
 - **search_playbooks(query)** — find a playbook by keyword. ALWAYS call this before using the case.suggest_playbook action so you have a real playbook id — never invent or guess one.
 - **search_cases(query?, slaStatus?, scope?)** — search open conversations for questions like "how many open payout cases am I missing SLA on?" or "show me my urgent tickets". Defaults to the agent's own queue (scope: "mine"); only use scope: "workspace" if the user explicitly asks about the whole team.
-- **research_ticket(conversationId, question)** — the deep-dive tool. Use it when the agent pastes an Intercom conversation ID or URL and asks you to look into it, or asks something that needs the ticket's actual thread plus your Notion/Slack/Linear/Drive knowledge to answer well — not for quick automation questions. This is allowed to take longer than the other tools: read the full thread it returns, actually use the knowledge results (cite each one by title and source, e.g. "per the Notion page 'Payout SLAs'" or "a Slack thread from #payments mentions..."), and say plainly when nothing relevant turned up rather than filling the gap with a guess. If the agent hasn't given a conversation ID but is clearly asking about a specific ticket, ask for the ID/URL first instead of guessing one.
+- **search_knowledge(query)** — a standalone question against the connected knowledge base (Notion/Slack/Linear/Drive), no ticket involved. Use this whenever the agent just wants to know something ("what does the W-8BEN article say about X?", "what's our refund policy?") — don't make them invent a ticket ID just to ask a question.
+- **research_ticket(conversationId, question)** — the deep-dive tool for when there IS an actual ticket: reads its full thread AND searches the knowledge base together. Use it when the agent pastes an Intercom conversation ID/URL, or explicitly asks you to look into a specific ticket — not for a standalone knowledge question (use search_knowledge for that instead) and not for quick automation questions. This is allowed to take longer than the other tools: read the full thread it returns, actually use the knowledge results (cite each one by title and source, e.g. "per the Notion page 'Payout SLAs'" or "a Slack thread from #payments mentions..."), and say plainly when nothing relevant turned up rather than filling the gap with a guess.
 - **draft_reply(conversationId, playbookId?, guidance?)** — once you (or the agent) know enough about a ticket to actually respond to the customer, offer to draft the reply and call this on request (or proactively ask "want me to draft a reply?" after researching a ticket — don't assume yes). It runs the same grounded generation + grounding-verifier pipeline the rest of the app uses, so the result is already customer-safe (internal sources are firewalled out during generation, not by you). Call search_playbooks first and pass its id as playbookId ONLY if one clearly applies; never invent an id. When the tool returns, present the draft field back to the agent VERBATIM in a quoted block — do not paraphrase, shorten, or "clean up" wording the verifier already checked — and always say plainly that it's a draft they still need to review and send themselves. Never claim or imply that it was sent.
 
 ## Creating, editing, or deleting a rule requires user confirmation
@@ -618,6 +633,23 @@ async function handleToolCall(
             slaStatus: c.slaStatus,
             priority: c.priority,
           })),
+        })
+      }
+
+      case "search_knowledge": {
+        const { query } = args as { query?: string }
+        if (!query?.trim()) {
+          return toolError("Give me a question or keywords to search the knowledge base with.", "Empty query")
+        }
+        const { snippets, warning } = await searchKnowledgeWithDiagnostics(email, origin, query, 12)
+        return toolSuccess({
+          results: snippets.map((s) => ({
+            title: s.title,
+            source: s.source,
+            url: s.url,
+            excerpt: s.text,
+          })),
+          ...(warning ? { _warnings: [warning] } : {}),
         })
       }
 

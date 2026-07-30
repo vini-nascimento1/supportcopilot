@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-07-29-n",
+    date: "2026-07-29",
+    title: "Ask the AI Assistant a knowledge question without a ticket",
+    description:
+      "Previously the only way to search your Notion/knowledge base through the AI Assistant was to attach a specific Intercom ticket. Now you can just ask — \"what does our W-8BEN article say?\" — with no ticket needed.",
+  },
+  {
     id: "seed-2026-07-29-m",
     date: "2026-07-29",
     title: "Notion grounding actually works now — it silently didn't before",
