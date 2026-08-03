@@ -8,7 +8,6 @@ import { getFreshNotionMcpToken } from "@/lib/notion-mcp-auth-server"
 import { searchNotionViaMcp } from "@/lib/notion-mcp-client"
 import { classifyNotionSnippetUse, type NotionSnippet } from "@/lib/notion-retrieval"
 import { getAgentNameAndAdminId } from "@/lib/auth"
-import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
 import { resolveToneForAgentEmail } from "@/lib/agent-tone"
 import {
   buildSystemPrompt,
@@ -18,9 +17,12 @@ import {
   streamChatCompletion,
   buildVerifierGroundingContext,
   buildDraftVerifierMessages,
+  getTextDraftModel,
+  getAuxDraftModel,
   REPLY_STYLE_NUDGE,
   type OpenAIMessage,
 } from "@/lib/draft-ai"
+import { withAiSlot, openaiFetch, openaiApiKey } from "@/lib/ai-throttle"
 import type { ConditionTree } from "@/lib/automation/types"
 
 export const dynamic = "force-dynamic"
@@ -47,8 +49,6 @@ export const maxDuration = 90
 // Intercom failures → included as _warnings in the tool data, not silently dropped
 //───────────────────────────────────────────────────────────────────────────────
 
-const VERBOO_API_KEY = process.env.VERBOO_API_KEY
-const VERBOO_BASE_URL = process.env.VERBOO_BASE_URL ?? "https://code.verboo.ai/router/v1"
 // Research (research_ticket + a couple of follow-up lookups + synthesis) needs
 // more rounds and more per-call thinking time than a quick "create this rule"
 // exchange — both were previously tuned only for the latter.
@@ -729,10 +729,9 @@ async function handleToolCall(
           )
         }
 
-        const [playbooksData, agentInfo, provider, toneResolution] = await Promise.all([
+        const [playbooksData, agentInfo, toneResolution] = await Promise.all([
           getPlaybooksDashboardData(),
           getAgentNameAndAdminId(email),
-          resolveProviderForAgentEmail(email),
           resolveToneForAgentEmail(email),
         ])
         const { name: agentName, intercomAdminId } = agentInfo
@@ -767,7 +766,7 @@ async function handleToolCall(
 
         let draft = ""
         try {
-          for await (const chunk of streamChatCompletion(draftMessages, { provider: provider ?? undefined })) {
+          for await (const chunk of streamChatCompletion(draftMessages)) {
             draft += chunk
           }
         } catch (e) {
@@ -788,9 +787,9 @@ async function handleToolCall(
           let verified = ""
           for await (const chunk of streamChatCompletion(buildDraftVerifierMessages(verifierSourceMessages, draft), {
             maxTokens: 4096,
-            temperature: 0,
-            model: provider?.auxModel,
-            provider: provider ?? undefined,
+            // Grounding check, not a rewrite — no reasoning budget needed.
+            reasoningEffort: "none",
+            model: getAuxDraftModel(),
           })) {
             verified += chunk
           }
@@ -824,9 +823,13 @@ async function handleToolCall(
   }
 }
 
-// ── Verboo Router helper ────────────────────────────────────────────────────
+// ── Tool-calling round-trip helper ──────────────────────────────────────────
 
-async function callVerboo(
+// Non-streaming completion for the tool loop. Shares the app's OpenAI client and
+// throttle with drafting, so an agent chatting here can't stampede the org's
+// rate limit alongside a bulk draft run. The drafting path in this same route
+// goes through streamChatCompletion instead, which throttles itself.
+async function callModel(
   messages: Array<Record<string, unknown>>,
   options?: { tool_choice?: "auto" | "none" }
 ): Promise<{
@@ -837,22 +840,25 @@ async function callVerboo(
   const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
 
   try {
-    const res = await fetch(`${VERBOO_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${VERBOO_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "deepseek-v4-flash",
-        max_tokens: 4096,
-        stream: false,
-        messages,
-        tools: TOOLS,
-        tool_choice: options?.tool_choice ?? "auto",
-      }),
-      signal: controller.signal,
-    })
+    const res = await withAiSlot(
+      () =>
+        openaiFetch("chat/completions", {
+          method: "POST",
+          body: JSON.stringify({
+            model: getTextDraftModel(),
+            // Covers reasoning tokens too — a starved budget returns empty
+            // content and the loop would report "I'm not sure how to respond."
+            max_completion_tokens: 8192,
+            reasoning_effort: "low",
+            stream: false,
+            messages,
+            tools: TOOLS,
+            tool_choice: options?.tool_choice ?? "auto",
+          }),
+          signal: controller.signal,
+        }),
+      controller.signal
+    )
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "unknown")
@@ -1017,7 +1023,7 @@ async function processToolCalls(
   }
 }
 
-// Drives the actual Verboo round-trip loop once `messages` has no pending
+// Drives the actual model round-trip loop once `messages` has no pending
 // confirmation in flight — either a fresh user turn, or resumed right after
 // a confirm/decline resolved the previous round's tool calls.
 function dedupeToolsUsed(names: string[]): string[] {
@@ -1035,7 +1041,7 @@ async function continueConversation(
 
   while (rounds < MAX_TOOL_ROUNDS) {
     rounds++
-    const response = await callVerboo(messages)
+    const response = await callModel(messages)
 
     if (!response.tool_calls || response.tool_calls.length === 0) {
       return NextResponse.json({
@@ -1070,7 +1076,7 @@ async function continueConversation(
 
   // Max tool rounds reached — ask for a final summary without tool access.
   try {
-    const finalResponse = await callVerboo(messages, { tool_choice: "none" })
+    const finalResponse = await callModel(messages, { tool_choice: "none" })
     return NextResponse.json({
       message: finalResponse.content ?? "I completed the actions but couldn't generate a summary.",
       toolsUsed: dedupeToolsUsed(toolsUsed),
@@ -1097,7 +1103,7 @@ export async function POST(req: Request) {
   } | null
   if (!body) return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
 
-  if (!VERBOO_API_KEY) return NextResponse.json({ error: "VERBOO_API_KEY not configured" }, { status: 500 })
+  if (!openaiApiKey()) return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 })
 
   const { origin } = new URL(req.url)
   const ctx: AgentCtx = { db, agentId, email: email ?? "", origin }

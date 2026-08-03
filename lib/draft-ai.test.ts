@@ -13,7 +13,9 @@ import {
   buildSystemPrompt,
   buildUserMessage,
   buildVisionEvidenceMessages,
-  selectModel,
+  getTextDraftModel,
+  getAuxDraftModel,
+  getDefaultReasoningEffort,
 } from "./draft-ai"
 import type { OpenAIMessage } from "./draft-ai"
 import type { NotionSnippet } from "./notion-retrieval"
@@ -249,37 +251,35 @@ const multimodalConvo = {
   messages: [{ role: "customer", body: "help" }],
 }
 
-describe("selectModel", () => {
-  it("returns the flash model when every message has string content", () => {
-    const messages: OpenAIMessage[] = [
-      { role: "system", content: "you are a copilot" },
-      { role: "user", content: "Customer: Jane\nhelp" },
-    ]
-    expect(selectModel(messages)).toBe("deepseek-v4-flash")
+describe("model configuration", () => {
+  // There is no text-vs-vision routing any more: the default model is
+  // multimodal, so one model serves string turns and image_url turns alike.
+  it("defaults both the text and aux models to Luna", () => {
+    expect(getTextDraftModel()).toBe("gpt-5.6-luna")
+    expect(getAuxDraftModel()).toBe("gpt-5.6-luna")
   })
 
-  it("returns the vision model when a user message has an image_url part", () => {
-    const messages: OpenAIMessage[] = [
-      { role: "system", content: "you are a copilot" },
-      {
-        role: "user",
-        content: [
-          { type: "text", text: "Customer: Jane\nhelp" },
-          { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } },
-        ],
-      },
-    ]
-    expect(selectModel(messages)).toBe("qwen3.6-27b")
+  it("honours env overrides for each model independently", () => {
+    const prevText = process.env.OPENAI_TEXT_MODEL
+    const prevAux = process.env.OPENAI_AUX_MODEL
+    process.env.OPENAI_TEXT_MODEL = "gpt-5.6-terra"
+    process.env.OPENAI_AUX_MODEL = "gpt-5.4-nano"
+    try {
+      expect(getTextDraftModel()).toBe("gpt-5.6-terra")
+      expect(getAuxDraftModel()).toBe("gpt-5.4-nano")
+    } finally {
+      if (prevText === undefined) delete process.env.OPENAI_TEXT_MODEL
+      else process.env.OPENAI_TEXT_MODEL = prevText
+      if (prevAux === undefined) delete process.env.OPENAI_AUX_MODEL
+      else process.env.OPENAI_AUX_MODEL = prevAux
+    }
   })
 
-  it("returns the flash model for array content with only text parts (no image)", () => {
-    const messages: OpenAIMessage[] = [
-      {
-        role: "user",
-        content: [{ type: "text", text: "Customer: Jane\nhelp" }],
-      },
-    ]
-    expect(selectModel(messages)).toBe("deepseek-v4-flash")
+  // gpt-5.x rejects `temperature`; reasoning effort is the knob that replaced it,
+  // and it must stay low by default so drafts don't spend the token budget
+  // thinking before any reply text is emitted.
+  it("defaults reasoning effort to low", () => {
+    expect(getDefaultReasoningEffort()).toBe("low")
   })
 })
 
@@ -354,11 +354,13 @@ describe("buildUserMessage", () => {
     expect(text).toContain("Customer image evidence")
     expect(text).toContain("expired ID error")
 
+    // The extracted evidence replaces the images entirely, so the draft turn
+    // carries no image_url part — the point of the two-step flow.
     const messages: OpenAIMessage[] = [
       { role: "system", content: "you are a copilot" },
       { role: "user", content: result },
     ]
-    expect(selectModel(messages)).toBe("deepseek-v4-flash")
+    expect(messages.every((m) => typeof m.content === "string")).toBe(true)
   })
 })
 
@@ -371,7 +373,10 @@ describe("buildVisionEvidenceMessages", () => {
     expect(messages).toHaveLength(2)
     expect(messages[1].role).toBe("user")
     expect(Array.isArray(messages[1].content)).toBe(true)
-    expect(selectModel(messages)).toBe("qwen3.6-27b")
+    // The image rides along as an image_url part; the model reading it is the
+    // aux model, passed explicitly by buildGroundedDraftUserMessage.
+    const parts = messages[1].content as { type: string }[]
+    expect(parts.some((p) => p.type === "image_url")).toBe(true)
   })
 })
 

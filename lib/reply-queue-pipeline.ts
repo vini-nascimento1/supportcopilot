@@ -20,6 +20,7 @@ import {
   buildAgentGreeting,
   hasAgentPersonallyReplied,
   streamChatCompletion,
+  getAuxDraftModel,
   REPLY_STYLE_NUDGE,
   type OpenAIMessage,
 } from "@/lib/draft-ai"
@@ -36,13 +37,12 @@ import {
   recordSuggestionAttempts,
   type SuggestionSource,
 } from "@/lib/reply-queue-store"
-import { resolveProviderForAgentId } from "@/lib/ai-provider"
 import { resolveToneForAgentId } from "@/lib/agent-tone"
 import { stripEmDashes } from "@/lib/tone-presets"
 
 // The always-on reply-queue pipeline — runs off the Intercom webhook (in the
 // background via `after()`). Composes the existing brain: gate -> Notion
-// ai_search -> deepseek generation -> persist a suggestion. ASSIGNED-ONLY: it
+// ai_search -> generation -> persist a suggestion. ASSIGNED-ONLY: it
 // only drafts for conversations owned by one of our agents (the unassigned
 // workspace firehose is skipped — see the gate in computeAndPersistSuggestion).
 // DRAFT-ONLY: it ONLY writes a suggested_replies row. It never sends, never
@@ -137,7 +137,7 @@ export type PipelineOutcome = {
 // Compute and persist the live suggestion for a single conversation (the
 // customer-branch brain): resolve the owner from the conversation's current
 // assignee -> fetch conversation + playbooks -> gate -> Notion ai_search
-// (assigned only) -> deepseek generation -> upsert the suggestion row.
+// (assigned only) -> generation -> upsert the suggestion row.
 //
 // Shared by BOTH the webhook pipeline (`runReplyQueuePipeline`, customer branch)
 // and the assign endpoint (`/api/reply-queue/assign`). On the assign path the
@@ -182,9 +182,6 @@ export async function computeAndPersistSuggestion(
   // off a duplicate draft for the same conversation. Best-effort; never blocks.
   await recordSuggestionAttempts([conversationId]).catch(() => {})
 
-  // If this agent has set a personal AI key, route their autonomous drafts
-  // through it (own quota, bypasses the shared Verboo throttle).
-  const provider = (await resolveProviderForAgentId(owner.id)) ?? undefined
   // Personal reply-tone preference (Settings → Reply tone), if set.
   const { instruction: toneInstruction, stripEmDashes: shouldStripEmDashes } =
     await resolveToneForAgentId(owner.id)
@@ -199,7 +196,7 @@ export async function computeAndPersistSuggestion(
     .filter(Boolean)
     .join(" ")
 
-  // Gate — reuse the canvas-bootstrap routing (Verboo error → keyword fallback).
+  // Gate — reuse the canvas-bootstrap routing (model error → keyword fallback).
   const gate = await classifyPlaybookMatch(ticketText, playbooksData.allRows)
   const matched: PlaybookListItem | null =
     gate.reason === "error"
@@ -252,11 +249,10 @@ export async function computeAndPersistSuggestion(
   let systemPrompt = notionHadHits
     ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied, greetingInjected, toneInstruction)
     : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied, greetingInjected, toneInstruction)
-  // Steer any model away from emitting its action plan as a checklist and
-  // asking to proceed — output just the reply. (Most pronounced on the OpenAI
-  // gpt-5 family, but good hygiene for the shared model too.)
+  // Steer the model away from emitting its action plan as a checklist and
+  // asking to proceed — output just the reply.
   systemPrompt += `\n\n${REPLY_STYLE_NUDGE}`
-  const userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail, provider)
+  const userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail)
   const messages: OpenAIMessage[] = [
     { role: "system", content: systemPrompt },
     { role: "user", content: userMessage },
@@ -264,7 +260,7 @@ export async function computeAndPersistSuggestion(
 
   let body = ""
   try {
-    for await (const chunk of streamChatCompletion(messages, { provider })) body += chunk
+    for await (const chunk of streamChatCompletion(messages)) body += chunk
   } catch {
     return { handled: false, action: "skipped", reason: "generation failed" }
   }
@@ -283,9 +279,10 @@ export async function computeAndPersistSuggestion(
     ]
     for await (const chunk of streamChatCompletion(buildDraftVerifierMessages(verifierSourceMessages, body), {
       maxTokens: 4096,
-      temperature: 0,
-      model: provider?.auxModel,
-      provider,
+      // A factual-grounding pass, not a rewrite — no reasoning budget needed,
+      // and none of it can be spent before the corrected draft is emitted.
+      reasoningEffort: "none",
+      model: getAuxDraftModel(),
     })) {
       verifiedBody += chunk
     }

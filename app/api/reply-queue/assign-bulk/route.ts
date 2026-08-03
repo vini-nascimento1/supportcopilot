@@ -28,7 +28,7 @@ const BULK_MAX = 15
 //
 // Draft generation for the newly-assigned ids runs in the BACKGROUND via
 // after(), exactly like /api/reply-queue/generate — it's throttled by the
-// Verboo gate and can take a while, so the response returns as soon as the
+// shared-key gate and can take a while, so the response returns as soon as the
 // assignment writes land and drafts surface on the next Queue poll.
 // DRAFT-ONLY in that background half: only the assignment writes above are
 // synchronous, and only a suggested_replies row is ever written for the

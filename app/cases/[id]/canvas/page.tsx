@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic"
 // from Intercom (cases in the DB is metadata-only). Layout persists in
 // localStorage keyed by conversation id.
 //
-// The playbook match (Verboo classifier call) is NOT computed here — it's a
+// The playbook match (the gate classifier call) is NOT computed here — it's a
 // live LLM round trip and blocking the page on it made every case open feel
 // frozen. CaseCanvas fetches it client-side after the page has painted
 // (see /api/canvas/playbook-match).

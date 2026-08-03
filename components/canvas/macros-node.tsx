@@ -145,7 +145,7 @@ export function MacrosNode({ id, data, selected }: NodeProps<MacrosNodeType>) {
     })
   }, [])
 
-  // Adapt a macro to THIS case via deepseek. Streams a draft into an inline,
+  // Adapt a macro to THIS case via the model. Streams a draft into an inline,
   // editable preview under the row. Draft-only: nothing is ever sent here.
   const adapt = useCallback(
     async (m: MacroRow) => {

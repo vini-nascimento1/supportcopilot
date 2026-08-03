@@ -15,14 +15,13 @@ import {
 import type { OpenAIMessage } from "@/lib/draft-ai"
 import { encodeImageAttachments } from "@/lib/attachments"
 import { retrieveNotionSnippets } from "@/lib/notion-retrieval-server"
-import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
 import { resolveToneForAgentEmail } from "@/lib/agent-tone"
 
 // ── Route handler ──────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  if (!process.env.VERBOO_API_KEY) {
-    return new Response("VERBOO_API_KEY is not configured", { status: 503 })
+  if (!process.env.OPENAI_API_KEY) {
+    return new Response("OPENAI_API_KEY is not configured", { status: 503 })
   }
 
   let body: {
@@ -69,8 +68,6 @@ export async function POST(req: NextRequest) {
     : []
 
   const { name: agentName, intercomAdminId } = await getAgentNameAndAdminId(email)
-  // Route through this agent's personal AI key if they've set one.
-  const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
   // Personal reply-tone preference (Settings → Reply tone), if set.
   const { instruction: toneInstruction } = await resolveToneForAgentEmail(email)
 
@@ -109,12 +106,11 @@ export async function POST(req: NextRequest) {
         : buildSystemPrompt(playbook, responseTemplates, agentName, articles, hasAgentReplied, false, toneInstruction)
 
     const images = await encodeImageAttachments(conversation.messages)
-    userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail, provider)
+    userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail)
   }
 
-  // Steer any model away from emitting its action plan as a checklist and asking
-  // to proceed — output just the reply. (Most pronounced on the OpenAI gpt-5
-  // family, but good hygiene for the shared model too.)
+  // Steer the model away from emitting its action plan as a checklist and asking
+  // to proceed — output just the reply.
   systemPrompt += `\n\n${REPLY_STYLE_NUDGE}`
 
   const encoder = new TextEncoder()
@@ -128,8 +124,8 @@ export async function POST(req: NextRequest) {
         ]
 
         // Pass the request signal so a client cancel/disconnect aborts the
-        // upstream Verboo stream instead of leaving it running.
-        for await (const chunk of streamChatCompletion(messages, { signal: req.signal, provider })) {
+        // upstream model stream instead of leaving it running.
+        for await (const chunk of streamChatCompletion(messages, { signal: req.signal })) {
           controller.enqueue(encoder.encode(chunk))
         }
       } catch (err) {

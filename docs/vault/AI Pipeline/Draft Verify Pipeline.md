@@ -88,10 +88,14 @@ The example rewrite ("I've checked your account" → "I'll look into your accoun
 
 ## Models & routing
 
-- Default text model: `deepseek-v4-flash`, routed through a shared internal router nicknamed "Verboo," throttled to 30 requests/minute (`lib/verboo-throttle.ts`) so one busy agent can't starve the rest of the team.
-- Default vision model: `qwen3.6-27b`.
-- The **aux model** (used for the verifier and for vision) falls back to the main text model if the agent hasn't configured one explicitly.
-- **Personal AI Key**: an agent can supply their own OpenAI-compatible API key in Settings (see [[Settings and Profile]]). It's stored encrypted in `agents.personal_ai_key_enc`, decrypted server-side via `lib/provider-crypto.ts` (`decryptSecret()`, requires the `PROVIDER_ENCRYPTION_KEY` env var — 32 bytes, hex or base64). A configured personal key bypasses the shared 30 req/min Verboo cap entirely and defaults to GPT-5-nano if the agent hasn't picked a specific model.
+Everything runs on OpenAI, on **one Fanvue org key** (`OPENAI_API_KEY`, configured server-side). There is no per-agent key and no per-agent model: the personal-AI-key feature was removed on 2026-08-03 once Fanvue provisioned a key for the whole team. Model choice is an env var, not a user setting.
+
+- **Default text model**: `gpt-5.6-luna` (`OPENAI_TEXT_MODEL`). It's multimodal, so there is **no separate vision model any more** — the same model handles text turns and pasted screenshots. The old `deepseek-v4-flash` / `qwen3.6-27b` split and the `selectModel()` helper that chose between them are gone.
+- **Aux model**: `gpt-5.6-luna` by default (`OPENAI_AUX_MODEL`), used for the narrow non-creative calls — the draft verifier, screenshot-evidence extraction, the playbook gate and triage keyword expansion. Kept as its own knob so cost can be cut there without touching reply quality.
+- **No temperature**: the gpt-5.x family rejects `temperature` outright (400) and requires `max_completion_tokens` instead of `max_tokens`. `reasoning_effort` replaced it — `low` for reply generation (`OPENAI_REASONING_EFFORT`), `none` for the aux/JSON calls. Reasoning tokens are billed as output **and** count against the completion budget, so too small a cap gets spent thinking and returns an empty body; that's why the default budget is 8192 rather than 4096.
+- **Structured outputs** replaced `temperature: 0` where determinism mattered: `GATE_RESPONSE_SCHEMA` in `lib/playbook-gate.ts` and the expansion schema in `lib/triage/expand.ts` pin the JSON shape via `response_format`. Both keep their defensive parsers as a fallback and still degrade to the keyword matcher on any failure.
+- **Throttle** (`lib/ai-throttle.ts`): bounds in-flight requests (`AI_MAX_CONCURRENCY`) and starts per rolling window (`AI_MAX_PER_WINDOW` / `AI_WINDOW_MS`), so bulk drafting, the webhook pipeline and the queue backfill can't stampede the org's rate limit. Every call in the app passes through it — with one shared key there is no longer any path that bypasses it. On OpenAI the real ceiling is tokens-per-minute for the org's usage tier; the defaults are conservative placeholders, meant to be raised once the actual limits for the key are read off the OpenAI dashboard.
+- **Removed 2026-08-03 — the personal AI key.** Agents used to be able to paste their own OpenAI key in Settings to get off a rate-limited shared router. Fanvue now provides one org key for everyone, so the whole feature is gone: `lib/ai-provider.ts`, `lib/provider-crypto.ts`, `app/api/agent/provider/`, the Settings card, the `PROVIDER_ENCRYPTION_KEY` env var, and the `agents.personal_ai_*` columns. `streamChatCompletion()` no longer takes a `provider` option. If a per-agent key is ever wanted again, it's a rebuild, not a flag flip.
 
 ## Timeouts & reliability
 
@@ -127,13 +131,12 @@ The actual customer send happens through `/api/draft/send` (the same human-gated
 
 ## Key files
 
-- `lib/draft-ai.ts` — prompt builders, `streamChatCompletion()`, model selection
+- `lib/draft-ai.ts` — prompt builders, `streamChatCompletion()`, `getTextDraftModel()` / `getAuxDraftModel()` / `getDefaultReasoningEffort()`
 - `lib/playbook-gate.ts` — `buildGatePrompt()`, `classifyPlaybookMatch()`, `GATE_CONFIDENCE_THRESHOLD`
 - `lib/reply-queue.ts` — `deriveRiskBand()`, `isSendLocked()`, `hasCapabilityGap()`, `LOCKED_CATEGORIES`
 - `lib/reply-queue-pipeline.ts` — `computeAndPersistSuggestion()`, `runReplyQueuePipeline()`
 - `lib/reply-queue-store.ts` — `upsertPendingSuggestion()`, `resolveSuggestionOnReply()`, `logReplyQueueEvent()`, `getPendingSuggestionsForAgent()`
-- `lib/verboo-throttle.ts` — shared 30 req/min throttle for the default provider
-- `lib/provider-crypto.ts` — `decryptSecret()` / `encryptSecret()` for the Personal AI Key
+- `lib/ai-throttle.ts` — shared-key throttle + the shared OpenAI client (`openaiFetch()`, `openaiApiKey()`, `openaiBaseUrl()`)
 - `app/api/draft/route.ts` — manual Generate/Improve endpoint
 - `app/api/draft/send/route.ts` — human-gated Intercom send
 - `app/api/reply-queue/resolve/route.ts` — queue bookkeeping after a send

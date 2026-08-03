@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-03-a",
+    date: "2026-08-03",
+    title: "Every AI draft now runs on a newer, sharper model",
+    description:
+      "Drafts, the Case copilot, the AI Assistant, screenshot reading and the playbook matcher all moved onto the latest GPT-5.6 Luna model. Expect better reasoning on tricky tickets and fewer garbled screenshot readings.",
+  },
+  {
     id: "seed-2026-07-29-n",
     date: "2026-07-29",
     title: "Ask the AI Assistant a knowledge question without a ticket",

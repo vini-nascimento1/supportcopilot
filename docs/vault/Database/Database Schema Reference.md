@@ -6,7 +6,7 @@ updated: 2026-07-29
 
 # Database Schema Reference
 
-Supabase Postgres schema for the Fanvue Support Copilot app (project `fanvue-support-copilot`, ref `sarbmqumaadpozmpenyr`). There is no `supabase/migrations/` folder checked into this repo — the schema lives only in the remote Supabase project, applied through 25 migrations (`init` → `agents_personal_ai_aux_model`, 2026-06-06 to 2026-07-26). This page was verified directly against the live schema (`list_tables`, `pg_indexes`) and the applied migration history, not against local SQL files, since none exist in-tree.
+Supabase Postgres schema for the Fanvue Support Copilot app (project `fanvue-support-copilot`, ref `sarbmqumaadpozmpenyr`). There is no `supabase/migrations/` folder checked into this repo — the schema lives only in the remote Supabase project, applied through 26 migrations (`init` → `drop_agents_personal_ai_provider`, 2026-06-06 to 2026-08-03). This page was verified directly against the live schema (`list_tables`, `pg_indexes`) and the applied migration history, not against local SQL files, since none exist in-tree.
 
 All tables below have Row Level Security enabled (`rls_enabled: true`). See [[Auth and Session]] for how agent identity maps into RLS policies.
 
@@ -14,7 +14,7 @@ All tables below have Row Level Security enabled (`rls_enabled: true`). See [[Au
 
 ### `agents`
 
-One row per support agent, created on first Supabase Auth login. Holds identity, OAuth tokens for connected integrations, and per-agent preferences (tone, personal AI key, triage settings). RLS restricts each agent to reading/writing only their own row. See [[Auth and Session]], [[Settings and Profile]], [[Personal API key]] equivalent — cross-reference [[Tech Stack]] for the Supabase Auth setup.
+One row per support agent, created on first Supabase Auth login. Holds identity, OAuth tokens for connected integrations, and per-agent preferences (tone, triage settings). RLS restricts each agent to reading/writing only their own row. See [[Auth and Session]], [[Settings and Profile]] — cross-reference [[Tech Stack]] for the Supabase Auth setup.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -36,15 +36,12 @@ One row per support agent, created on first Supabase Auth login. Holds identity,
 | notion_mcp_token_expires_at | timestamptz | nullable — access token expiry (UTC) |
 | notion_mcp_refresh_expires_at | timestamptz | nullable — absolute refresh-token expiry (~30 days), does not slide |
 | triage_prefs | jsonb | nullable — per-agent triage keyword/filter prefs, see [[Triage System]] |
-| personal_ai_key_enc | text | nullable — AES-256-GCM encrypted personal OpenAI-compatible key; NULL = use shared app key; never returned to client |
-| personal_ai_base_url | text | nullable — defaults to `https://api.openai.com/v1` when a key is set |
-| personal_ai_model | text | nullable — model id for text + vision; defaults to `gpt-5-nano` when a key is set |
-| personal_ai_enabled | boolean | default `true` — false pauses the personal key without deleting it |
 | tone_preset | text | nullable — `professional`/`warm`/`human`/`custom`, NULL = default generic warmth rule |
 | tone_custom | text | nullable — free text, used only when `tone_preset = 'custom'`, capped 500 chars app-side |
-| personal_ai_aux_model | text | nullable — model for verifier + vision-extraction sub-calls; falls back to `personal_ai_model` |
 
-**Read/write:** `lib/auth.ts`, `lib/agent.ts`, `lib/agent-tone.ts`, `lib/ai-provider.ts`, `lib/drafts.ts`, `lib/automation/*.ts`, `lib/triage/store.ts`, `lib/notion-mcp-auth-server.ts`; API routes `app/api/agent/provider`, `app/api/agent/tone`, `app/api/agents`, `app/api/auth/callback`, `app/api/auth/slack/callback`, `app/api/auth/notion/callback`, `app/api/settings/update`, `app/api/cases`, `app/api/reply-queue*`, `app/api/playbook-dismissals`, `app/api/automation/alerts`, `app/api/cron/refresh-metrics`, `app/api/metrics`, `app/api/ai/chat`.
+**Dropped 2026-08-03** (migration `drop_agents_personal_ai_provider`): `personal_ai_key_enc`, `personal_ai_base_url`, `personal_ai_model`, `personal_ai_aux_model`, `personal_ai_enabled`. These backed the per-agent "Personal AI key" feature, removed when Fanvue provisioned a single org OpenAI key for the whole app — the model is now an env var, not a per-agent setting. See [[Draft Verify Pipeline]].
+
+**Read/write:** `lib/auth.ts`, `lib/agent.ts`, `lib/agent-tone.ts`, `lib/drafts.ts`, `lib/automation/*.ts`, `lib/triage/store.ts`, `lib/notion-mcp-auth-server.ts`; API routes `app/api/agent/tone`, `app/api/agents`, `app/api/auth/callback`, `app/api/auth/slack/callback`, `app/api/auth/notion/callback`, `app/api/settings/update`, `app/api/cases`, `app/api/reply-queue*`, `app/api/playbook-dismissals`, `app/api/automation/alerts`, `app/api/cron/refresh-metrics`, `app/api/metrics`, `app/api/ai/chat`.
 
 ## AI reply pipeline
 

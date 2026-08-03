@@ -21,7 +21,6 @@ import { getAllCaseTools } from "@/lib/case-tools-db"
 import { refreshTokenExpired } from "@/lib/notion-mcp-auth"
 import { CaseToolsSettings } from "@/components/case-tools-settings"
 import { CanvasModeSettings } from "@/components/canvas-mode-settings"
-import { PersonalAiKeySettings } from "@/components/personal-ai-key-settings"
 import { ReplyToneSettings } from "@/components/reply-tone-settings"
 import { SettingsForm } from "./settings-form"
 
@@ -215,10 +214,11 @@ export default async function SettingsPage({
             <CaseToolsSettings tools={caseTools} />
           </TabsContent>
 
-          {/* AI & Drafting — voice and model behind generated replies */}
+          {/* AI & Drafting — voice behind generated replies. The model itself is
+              app-wide (one Fanvue OpenAI key, configured server-side), so there
+              is nothing per-agent to configure here beyond tone. */}
           <TabsContent value="ai" className="flex flex-col gap-6 pt-6">
             <ReplyToneSettings />
-            <PersonalAiKeySettings />
           </TabsContent>
 
           {/* Integrations — connected third-party accounts */}

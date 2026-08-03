@@ -36,6 +36,32 @@ export function buildGatePrompt(
   ]
 }
 
+// Structured-output contract for the verdict. The gate used to lean on
+// `temperature: 0` for a well-formed JSON object, which gpt-5.x rejects — the
+// model now has to emit exactly this shape instead. `strict` mode requires every
+// property listed in `required` and additionalProperties: false; a null match is
+// expressed as a nullable type rather than an omitted field.
+export const GATE_RESPONSE_SCHEMA = {
+  type: "json_schema" as const,
+  json_schema: {
+    name: "playbook_gate_verdict",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["match", "confidence", "reason"],
+      properties: {
+        match: {
+          type: ["string", "null"],
+          description: "The id of the single playbook that clearly applies, or null if none does.",
+        },
+        confidence: { type: "number", description: "0 to 1." },
+        reason: { type: "string", description: "Short justification." },
+      },
+    },
+  },
+}
+
 export type PlaybookGateResult = {
   playbookId: string | null
   confidence: number
@@ -78,31 +104,35 @@ export function parseGateResponse(
 export const GATE_CONFIDENCE_THRESHOLD = 0.6
 
 // Returns a verdict; on any failure returns reason "error" so callers can
-// fall back to the keyword matcher and never regress on a Verboo outage.
+// fall back to the keyword matcher and never regress on a model/API outage.
 export async function classifyPlaybookMatch(
   caseText: string,
   playbooks: PlaybookListItem[]
 ): Promise<PlaybookGateResult> {
-  // Dynamic import keeps pure functions free of server-only dependency chain.
-  const { withVerbooSlot, verbooFetch, verbooApiKey } = await import("@/lib/verboo-throttle")
+  // Dynamic imports keep the pure functions above free of the server-only
+  // dependency chain (both modules below are server-only).
+  const { withAiSlot, openaiFetch, openaiApiKey } = await import("@/lib/ai-throttle")
+  const { getAuxDraftModel } = await import("@/lib/draft-ai")
 
   // Without the API key there's nothing to call — fall through to keyword match.
-  if (!verbooApiKey() || playbooks.length === 0) {
+  if (!openaiApiKey() || playbooks.length === 0) {
     return { playbookId: null, confidence: 0, reason: "error" }
   }
 
-  // Route through the shared Verboo throttle so the gate can't add to a 429
+  // Route through the shared-key throttle so the gate can't add to a 429
   // stampede alongside the generation/verifier/backfill calls.
   try {
-    return await withVerbooSlot(async () => {
-      const res = await verbooFetch("chat/completions", {
+    return await withAiSlot(async () => {
+      const res = await openaiFetch("chat/completions", {
         method: "POST",
         body: JSON.stringify({
-          model: "deepseek-v4-flash",
+          model: getAuxDraftModel(),
           // 512, not 200: a smoke test showed 200 truncated the JSON verdict
           // mid-"reason", which then parses as unparseable → a real match dropped.
-          max_tokens: 512,
-          temperature: 0,
+          // Reasoning is off, so the whole budget goes to the visible JSON.
+          max_completion_tokens: 512,
+          reasoning_effort: "none",
+          response_format: GATE_RESPONSE_SCHEMA,
           stream: false,
           messages: buildGatePrompt(caseText, playbooks),
         }),

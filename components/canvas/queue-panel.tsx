@@ -324,7 +324,7 @@ export function QueuePanel({
 
   // Re-kick generation for an autonomous placeholder that's been stuck past
   // AUTONOMOUS_STUCK_AFTER_MS — the backfill loop kept retrying every poll and
-  // silently failing (commonly a transient Verboo error/rate-limit). Un-dismiss
+  // silently failing (commonly a transient API error/rate-limit). Un-dismiss
   // it too, in case the agent had previously hidden it.
   const retryAutonomous = useCallback(async (item: DraftingItem) => {
     try {

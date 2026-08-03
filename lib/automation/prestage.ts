@@ -9,8 +9,8 @@ import "server-only"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getConversationDetail, type ConversationDetail } from "@/lib/intercom"
 import { getPlaybooksDashboardData } from "@/lib/playbooks"
-import { hasAgentPersonallyReplied } from "@/lib/draft-ai"
-import { withVerbooSlot, verbooFetch, verbooApiKey } from "@/lib/verboo-throttle"
+import { hasAgentPersonallyReplied, getTextDraftModel } from "@/lib/draft-ai"
+import { withAiSlot, openaiFetch, openaiApiKey } from "@/lib/ai-throttle"
 
 // "Has THIS case's owning agent personally replied" — not "has any admin/bot
 // replied". Previously this prompt unconditionally forced the greeting every
@@ -59,14 +59,17 @@ function buildUserMessage(c: ConversationDetail, playbook?: { caseType: string; 
 }
 
 async function generate(system: string, user: string): Promise<string> {
-  // Shares the process-wide Verboo throttle with the gate + reply-queue pipeline
-  // so automation prestage can't contribute to a 429 stampede.
-  return withVerbooSlot(async () => {
-    const res = await verbooFetch("chat/completions", {
+  // Shares the process-wide shared-key throttle with the gate + reply-queue
+  // pipeline so automation prestage can't contribute to a 429 stampede.
+  return withAiSlot(async () => {
+    const res = await openaiFetch("chat/completions", {
       method: "POST",
       body: JSON.stringify({
-        model: "deepseek-v4-flash",
-        max_tokens: 1024,
+        model: getTextDraftModel(),
+        // Reply generation, so a little reasoning is worth it — but the budget
+        // has to cover reasoning tokens as well as the visible reply.
+        max_completion_tokens: 4096,
+        reasoning_effort: "low",
         stream: false,
         messages: [
           { role: "system", content: system },
@@ -136,7 +139,7 @@ async function persistDraft(conversationId: string, replyBody: string): Promise<
  * to the action runner.
  */
 export async function prestageDraft(conversationId: string | null): Promise<PrestageResult> {
-  if (!verbooApiKey()) return { applied: false, detail: "VERBOO_API_KEY not set" }
+  if (!openaiApiKey()) return { applied: false, detail: "OPENAI_API_KEY not set" }
   if (!conversationId) return { applied: false, detail: "no conversation id" }
   const db = getSupabaseAdminClient()
   if (!db) return { applied: false, detail: "no admin client" }

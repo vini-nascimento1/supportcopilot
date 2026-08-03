@@ -9,7 +9,6 @@ import {
   type OpenAIMessage,
   type OpenAIContentPart,
 } from "@/lib/draft-ai"
-import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
 
 export const dynamic = "force-dynamic"
 
@@ -31,10 +30,9 @@ export async function POST(request: Request) {
   if (!email) {
     return new Response("Authentication required", { status: 401 })
   }
-  if (!process.env.VERBOO_API_KEY) {
+  if (!process.env.OPENAI_API_KEY) {
     return new Response("AI is not configured (missing key)", { status: 500 })
   }
-  const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
 
   const body = await request.json().catch(() => null)
   const conversationId: string | undefined = body?.conversationId
@@ -131,9 +129,8 @@ ${playbookSection}${notionSection}
 - When asked for a customer-facing reply, follow Fanvue's tone: warm, first-person, "Hey! 👋 thanks for reaching out…", bold key steps, one clear call-to-action.`
 
   // When the latest user turn carries pasted images, build it as multimodal
-  // content (text + image_url parts). selectModel (inside streamChatCompletion)
-  // then routes image turns to the vision model and text-only turns to the
-  // fast deepseek-v4-flash path.
+  // content (text + image_url parts). No model routing is needed any more — the
+  // default model is multimodal, so the same one answers text and image turns.
   const hasImages = images.length > 0
   const windowed = messages.slice(-12)
   const outgoing: OpenAIMessage[] = windowed.map((m, i) => {
@@ -159,8 +156,8 @@ ${playbookSection}${notionSection}
     ...outgoing,
   ]
 
-  // Stream the answer back as plain text (same contract as /api/draft). The
-  // vision model is slow, so streaming lets a long answer render progressively
+  // Stream the answer back as plain text (same contract as /api/draft). Reading
+  // pasted images is slow, so streaming lets a long answer render progressively
   // instead of racing a hard timeout — which is what produced the recurring
   // "The AI took too long" failure when reading pasted images.
   const encoder = new TextEncoder()
@@ -169,7 +166,6 @@ ${playbookSection}${notionSection}
       try {
         for await (const chunk of streamChatCompletion(aiMessages, {
           maxTokens: MAX_TOKENS,
-          provider,
         })) {
           controller.enqueue(encoder.encode(chunk))
         }

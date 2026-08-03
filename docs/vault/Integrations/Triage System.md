@@ -6,7 +6,7 @@ updated: 2026-07-29
 
 The Triage System periodically sweeps Intercom's open-and-unassigned conversations into a ranked pool, so agents aren't limited to working only what's directly assigned to them. Each agent can filter the shared pool by keyword and audience and claim ("Assign to me") whatever best matches their own strengths, rather than waiting for a manual assignment.
 
-It is deliberately LLM-free: classification reuses the same keyword playbook matcher the live dashboard tip uses (`getTopMatches()` in `lib/case-intelligence.ts`), never a Verboo gate/generation call, so a cron running every few minutes can't burn LLM budget. The sweep only reads Intercom and writes to the app's own `triage_items` table — it never sends, assigns, or otherwise writes back to Intercom itself.
+It is deliberately LLM-free: classification reuses the same keyword playbook matcher the live dashboard tip uses (`getTopMatches()` in `lib/case-intelligence.ts`), never a model gate/generation call, so a cron running every few minutes can't burn LLM budget. The sweep only reads Intercom and writes to the app's own `triage_items` table — it never sends, assigns, or otherwise writes back to Intercom itself.
 
 ## The sweep (`lib/triage/sweep.ts`)
 

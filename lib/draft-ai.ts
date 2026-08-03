@@ -5,17 +5,12 @@ import {
   type NotionSnippet,
 } from "@/lib/notion-retrieval"
 import {
-  acquireVerbooSlot,
-  releaseVerbooSlot,
+  acquireAiSlot,
+  releaseAiSlot,
   parseRetryAfterMs,
-  verbooBaseUrl,
-  verbooApiKey,
-} from "@/lib/verboo-throttle"
-import type { AiProvider } from "@/lib/ai-provider"
-
-// Where an outbound completion is sent. Defaults to the shared Verboo router;
-// a personal AiProvider overrides base URL + key so an agent's own quota is used.
-type StreamEndpoint = { baseUrl: string; apiKey: string | undefined }
+  openaiBaseUrl,
+  openaiApiKey,
+} from "@/lib/ai-throttle"
 
 export type OpenAIContentPart =
   | { type: "text"; text: string }
@@ -26,12 +21,23 @@ export type OpenAIMessage = {
   content: string | OpenAIContentPart[]
 }
 
-const DEFAULT_TEXT_MODEL = "deepseek-v4-flash"
-const DEFAULT_VISION_MODEL = "qwen3.6-27b"
-const DEFAULT_DRAFT_TEMPERATURE = 0.2
+// Everything runs on OpenAI. Luna is the price-performance tier: multimodal, so
+// ONE model covers text and screenshots (no separate vision model any more), and
+// cheap enough to be the default for every agent on the shared key.
+const DEFAULT_TEXT_MODEL = "gpt-5.6-luna"
+// Narrow, non-creative calls (draft verifier, vision-evidence extraction). Same
+// model by default — it's already the cheap tier — but kept as its own knob so
+// cost can be cut further without touching reply generation.
+const DEFAULT_AUX_MODEL = "gpt-5.6-luna"
+
+// The gpt-5.x family REJECTS `temperature`; reasoning effort is the knob that
+// replaced it. "low" keeps drafts fast and cheap while still letting the model
+// think a little about playbook conditions; the aux/JSON callers pass "none" for
+// a straight non-reasoning response.
+const DEFAULT_REASONING_EFFORT = "low"
 
 // Reliability guards for the upstream streaming call. Historically a stalled or
-// rate-limited Verboo request had no timeout, no retry, and no abort path — the
+// rate-limited request had no timeout, no retry, and no abort path — the
 // stream reader blocked forever, so the Canvas "Generating…" state (and the
 // background reply-queue pipeline) hung with no way to cancel. All three are
 // overridable via env for ops tuning.
@@ -54,19 +60,18 @@ type DraftConversation = {
 
 type DraftImage = { name: string; dataUri: string }
 
-function numberFromEnv(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const parsed = Number(raw)
-  return Number.isFinite(parsed) ? parsed : fallback
-}
-
 export function getTextDraftModel(): string {
-  return process.env.VERBOO_TEXT_MODEL ?? DEFAULT_TEXT_MODEL
+  return process.env.OPENAI_TEXT_MODEL ?? DEFAULT_TEXT_MODEL
 }
 
-export function getVisionDraftModel(): string {
-  return process.env.VERBOO_VISION_MODEL ?? DEFAULT_VISION_MODEL
+/** Model for the narrow, non-creative calls: the draft verifier, vision-evidence
+    extraction, the playbook gate and triage keyword expansion. */
+export function getAuxDraftModel(): string {
+  return process.env.OPENAI_AUX_MODEL ?? DEFAULT_AUX_MODEL
+}
+
+export function getDefaultReasoningEffort(): string {
+  return process.env.OPENAI_REASONING_EFFORT ?? DEFAULT_REASONING_EFFORT
 }
 
 // ── Output-language lock ───────────────────────────────────────────────────
@@ -173,10 +178,10 @@ const AGENT_IDENTITY_RULES = `## You ARE the agent handling this — not a bot r
 
 `
 
-// Style guard for models (notably the OpenAI gpt-5 family) that tend to narrate
-// their internal plan as a bulleted checklist and then ask the customer to
-// confirm they may proceed — instead of just writing the reply. Injected only on
-// the personal-provider path so the shared-model prompts are unchanged.
+// Style guard for the gpt-5 family, which tends to narrate its internal plan as
+// a bulleted checklist and then ask the customer to confirm it may proceed —
+// instead of just writing the reply. Every drafting call site appends this (the
+// draft route, the reply-queue pipeline, and the AI chat route).
 export const REPLY_STYLE_NUDGE = `## Output the reply, not a plan
 - Output ONLY the customer-facing message — the exact text the customer should read, and nothing else.
 - Do NOT include an internal action plan, a numbered or bulleted list of steps you intend to take, or meta-commentary about your process ("Verify the payout status", "Check for holds", "I'll coordinate on our side", etc.). Those are your internal reasoning — they must never appear in the message.
@@ -500,18 +505,18 @@ export async function buildGroundedDraftUserMessage(
   conversation: DraftConversation,
   images: DraftImage[],
   hasAgentReplied = false,
-  hasKnownEmail = false,
-  provider?: AiProvider
+  hasKnownEmail = false
 ): Promise<string | OpenAIContentPart[]> {
   if (images.length === 0) return buildUserMessage(conversation, undefined, undefined, hasAgentReplied, hasKnownEmail)
 
   let imageEvidence = ""
   try {
     for await (const chunk of streamChatCompletion(buildVisionEvidenceMessages(conversation, images), {
-      model: provider ? provider.auxModel : getVisionDraftModel(),
+      model: getAuxDraftModel(),
       maxTokens: 1536,
-      temperature: 0,
-      provider,
+      // Reading facts off a screenshot needs no deliberation, and reasoning
+      // tokens would eat into the 1536 budget before any text is emitted.
+      reasoningEffort: "none",
     })) {
       imageEvidence += chunk
     }
@@ -778,18 +783,6 @@ Return the corrected draft now.`,
   ]
 }
 
-function messagesHaveImage(messages: OpenAIMessage[]): boolean {
-  return messages.some(
-    (m) =>
-      Array.isArray(m.content) &&
-      m.content.some((part) => part.type === "image_url")
-  )
-}
-
-export function selectModel(messages: OpenAIMessage[]): string {
-  return messagesHaveImage(messages) ? getVisionDraftModel() : getTextDraftModel()
-}
-
 // Transient statuses worth a retry (rate limit + upstream/gateway hiccups).
 function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504
@@ -824,16 +817,12 @@ function backoffDelay(
   })
 }
 
-// POST to Verboo with a connect (time-to-first-byte) timeout and bounded retry
+// POST to OpenAI with a connect (time-to-first-byte) timeout and bounded retry
 // on transient PRE-stream failures. Never retries once bytes are flowing — a
 // partial stream can't be safely replayed. Honours an external abort signal.
-async function openVerbooStream(
-  body: string,
-  signal?: AbortSignal,
-  endpoint?: StreamEndpoint
-): Promise<Response> {
-  const baseUrl = endpoint?.baseUrl ?? verbooBaseUrl()
-  const apiKey = endpoint?.apiKey ?? verbooApiKey()
+async function openCompletionStream(body: string, signal?: AbortSignal): Promise<Response> {
+  const baseUrl = openaiBaseUrl()
+  const apiKey = openaiApiKey()
   let attempt = 0
   for (;;) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
@@ -892,66 +881,50 @@ export async function* streamChatCompletion(
   options?: {
     maxTokens?: number
     model?: string
-    temperature?: number
+    // gpt-5.x reasoning knob: "none" | "low" | "medium" | "high" | "xhigh" | "max".
+    // Replaces the `temperature` option this used to take — gpt-5.x rejects
+    // temperature outright (400).
+    reasoningEffort?: string
     signal?: AbortSignal
-    // When set, route through this agent's personal OpenAI-compatible key
-    // instead of the shared Verboo router (and skip the shared-key throttle).
-    provider?: AiProvider
   }
 ): AsyncGenerator<string> {
-  const provider = options?.provider
-  // Model precedence: explicit override → personal provider's model → shared default.
-  const model =
-    options?.model ??
-    (provider
-      ? messagesHaveImage(messages)
-        ? provider.auxModel
-        : provider.textModel
-      : selectModel(messages))
+  // Model precedence: explicit override → the app-wide default. No image branch
+  // any more: Luna is multimodal, so the same model handles text turns and
+  // pasted screenshots.
+  const model = options?.model ?? getTextDraftModel()
 
-  // Request shape differs by provider. The shared Verboo router (DeepSeek/Qwen)
-  // takes the classic `max_tokens` + `temperature`. Personal keys target OpenAI,
-  // whose gpt-5 / o-series models REJECT both: they require `max_completion_tokens`
-  // and only accept the default temperature (sending any temperature → 400). So
-  // for a personal provider we use the modern OpenAI contract and omit temperature.
-  const maxTokens = options?.maxTokens ?? 4096
-  const body = JSON.stringify(
-    provider
-      ? { model, max_completion_tokens: maxTokens, stream: true, messages }
-      : {
-          model,
-          max_tokens: maxTokens,
-          temperature:
-            options?.temperature ??
-            numberFromEnv("VERBOO_DRAFT_TEMPERATURE", DEFAULT_DRAFT_TEMPERATURE),
-          stream: true,
-          messages,
-        }
-  )
+  // `max_completion_tokens` (gpt-5.x rejects `max_tokens`) and no temperature
+  // (also rejected — `reasoning_effort` is the knob instead).
+  //
+  // The budget covers REASONING TOKENS TOO, not just visible output: with a
+  // reasoning effort above "none", too small a cap gets spent thinking and the
+  // response comes back empty. Hence the roomier default.
+  const maxTokens = options?.maxTokens ?? 8192
+  const body = JSON.stringify({
+    model,
+    max_completion_tokens: maxTokens,
+    reasoning_effort: options?.reasoningEffort ?? getDefaultReasoningEffort(),
+    stream: true,
+    messages,
+  })
 
-  const endpoint: StreamEndpoint | undefined = provider
-    ? { baseUrl: provider.baseUrl, apiKey: provider.apiKey }
-    : undefined
-  // The shared-key throttle protects the shared Verboo quota only. A personal
-  // key has its own quota, so it bypasses the limiter entirely.
-  const useThrottle = !provider || provider.shared
-
-  // Hold one throttle slot for the whole generation — from the request through
-  // the last streamed byte — so concurrency is bounded by real in-flight streams,
-  // not just request starts. Released in the finally below on every exit path
-  // (done, stall, abort, throw).
-  if (useThrottle) await acquireVerbooSlot(options?.signal)
+  // Every generation in the app shares one org key, so every generation goes
+  // through the throttle. Hold one slot for the whole generation — from the
+  // request through the last streamed byte — so concurrency is bounded by real
+  // in-flight streams, not just request starts. Released in the finally below on
+  // every exit path (done, stall, abort, throw).
+  await acquireAiSlot(options?.signal)
   let slotReleased = false
   const releaseSlot = () => {
-    if (useThrottle && !slotReleased) {
+    if (!slotReleased) {
       slotReleased = true
-      releaseVerbooSlot()
+      releaseAiSlot()
     }
   }
 
   let res: Response
   try {
-    res = await openVerbooStream(body, options?.signal, endpoint)
+    res = await openCompletionStream(body, options?.signal)
   } catch (err) {
     releaseSlot()
     throw err

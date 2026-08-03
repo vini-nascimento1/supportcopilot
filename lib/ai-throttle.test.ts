@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 import {
-  acquireVerbooSlot,
-  releaseVerbooSlot,
-  withVerbooSlot,
+  acquireAiSlot,
+  releaseAiSlot,
+  withAiSlot,
   parseRetryAfterMs,
-} from "./verboo-throttle"
+  AI_THROTTLE_LIMITS,
+} from "./ai-throttle"
 
 describe("parseRetryAfterMs", () => {
   it("returns null for absent / empty / unparseable values", () => {
@@ -34,7 +35,7 @@ describe("parseRetryAfterMs", () => {
   })
 })
 
-describe("verboo slot gate", () => {
+describe("shared-key slot gate", () => {
   beforeEach(() => {
     vi.useRealTimers()
   })
@@ -42,60 +43,55 @@ describe("verboo slot gate", () => {
     vi.useRealTimers()
   })
 
-  it("caps concurrency: the (MAX_CONCURRENCY+1)th acquire waits until a release", async () => {
-    // Default MAX_CONCURRENCY is 3. Fill the three slots.
-    await acquireVerbooSlot()
-    await acquireVerbooSlot()
-    await acquireVerbooSlot()
+  it("caps concurrency: the (maxConcurrency+1)th acquire waits until a release", async () => {
+    // Read the cap off the module rather than hardcoding it — the defaults are
+    // env-tunable and get retuned as the org's rate limits change.
+    const cap = AI_THROTTLE_LIMITS.maxConcurrency
+    for (let i = 0; i < cap; i++) await acquireAiSlot()
 
-    let fourthResolved = false
-    const fourth = acquireVerbooSlot().then(() => {
-      fourthResolved = true
+    let extraResolved = false
+    const extra = acquireAiSlot().then(() => {
+      extraResolved = true
     })
 
     // Give the polling loop a couple of ticks — it must still be blocked.
     await new Promise((r) => setTimeout(r, 120))
-    expect(fourthResolved).toBe(false)
+    expect(extraResolved).toBe(false)
 
     // Freeing one slot lets the queued acquire through.
-    releaseVerbooSlot()
-    await fourth
-    expect(fourthResolved).toBe(true)
+    releaseAiSlot()
+    await extra
+    expect(extraResolved).toBe(true)
 
-    // Clean up the slots we still hold (3: two originals + the fourth).
-    releaseVerbooSlot()
-    releaseVerbooSlot()
-    releaseVerbooSlot()
+    // Clean up the slots we still hold (cap: the originals minus the one we
+    // released, plus the queued acquire that took its place).
+    for (let i = 0; i < cap; i++) releaseAiSlot()
   })
 
-  it("withVerbooSlot releases even when fn throws", async () => {
+  it("withAiSlot releases even when fn throws", async () => {
     await expect(
-      withVerbooSlot(async () => {
+      withAiSlot(async () => {
         throw new Error("boom")
       })
     ).rejects.toThrow("boom")
 
-    // If the slot leaked, four sequential acquires would deadlock. They resolve
-    // fast because the failed call released its slot.
-    await withVerbooSlot(async () => "ok")
-    await withVerbooSlot(async () => "ok")
-    await withVerbooSlot(async () => "ok")
-    await withVerbooSlot(async () => "ok")
+    // If the slot leaked, filling the pool sequentially would deadlock. These
+    // resolve fast because the failed call released its slot.
+    for (let i = 0; i <= AI_THROTTLE_LIMITS.maxConcurrency; i++) {
+      await withAiSlot(async () => "ok")
+    }
   })
 
   it("rejects a pending acquire when its abort signal fires", async () => {
     // Saturate concurrency so the next acquire has to wait.
-    await acquireVerbooSlot()
-    await acquireVerbooSlot()
-    await acquireVerbooSlot()
+    const cap = AI_THROTTLE_LIMITS.maxConcurrency
+    for (let i = 0; i < cap; i++) await acquireAiSlot()
 
     const controller = new AbortController()
-    const pending = acquireVerbooSlot(controller.signal)
+    const pending = acquireAiSlot(controller.signal)
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: "AbortError" })
 
-    releaseVerbooSlot()
-    releaseVerbooSlot()
-    releaseVerbooSlot()
+    for (let i = 0; i < cap; i++) releaseAiSlot()
   })
 })

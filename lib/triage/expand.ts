@@ -1,25 +1,61 @@
 import "server-only"
 
-// Triage keyword expansion — one Verboo call, triggered only when the agent
+// Triage keyword expansion — one model call, triggered only when the agent
 // saves triage_prefs with expand=true and their keywords changed (see
 // app/api/triage/prefs/route.ts, which caches the result in
 // triage_prefs.expandedTerms/expandedFor so this never runs on a normal
 // /api/triage read). Mirrors lib/automation/prestage.ts's `generate()`
-// pattern: non-streaming, throttled through the shared Verboo gate
-// (lib/verboo-throttle). NEVER throws — every caller treats [] as "expansion
+// pattern: non-streaming, throttled through the shared-key gate
+// (lib/ai-throttle). NEVER throws — every caller treats [] as "expansion
 // unavailable" and falls back to the literal keywords only
 // (lib/triage/match.ts filterAndRank already gates expandedTerms on `expand`).
 
-import { withVerbooSlot, verbooFetch, verbooApiKey } from "@/lib/verboo-throttle"
+import { withAiSlot, openaiFetch, openaiApiKey } from "@/lib/ai-throttle"
+import { getAuxDraftModel } from "@/lib/draft-ai"
 
 const MAX_TERMS = 40
 const MAX_TERM_LENGTH = 40
 
-const SYSTEM_PROMPT = `You expand support-ticket search keywords for a triage tool. Given a short list of keywords, produce up to ${MAX_TERMS} closely-related terms a customer might actually type when describing the same issue — synonyms, common misspellings, and everyday phrasing — across English, Portuguese and Spanish (Fanvue customers write in all three). Output STRICT JSON: an array of lowercase strings, and nothing else. No prose, no markdown, no explanation.`
+const SYSTEM_PROMPT = `You expand support-ticket search keywords for a triage tool. Given a short list of keywords, produce up to ${MAX_TERMS} closely-related terms a customer might actually type when describing the same issue — synonyms, common misspellings, and everyday phrasing — across English, Portuguese and Spanish (Fanvue customers write in all three). Every term must be lowercase.`
 
-// Find the first [...] block in a possibly noisy model response and parse it.
-// Returns null on any parse failure (missing brackets, invalid JSON, not an array).
+// Structured output replaces the old `temperature: 0` + "output STRICT JSON"
+// prompt instruction (gpt-5.x rejects temperature). The response is an object
+// rather than a bare array because strict json_schema requires an object root;
+// extractJsonArray below still runs as the defensive fallback.
+const EXPANSION_SCHEMA = {
+  type: "json_schema" as const,
+  json_schema: {
+    name: "keyword_expansion",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["terms"],
+      properties: {
+        terms: {
+          type: "array",
+          items: { type: "string" },
+          description: `Up to ${MAX_TERMS} lowercase related search terms.`,
+        },
+      },
+    },
+  },
+}
+
+// Pull the term list out of a model response. Prefers the structured
+// { "terms": [...] } object; falls back to the first [...] block anywhere in the
+// text so an older/degraded response shape still works. Returns null on any
+// parse failure (missing brackets, invalid JSON, not an array).
 function extractJsonArray(text: string): unknown[] | null {
+  try {
+    const parsed = JSON.parse(text.trim()) as unknown
+    if (Array.isArray(parsed)) return parsed
+    if (parsed && typeof parsed === "object" && Array.isArray((parsed as { terms?: unknown }).terms)) {
+      return (parsed as { terms: unknown[] }).terms
+    }
+  } catch {
+    // fall through to the bracket scan
+  }
   const start = text.indexOf("[")
   const end = text.lastIndexOf("]")
   if (start === -1 || end === -1 || end < start) return null
@@ -33,22 +69,23 @@ function extractJsonArray(text: string): unknown[] | null {
 
 /**
  * Expand a short keyword list into a larger set of related terms via one
- * non-streaming Verboo call (deepseek-v4-flash, temperature 0). Defensive
- * end to end — any missing config, network failure, non-2xx response, or
- * unparseable output returns [] rather than throwing, so the caller can
- * persist "expansion unavailable" and keep filtering on the literal keywords.
+ * non-streaming call on the shared key (aux model, no reasoning, structured
+ * output). Defensive end to end — any missing config, network failure, non-2xx
+ * response, or unparseable output returns [] rather than throwing, so the caller
+ * can persist "expansion unavailable" and keep filtering on the literal keywords.
  */
 export async function expandKeywords(keywords: string[]): Promise<string[]> {
-  if (!verbooApiKey() || keywords.length === 0) return []
+  if (!openaiApiKey() || keywords.length === 0) return []
 
   try {
-    const content = await withVerbooSlot(async () => {
-      const res = await verbooFetch("chat/completions", {
+    const content = await withAiSlot(async () => {
+      const res = await openaiFetch("chat/completions", {
         method: "POST",
         body: JSON.stringify({
-          model: "deepseek-v4-flash",
-          temperature: 0,
-          max_tokens: 512,
+          model: getAuxDraftModel(),
+          reasoning_effort: "none",
+          max_completion_tokens: 1024,
+          response_format: EXPANSION_SCHEMA,
           stream: false,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
@@ -56,7 +93,7 @@ export async function expandKeywords(keywords: string[]): Promise<string[]> {
           ],
         }),
       })
-      if (!res.ok) throw new Error(`Verboo error (${res.status})`)
+      if (!res.ok) throw new Error(`AI API error (${res.status})`)
       const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
       return data.choices?.[0]?.message?.content ?? ""
     })

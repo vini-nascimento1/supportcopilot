@@ -10,7 +10,7 @@ import { getPlaybooksDashboardData } from "@/lib/playbooks"
 export const dynamic = "force-dynamic"
 
 // Playbook match banner for the Conversation card. Split out of
-// /api/canvas/bootstrap and the canvas page's server render so the Verboo
+// /api/canvas/bootstrap and the canvas page's server render so the gate
 // classifier call (a live LLM round trip) never blocks the canvas from
 // painting — the client fetches this once the canvas is already up.
 export async function POST(request: Request) {
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   const playbooksData = await getPlaybooksDashboardData()
   const gate = await classifyPlaybookMatch(ticketText, playbooksData.allRows)
 
-  // On a Verboo error, degrade to the legacy keyword matcher so behaviour
+  // On a gate error, degrade to the legacy keyword matcher so behaviour
   // never regresses; otherwise honour the confidence threshold.
   const matched =
     gate.reason === "error"

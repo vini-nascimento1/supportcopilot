@@ -28,9 +28,10 @@ The Settings page is where an individual agent customizes their own experience: 
 | Canvas tools | `components/case-tools-settings.tsx` | CRUD for the tool cards available on the Canvas — see [[Tool Cards and Fadmin]] |
 | Canvas display | `components/canvas-mode-settings.tsx` | Canvas display preferences (single toggle-row card) |
 | Reply tone | `components/reply-tone-settings.tsx` | Pick a tone preset (Professional / Warm / Human) or write custom tone text — consumed by draft generation, see [[System Prompt Architecture]] |
-| Personal AI key | `components/personal-ai-key-settings.tsx` | Bring-your-own OpenAI-compatible key: API key, base URL, model, aux model — see [[Draft Verify Pipeline]] for how this is consumed at generation/verification time |
 | Connected integrations | inline in `page.tsx` | Google, Intercom, Slack, Notion connection status + connect/disconnect actions |
 | Sign out | inline in `page.tsx` | Posts to `/api/auth/logout` |
+
+**Removed 2026-08-03:** the "Personal AI key" card (bring-your-own OpenAI key, base URL, model, aux model). Fanvue now provides one org key for the whole app, so the model is configured server-side by env var and there is nothing per-agent to set — see [[Draft Verify Pipeline]]. The AI & Drafting tab now holds Reply tone only.
 
 ## Integrations
 

@@ -3,7 +3,7 @@ import "server-only"
 // Triage sweep — classifies the open-but-unworked pool (unassigned, or held
 // by a non-human admin like Fin) into `triage_items`. Deliberately LLM-free:
 // classification reuses the same keyword playbook matcher the live dashboard
-// tip uses (getTopMatches from lib/case-intelligence), never the Verboo
+// tip uses (getTopMatches from lib/case-intelligence), never the model
 // gate/generation calls, so a cron running every few minutes can't burn LLM
 // budget. Read Intercom, write only our own Supabase tables — this sweep
 // never writes to Intercom, sends, or assigns anything (ADR-0003/0007/0011).

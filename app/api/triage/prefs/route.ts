@@ -6,7 +6,7 @@ import { getTriagePrefs, saveTriagePrefs } from "@/lib/triage/store"
 import { expandKeywords } from "@/lib/triage/expand"
 
 // Save the signed-in agent's triage filter prefs (keywords, audiences,
-// priorityOnly, expand). Expansion is opt-in and cached: a Verboo call to
+// priorityOnly, expand). Expansion is opt-in and cached: a model call to
 // widen `keywords` only fires when expand=true AND the normalized keyword
 // set actually changed since the cached expandedFor — every other save
 // (toggling priorityOnly, flipping expand back on with unchanged keywords,
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
       const expanded = await expandKeywords(next.keywords)
       next.expandedTerms = expanded
       next.expandedFor = normalizedKeywordsKey
-      // Expansion failed/unavailable (Verboo down, no API key, bad output) —
+      // Expansion failed/unavailable (API down, no key, bad output) —
       // still persist so we don't re-attempt on every future read; the
       // filter just falls back to the literal keywords until the agent saves
       // again. Surface it so the UI can say so.

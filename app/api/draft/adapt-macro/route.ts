@@ -9,7 +9,6 @@ import {
   streamChatCompletion,
 } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
-import { resolveProviderForAgentEmail } from "@/lib/ai-provider"
 import { resolveToneForAgentEmail } from "@/lib/agent-tone"
 
 // Minimal server-side HTML → plain-text strip (DOMParser is client-only).
@@ -31,12 +30,12 @@ function stripHtml(html: string): string {
 }
 
 // ── Route handler ──────────────────────────────────────────────────────────
-// D9: adapt an approved macro to THIS case via deepseek. Draft-only — the
-// stream is shown for the agent to review/copy, never sent (ADR-0011).
+// D9: adapt an approved macro to THIS case. Draft-only — the stream is shown for
+// the agent to review/copy, never sent (ADR-0011).
 
 export async function POST(req: NextRequest) {
-  if (!process.env.VERBOO_API_KEY) {
-    return new Response("VERBOO_API_KEY is not configured", { status: 503 })
+  if (!process.env.OPENAI_API_KEY) {
+    return new Response("OPENAI_API_KEY is not configured", { status: 503 })
   }
 
   let body: { conversationId?: string; macroId?: string }
@@ -99,7 +98,6 @@ export async function POST(req: NextRequest) {
   }
 
   const { name: agentName, intercomAdminId } = await getAgentNameAndAdminId(email)
-  const provider = (await resolveProviderForAgentEmail(email)) ?? undefined
   const { instruction: toneInstruction } = await resolveToneForAgentEmail(email)
   const hasAgentReplied = hasAgentPersonallyReplied(conversation.messages, intercomAdminId)
   const systemPrompt = buildMacroAdaptSystemPrompt(macroText, agentName, hasAgentReplied, toneInstruction)
@@ -115,7 +113,7 @@ export async function POST(req: NextRequest) {
           { role: "user", content: userMessage },
         ]
 
-        for await (const chunk of streamChatCompletion(messages, { provider })) {
+        for await (const chunk of streamChatCompletion(messages)) {
           controller.enqueue(encoder.encode(chunk))
         }
       } catch (err) {
