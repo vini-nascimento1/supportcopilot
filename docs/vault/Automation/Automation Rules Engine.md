@@ -66,7 +66,7 @@ Anything outside these fields/topics is invisible to the engine — an `event` v
 
 All actions are **draft-only** — none of them can act directly toward a customer. That boundary is enforced by the absence of any send-capable action kind, not by a runtime check:
 
-- `alert.in_app` — in-app toast + sidebar badge
+- `alert.in_app` — rings the global notification bell: badge + floating toast, wherever the agent is in the app, with a link to the conversation that matched (see [[Notifications]])
 - `alert.slack` — DMs the rule's owner via [[Slack Integration]] (requires that agent's own Slack OAuth token from [[Settings and Profile]])
 - `case.flag` — sets a hint flag on the case card
 - `case.suggest_playbook` — links a playbook to the conversation
@@ -99,7 +99,7 @@ Action side effects (writing the flag, prestaging the draft, sending the Slack D
 | `/api/automation/rules/{id}/run` | POST | Manually run a single rule on demand |
 | `/api/automation/rules/test` | POST | Dry-run a rule's conditions without saving |
 | `/api/automation/sweep` | POST | Cron entry point for `runMonitorSweep()`, authenticated via a `CRON_SECRET` header |
-| `/api/automation/alerts` | POST | Fetch pending alerts for the Automation page's Alerts tab (see [[Notifications]]) |
+| `/api/automation/alerts` | GET / PATCH | GET unread alerts for the notification bell (with a conversation deep link); PATCH `{ ids }` marks them read (see [[Notifications]]) |
 
 ## Key files
 

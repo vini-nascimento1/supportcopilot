@@ -41,7 +41,7 @@ This vault documents **how the app works**, not what to do on any given ticket �
 
 - [[Settings and Profile]] — the agent-facing settings page (Profile / Canvas / AI & Drafting columns)
 - [[Automation Rules Engine]] — user-defined trigger/monitor rules, condition trees, actions
-- [[Notifications]] — the global notification bell (in-app pub/sub) vs. the Automation Alerts tab vs. sonner toasts
+- [[Notifications]] — the global notification bell (now the single home for automation alerts too) vs. sonner toasts
 
 ## Other docs in this repo (not part of the Obsidian vault)
 

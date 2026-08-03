@@ -6,13 +6,11 @@ import {
   Trash2Icon,
   FlaskConicalIcon,
   ZapIcon,
-  BellIcon,
   ClockIcon,
   WebhookIcon,
   GripVerticalIcon,
   ChevronDownIcon,
   CheckIcon,
-  AlertCircleIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -22,7 +20,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Dialog,
   DialogContent,
@@ -53,7 +50,7 @@ import type {
 
 // ── constants ────────────────────────────────────────────────────────────────
 const ACTION_KINDS: { kind: ActionKind; label: string; description: string }[] = [
-  { kind: "alert.in_app", label: "In-app alert", description: "Get notified in the dashboard" },
+  { kind: "alert.in_app", label: "In-app alert", description: "Ring the notification bell" },
   { kind: "alert.slack", label: "Slack DM", description: "Send you a Slack message (M6)" },
   { kind: "case.flag", label: "Flag case", description: "Mark case with priority hint" },
   { kind: "case.suggest_playbook", label: "Suggest playbook", description: "Link a playbook to the case" },
@@ -111,19 +108,13 @@ function blankRule(kind: RuleKind): Partial<AutomationRule> {
 const DEFAULT_TRIGGER_EVENTS = ["conversation.user.created", "conversation.admin.assigned"] as const
 
 // ── component ─────────────────────────────────────────────────────────────────
-type Alert = {
-  id: string
-  body: string
-  kind: string
-  created_at: string
-  automation_rules?: { name?: string }
-}
-
+// No alerts list here: `alert.in_app` matches go straight to the global
+// notification bell (components/notifications/automation-alert-sync.ts), so
+// this page is just the rule list.
 type PlaybookOption = { id: string; case_type: string; title: string }
 
 export function AutomationClient() {
   const [rules, setRules] = useState<AutomationRule[]>([])
-  const [alerts, setAlerts] = useState<Alert[]>([])
   const [playbooks, setPlaybooks] = useState<PlaybookOption[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Partial<AutomationRule> | null>(null)
@@ -134,13 +125,6 @@ export function AutomationClient() {
     const data = await res.json()
     if (res.ok) setRules(data.rules ?? [])
     else toast.error(data.error ?? "Failed to load rules")
-  }, [])
-
-  const loadAlerts = useCallback(async () => {
-    const res = await fetch("/api/automation/alerts")
-    const data = await res.json()
-    if (res.ok) setAlerts(data.alerts ?? [])
-    else toast.error(data.error ?? "Failed to load alerts")
   }, [])
 
   const loadPlaybooks = useCallback(async () => {
@@ -158,13 +142,13 @@ export function AutomationClient() {
   useEffect(() => {
     let active = true
     void (async () => {
-      await Promise.all([loadRules(), loadAlerts(), loadPlaybooks()])
+      await Promise.all([loadRules(), loadPlaybooks()])
       if (active) setLoading(false)
     })()
     return () => {
       active = false
     }
-  }, [loadRules, loadAlerts, loadPlaybooks])
+  }, [loadRules, loadPlaybooks])
 
   async function toggleEnabled(rule: AutomationRule) {
     const res = await fetch(`/api/automation/rules/${rule.id}`, {
@@ -203,31 +187,12 @@ export function AutomationClient() {
     }
   }
 
-  async function markAlertsRead(ids: string[]) {
-    const res = await fetch("/api/automation/alerts", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids }),
-    })
-    if (res.ok) loadAlerts()
-  }
-
   return (
-    <Tabs defaultValue="rules" className="gap-6">
+    <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <TabsList className="h-10">
-          <TabsTrigger value="rules" className="gap-1.5 px-3">
-            <ZapIcon className="size-3.5" /> Rules
-          </TabsTrigger>
-          <TabsTrigger value="alerts" className="gap-1.5 px-3">
-            <BellIcon className="size-3.5" /> Alerts
-            {alerts.length > 0 && (
-              <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
-                {alerts.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <ZapIcon className="size-4 text-muted-foreground" /> Rules
+        </div>
         <div className="flex gap-2">
           <Button
             size="sm"
@@ -243,7 +208,7 @@ export function AutomationClient() {
         </div>
       </div>
 
-      <TabsContent value="rules">
+      <div>
         {loading ? (
           <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
             <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -348,48 +313,7 @@ export function AutomationClient() {
             </Table>
           </div>
         )}
-      </TabsContent>
-
-      <TabsContent value="alerts">
-        {alerts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
-            <BellIcon className="mb-3 size-8 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">No unread alerts yet.</p>
-            <p className="mt-1 text-xs text-muted-foreground/70">
-              Alerts appear when a rule matches a case.
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div className="flex justify-end">
-              <Button size="sm" variant="ghost" onClick={() => markAlertsRead(alerts.map((a) => a.id))}>
-                Mark all read
-              </Button>
-            </div>
-            {alerts.map((a) => (
-              <div
-                key={a.id}
-                className="flex items-start justify-between rounded-lg border bg-card p-4 transition-colors hover:bg-muted/30"
-              >
-                <div className="flex gap-3">
-                  <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">
-                    <AlertCircleIcon className="size-4" />
-                  </div>
-                  <div>
-                    <p className="text-sm">{a.body}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {a.automation_rules?.name ?? "rule"} · {new Date(a.created_at).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-                <Button size="sm" variant="ghost" onClick={() => markAlertsRead([a.id])}>
-                  Dismiss
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </TabsContent>
+      </div>
 
       {editing && (
         <RuleEditor
@@ -402,7 +326,7 @@ export function AutomationClient() {
           }}
         />
       )}
-    </Tabs>
+    </div>
   )
 }
 

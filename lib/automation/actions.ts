@@ -69,8 +69,11 @@ function buildTemplateVars(target: ActionTarget): TemplateVars {
 }
 
 // ── alert.in_app ─────────────────────────────────────────────────────────────
-// Insert an alert into the agent's inbox. De-duped by the unique (rule,case,kind)
-// constraint so re-running monitors every 5 min doesn't pile up duplicates.
+// Raise an alert for the rule owner. Delivery is the global notification bell:
+// the row sits unread until the agent reads/dismisses it, and the client polls
+// it in (components/notifications/automation-alert-sync.ts). De-duped by the
+// unique (rule,case,kind) constraint so re-running monitors every 5 min doesn't
+// pile up duplicates.
 const alertInApp: Handler = async (action, target) => {
   const db = getSupabaseAdminClient()
   if (!db) return { kind: action.kind, applied: false, detail: "no admin client" }

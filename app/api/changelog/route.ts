@@ -16,6 +16,27 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-03-d",
+    date: "2026-08-03",
+    title: "Dismiss all your notifications in one click",
+    description:
+      "The notification bell now has a \"Dismiss all\" button at the top. It empties the list and clears any toasts still floating on screen, and anything that came from an automation rule is marked read so it won't come back.",
+  },
+  {
+    id: "seed-2026-08-03-c",
+    date: "2026-08-03",
+    title: "Automation alerts now ring the notification bell",
+    description:
+      "When one of your rules matches — an SLA breach, a ticket sitting too long — you get a real notification: the bell badge lights up and a toast pops, wherever you are in the app. Click it to jump straight to the conversation. Unread alerts stick around until you actually read them, even after a refresh.",
+  },
+  {
+    id: "seed-2026-08-03-b",
+    date: "2026-08-03",
+    title: "The Automation \"Alerts\" tab is gone",
+    description:
+      "It was a page you had to remember to visit, which defeated the point of an alert. Everything it showed now arrives in the notification bell instead. The Automation page is just your rules now.",
+  },
+  {
     id: "seed-2026-08-03-a",
     date: "2026-08-03",
     title: "Every AI draft now runs on a newer, sharper model",

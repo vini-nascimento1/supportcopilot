@@ -3,9 +3,20 @@ import { NextResponse } from "next/server"
 import { getSignedInEmail } from "@/lib/auth"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 
-// Agent alert inbox. GET = this agent's alerts (unread by default); PATCH = mark read.
+// Agent alert feed. GET = this agent's alerts (unread by default); PATCH = mark read.
 // Scoped to the signed-in agent's own rules (automation rules are per-agent, ADR-0007).
+//
+// There is no alerts page any more: this endpoint feeds the global notification
+// bell, polled by components/notifications/automation-alert-sync.ts. PATCH is
+// what "dismiss"/"clear all"/opening the bell call to stop an alert coming back.
 export const dynamic = "force-dynamic"
+
+/** Deep link to the conversation that matched, when we know it. */
+function intercomUrl(conversationId: string | null | undefined): string | null {
+  const appId = process.env.INTERCOM_APP_ID
+  if (!conversationId || !appId) return null
+  return `https://app.intercom.com/a/apps/${appId}/conversations/${conversationId}`
+}
 
 async function resolveAgentId(email: string) {
   const db = getSupabaseAdminClient()
@@ -24,7 +35,9 @@ export async function GET(req: Request) {
   const includeRead = new URL(req.url).searchParams.get("all") === "1"
   let query = db
     .from("automation_alerts")
-    .select("id, rule_id, case_id, kind, body, read_at, created_at, automation_rules!inner(name, owner_id)")
+    .select(
+      "id, rule_id, case_id, kind, body, read_at, created_at, automation_rules!inner(name, owner_id), cases(intercom_conversation_id)"
+    )
     .eq("automation_rules.owner_id", agentId)
     .order("created_at", { ascending: false })
     .limit(100)
@@ -32,7 +45,13 @@ export async function GET(req: Request) {
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ alerts: data ?? [] })
+
+  type Row = { cases?: { intercom_conversation_id?: string | null } | null }
+  const alerts = (data ?? []).map((row) => {
+    const { cases, ...rest } = row as Row & Record<string, unknown>
+    return { ...rest, url: intercomUrl(cases?.intercom_conversation_id) }
+  })
+  return NextResponse.json({ alerts })
 }
 
 export async function PATCH(req: Request) {
