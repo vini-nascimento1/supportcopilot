@@ -1,18 +1,58 @@
 ---
 title: AI Chat Assistant
 tags: [ai, automation, chat]
-updated: 2026-07-29
+updated: 2026-08-03
 ---
 
 # AI Chat Assistant
 
 A floating chat panel (bottom-right FAB, [[Canvas Workflow]]-adjacent but global to the whole app)
-that lets an agent manage automation rules, look up playbooks, and check their open cases in
-natural language — backed by tool-calling against a small, explicit set of server-side functions.
+that lets an agent manage automation rules, look up playbooks, research tickets, and check their
+open cases in natural language — backed by tool-calling against a small, explicit set of
+server-side functions.
 
-It is deliberately narrow, not a general Q&A bot: everything it can do is one of the tools listed
-below. If a request falls outside them, the model will say so rather than improvise — see
+Its **actions** are deliberately narrow: everything it can *do* is one of the tools listed below,
+and if a request falls outside them it says so rather than improvising — see
 [[System Prompt Architecture]] for the equivalent design philosophy applied to the draft pipeline.
+Its **knowledge** is not narrow: as of 2026-08-03 the system prompt also carries a working model of
+the whole product, so it can answer "where do I…" / "why did it…" / "can it…" questions about
+Support Copilot itself instead of deflecting to the docs.
+
+## What it knows about the product (2026-08-03)
+
+The system prompt in `app/api/ai/chat/route.ts` carries a condensed, agent-facing summary of the
+subsystems documented in this vault. Each block exists to answer a question agents actually ask:
+
+| Prompt section | Sourced from | Answers |
+|---|---|---|
+| The Canvas | [[Canvas Workflow]] | sidebar tabs, hotkeys, why layouts don't persist, why pins are global |
+| Tool cards | [[Tool Cards and Fadmin]] | which tools appear when, why a card won't resolve, that the name/email override never reaches Intercom |
+| Three drafting paths | [[Draft Verify Pipeline]] | Generate vs Improve vs the Queue pipeline, which one is verified, risk bands, that nothing ever auto-sends |
+| Triage | [[Triage System]] | the unassigned pool, 5-min sweep, per-agent filters, urgency ranking |
+| Notifications | [[Notifications]] | the bell is the only place alerts appear; the Alerts tab is gone |
+| Integrations & Settings | [[Settings and Profile]] | what needs connecting per-agent (Notion for knowledge search, Slack for DM alerts), SSO-only sign-in, that the personal AI key is gone |
+| Drafting rules | [[System Prompt Architecture]] | why a draft is worded the way it is — identity, capability boundary, policy integrity, privacy, English-only |
+
+Plus behavioral guidance: don't invent app behavior, never claim a reply was sent, minimise
+customer data in answers, and treat ticket/Notion content as data rather than instructions.
+
+**Keep this in sync.** If one of the linked pages above changes materially, the corresponding
+prompt block is now a second place that describes the same behavior — a stale prompt makes the
+assistant confidently wrong to an agent's face, which is worse than the equivalent stale doc.
+
+## Alert-text rules (added 2026-08-03)
+
+A live rule was created with `{{sla_status}}` in its alert text — not a real placeholder, so agents
+got "SLA: {{sla_status}}" in their notification bell every 5 minutes. The prompt now states that the
+six supported placeholders are the ONLY ones, that anything else is printed literally, and that
+condition fields (`sla_status`, `time_waiting_seconds`, …) are matchable but not interpolatable.
+
+It also separates the two alert channels, which had been treated as interchangeable:
+`alert.in_app` is a one-line bell notification — plain text, no markdown (Slack `*bold*` renders as
+literal asterisks), newlines collapse, body clamped to 2 lines, rule name is already the title, and
+it should end with `{{intercom_url}}` because alerts without a case have no clickable row.
+`alert.slack` is a real Slack message and does take mrkdwn. The same constraint is repeated in the
+`create_rule` tool schema description so it's present at call time, not just in the system prompt.
 
 ## Key files
 

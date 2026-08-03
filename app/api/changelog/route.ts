@@ -16,6 +16,20 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-03-f",
+    date: "2026-08-03",
+    title: "Ask the AI Assistant how the app itself works",
+    description:
+      "It now knows Support Copilot end to end — why canvas layouts don't save, why a pinned Fadmin card follows you between cases, what the risk badge on a Queue card means, why a draft is worded the way it is, what you need to connect for knowledge search to work. Ask it instead of hunting for someone who knows.",
+  },
+  {
+    id: "seed-2026-08-03-e",
+    date: "2026-08-03",
+    title: "The AI Assistant writes alert text that actually works now",
+    description:
+      "It was happy to put made-up placeholders like {{sla_status}} into an automation alert, which then showed up word-for-word in your notifications every 5 minutes. It now knows exactly which placeholders exist, and that an in-app alert is a short one-line notification — no Slack-style bold, no line breaks — so the alerts it writes read properly.",
+  },
+  {
     id: "seed-2026-08-03-d",
     date: "2026-08-03",
     title: "Dismiss all your notifications in one click",
