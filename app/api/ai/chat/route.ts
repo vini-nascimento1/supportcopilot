@@ -533,6 +533,11 @@ function toolSuccess(data: unknown): ToolResult {
 }
 
 function toolError(friendly: string, debug: string): ToolResult {
+  // Only `friendly` ever leaves this route (the model reads it, then explains
+  // it to the agent) — nothing downstream reads `debug`, so without this line
+  // every tool failure (bad conversation ID, Intercom down, expired Notion
+  // token) is invisible on the server.
+  console.error("[ai/chat] tool error:", debug)
   return { success: false, friendly, debug }
 }
 
@@ -681,6 +686,7 @@ async function handleToolCall(
             const convs = await searchOpenConversationsForAdmin(String(agent.intercom_admin_id))
             openConvs = convs.length
           } catch (e) {
+            console.error("[ai/chat] get_insights Intercom count failed:", (e as Error).message)
             intercomError = "Could not reach Intercom to count open conversations."
           }
         }
@@ -927,8 +933,11 @@ async function handleToolCall(
             verified += chunk
           }
           if (verified.trim()) draft = verified.trim()
-        } catch {
-          // Verifier is best-effort — keep the unverified draft rather than failing the tool.
+        } catch (e) {
+          // Verifier is best-effort — keep the unverified draft rather than
+          // failing the tool, but say so on the server: a draft that quietly
+          // skipped the grounding pass is worth knowing about.
+          console.error("[ai/chat] draft verifier failed, returning unverified draft:", (e as Error).message)
         }
 
         return toolSuccess({
@@ -972,6 +981,17 @@ async function callModel(
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
 
+  // gpt-5.x rejects function tools combined with any reasoning_effort above
+  // "none" on /v1/chat/completions ("To use function tools, use /v1/responses
+  // or set reasoning_effort to 'none'"). That is a 400 on EVERY request, so
+  // tools must go out with reasoning off. Do not raise this back to "low"
+  // without moving the whole loop to /v1/responses first.
+  //
+  // The final-summary call passes tool_choice "none" — it needs no tools at
+  // all, so drop them there and let that one call actually think, which is
+  // where reasoning was worth having anyway (synthesising a researched ticket).
+  const withTools = (options?.tool_choice ?? "auto") !== "none"
+
   try {
     const res = await withAiSlot(
       () =>
@@ -982,11 +1002,10 @@ async function callModel(
             // Covers reasoning tokens too — a starved budget returns empty
             // content and the loop would report "I'm not sure how to respond."
             max_completion_tokens: 8192,
-            reasoning_effort: "low",
+            reasoning_effort: withTools ? "none" : "low",
             stream: false,
             messages,
-            tools: TOOLS,
-            tool_choice: options?.tool_choice ?? "auto",
+            ...(withTools ? { tools: TOOLS, tool_choice: options?.tool_choice ?? "auto" } : {}),
           }),
           signal: controller.signal,
         }),
@@ -995,6 +1014,10 @@ async function callModel(
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "unknown")
+      // The provider's own words are the only thing that says WHY (bad
+      // model/param combo, rate limit, oversized payload). Log them — the
+      // caller can only turn this into a generic message for the user.
+      console.error(`[ai/chat] provider error ${res.status}:`, errText.slice(0, 1000))
       throw new Error(`AI provider error (${res.status}): ${errText}`)
     }
 
@@ -1214,7 +1237,8 @@ async function continueConversation(
       message: finalResponse.content ?? "I completed the actions but couldn't generate a summary.",
       toolsUsed: dedupeToolsUsed(toolsUsed),
     })
-  } catch {
+  } catch (e) {
+    console.error("[ai/chat] final summary call failed:", (e as Error).message)
     return NextResponse.json({
       message: `I ran out of steps for this turn. The AI couldn't summarise the results — try asking "what did you just do?" to get a recap.`,
       toolsUsed: dedupeToolsUsed(toolsUsed),
@@ -1263,15 +1287,20 @@ export async function POST(req: Request) {
     return await continueConversation(messages, 0, ctx)
   } catch (e) {
     const err = e as Error & { name: string }
+    console.error("[ai/chat] request failed:", err.name, err.message)
     if (err.name === "AbortError" || err.name === "TimeoutError") {
       return NextResponse.json({
         error: "The AI took too long to respond. Try a simpler request or try again.",
       }, { status: 504 })
     }
+    // Carrying just the provider's status code (never its raw body) makes a
+    // screenshot of this error actionable on its own: 400 is a code/model
+    // problem, 429 is rate limiting, 5xx is theirs. Detail stays in the log.
+    const providerStatus = /^AI provider error \((\d{3})\)/.exec(err.message ?? "")?.[1]
     return NextResponse.json({
       error: err.message?.startsWith("Stale or out-of-order")
         ? err.message
-        : "Something went wrong with the AI assistant. Please try again or report this to Vinicius if it persists.",
+        : `Something went wrong with the AI assistant${providerStatus ? ` (provider ${providerStatus})` : ""}. Please try again or report this to Vinicius if it persists.`,
     }, { status: 500 })
   }
 }

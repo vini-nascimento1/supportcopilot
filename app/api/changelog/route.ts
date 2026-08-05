@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-05-a",
+    date: "2026-08-05",
+    title: "The AI Assistant answers again instead of erroring",
+    description:
+      "Every single message to the AI Assistant was coming back as \"Something went wrong\", because the model it runs on refuses one of the settings it was being sent, so nothing ever reached the assistant. Fixed, so asking it to read a ticket or search knowledge works again. If it ever does fail now, the error tells you what actually broke instead of leaving you to guess.",
+  },
+  {
     id: "seed-2026-08-03-f",
     date: "2026-08-03",
     title: "Ask the AI Assistant how the app itself works",

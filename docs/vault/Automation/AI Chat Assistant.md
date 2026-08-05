@@ -156,6 +156,41 @@ This is a deliberate middle ground, not the full "background job + notification"
 considered and set aside — see [[Notifications]] for the bell this could eventually report through
 if research ever needs to run longer than a single request comfortably allows.
 
+## Model constraint: function tools cannot carry reasoning (2026-08-05)
+
+`gpt-5.x` on OpenAI's `/v1/chat/completions` **rejects a request that sends function tools together
+with any `reasoning_effort` above `"none"`**:
+
+> Function tools with reasoning_effort are not supported for gpt-5.6-luna in /v1/chat/completions.
+> To use function tools, use /v1/responses or set reasoning_effort to 'none'.
+
+Because this route always sends `tools`, the `reasoning_effort: "low"` it inherited meant a **400 on
+every single chat message** — the assistant was fully dead, and the route's generic catch reported it
+as "Something went wrong with the AI assistant" with no clue why. So in `callModel`:
+
+- the tool-calling calls send `reasoning_effort: "none"`
+- the final-summary call (`tool_choice: "none"`) omits `tools` entirely and keeps `"low"` — it needs
+  no tools, and synthesising a researched ticket is where the reasoning was actually worth having
+
+Do not raise the tool-calling calls back to `"low"` without migrating the whole loop to
+`/v1/responses` first. This affects only this route: `lib/automation/prestage.ts` also uses
+`"low"`, but sends no tools, so it is unaffected — as is every `streamChatCompletion` caller.
+
+## Diagnosability: the route logs its failures (2026-08-05)
+
+The 400 above was invisible because the route had **no `console.*` at all** — every `toolError()`
+built a `debug` string that nothing ever read, and the outer catch discarded the provider's own
+explanation. Now:
+
+- `toolError()` logs `debug` (bad conversation ID, Intercom down, expired Notion token)
+- `callModel` logs the provider's status + response body on a non-OK response
+- the outer catch, the failed-final-summary catch, the `draft_reply` verifier catch, and the
+  `get_insights` Intercom-count catch all log instead of swallowing
+- the user-facing 500 now carries the provider status code (e.g. "…(provider 400)…") but never the
+  provider's raw body — enough that a screenshot of the error is actionable on its own
+
+All log lines are prefixed `[ai/chat]`. Keep new failure paths in this route logged the same way.
+
 ## Known gaps
 
 - No usage logging/analytics — there's no record of how often, or for what, the assistant gets
