@@ -86,6 +86,16 @@ upsertPendingSuggestion()  — persists verified body + risk_band to suggested_r
 
 The example rewrite ("I've checked your account" → "I'll look into your account") is exactly the class of claim the Capability Boundary Rules in the system prompt try to prevent upstream (see [[System Prompt Architecture]]) — the verifier is the second layer of defense when the drafting model slips past that rule anyway.
 
+Since 2026-08-09 the verifier also enforces the payment-dispute rule as a hard delete, not a softening: any instruction to dispute, reverse, or "report as unauthorised" a charge with a bank, card issuer, or wallet is cut outright, and a draft that treats a **pending** charge as money taken is corrected to an authorisation hold. This one is a delete rather than a rewrite because the advice is actively harmful — Fanvue's zero-tolerance chargeback policy bans the account of a customer who follows it. See [[System Prompt Architecture]] §3b for the upstream rule and its Notion sources.
+
+## Reply style nudge
+
+`REPLY_STYLE_NUDGE` is appended by all three drafting paths (`app/api/draft/route.ts`, `lib/reply-queue-pipeline.ts`, and `draft_reply` in `app/api/ai/chat/route.ts`). It exists to suppress gpt-5-family verbal tics that read as machine-generated:
+
+- narrating an internal action plan as a checklist instead of just writing the reply
+- ending by asking the customer to approve internal checks
+- **(added 2026-08-09)** gating an action behind a magic word — "Reply 'cancel it' and I'll…", "Say 'yes' to proceed", "Type CONFIRM". A support agent asking a customer to send back an exact keyword reads as an automated bot, which undercuts the whole [[System Prompt Architecture]] identity layer. The replacement is an ordinary question that leaves the wording to the customer: "Just confirm you'd like me to go ahead and I'll get it sorted."
+
 ## Models & routing
 
 Everything runs on OpenAI, on **one Fanvue org key** (`OPENAI_API_KEY`, configured server-side). There is no per-agent key and no per-agent model: the personal-AI-key feature was removed on 2026-08-03 once Fanvue provisioned a key for the whole team. Model choice is an env var, not a user setting.

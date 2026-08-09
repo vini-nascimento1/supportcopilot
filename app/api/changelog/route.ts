@@ -16,6 +16,20 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-09-b",
+    date: "2026-08-09",
+    title: "Drafts never tell a customer to dispute a charge again",
+    description:
+      "A draft talked a fan through reporting a charge as unauthorised with their payment provider. That is the one thing we can never say: a dispute gets that fan's own account banned under our zero-tolerance chargeback policy. Drafts now handle an unrecognised charge the way the guide says, by asking only for the card's first 6 and last 4 digits so you can look it up, and they correctly explain a pending charge as a hold the bank releases on its own. The verifier strips this advice too if it ever slips through.",
+  },
+  {
+    id: "seed-2026-08-09-a",
+    date: "2026-08-09",
+    title: "No more \"reply CANCEL IT and I'll do that\" drafts",
+    description:
+      "Drafts had a habit of ending with a robotic instruction to send back an exact keyword, which reads like an automated bot rather than the person the customer is talking to. When a draft needs your customer to okay something, it now just asks in plain words and lets them answer however they like.",
+  },
+  {
     id: "seed-2026-08-05-a",
     date: "2026-08-05",
     title: "The AI Assistant answers again instead of erroring",

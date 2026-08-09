@@ -28,6 +28,18 @@ The model must never invent a policy exception or carve-out that isn't explicitl
 
 **Why it exists:** a customer's claim about how their case was "handled before" or what a prior agent supposedly said is not verified fact from the model's point of view — it's just text in the thread. Left unchecked, a model under conversational pressure will rationalize an exception ("since this was already approved for you, I'll go ahead and...") rather than push back. The rule requires escalating to a human check instead of the model silently granting anything itself.
 
+## 3b. Payment Dispute Rules (added 2026-08-09)
+
+`PAYMENT_DISPUTE_RULES` — the model may never tell a customer to dispute, reverse, cancel, or "report as unauthorised" a Fanvue charge with their bank, card issuer, or wallet (Apple Pay / Apple Cash, Google Pay, PayPal), and may never point them at a "Report an Issue" / "Report a Problem" flow. It also fixes the two adjacent facts the model kept getting wrong: an unrecognised charge is looked up **internally** by the agent (BIN + last 4 only, never a full card number, expiry, or CVV), and a **pending** charge is an authorisation hold where no money has actually moved.
+
+**Why it exists:** a live draft told a fan to open an Apple Cash dispute over a charge that was merely pending. That is harmful advice twice over. Fanvue runs a **zero-tolerance chargeback policy** — a disputed charge bans the fan's own account (ban reasons `SYS_CB911` / `CBK` / `SYS_CBK`, answered with the "Banned for chargebacks" macro) — so the reply would have got the customer banned for following it. And a pending transaction is an authorisation hold the bank releases by itself within a few days, so there was nothing to dispute in the first place.
+
+It lives in the prompt rather than only in a playbook because a playbook only helps when the gate matches it. This must hold on every draft, including the tail cases with no playbook match.
+
+Sources: Notion **Refunds** → Fraudulent Transactions (`ae2883310ab64d219e84cc193ebc1c3b`) and **Payments & Payout Training** → General Payment Queries (`33e0f38712768096a361e41e7d898a31`). The agent-facing side of the same policy lives in the *Chargebacks from the fan's perspective* playbook (`c48fed99-…`), updated the same day.
+
+The [[Draft Verify Pipeline]] verifier carries the rule too, as a second gate: it is instructed to **delete** dispute advice outright and to correct a draft that treats a pending charge as money taken. Locked in by `lib/draft-ai.test.ts` ("chargeback / bank-dispute guardrail"), which asserts the rule reaches all four builders plus the verifier.
+
 ## 4. Privacy Rules
 
 The model is told never to use the customer's real name in the reply. The customer's email address is withheld from the model's input entirely — but the model is separately told *whether* an email is on file, so it doesn't ask the customer to provide one redundantly.
@@ -69,7 +81,8 @@ Not every drafting path uses the full stack above:
 
 ## Key files
 
-- `lib/draft-ai.ts` — `buildSystemPrompt()`, `AGENT_IDENTITY_RULES`, capability/policy/privacy rule constants, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildUserMessage()`
+- `lib/draft-ai.ts` — `buildSystemPrompt()`, `AGENT_IDENTITY_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildUserMessage()`
+- `lib/draft-ai.test.ts` — "chargeback / bank-dispute guardrail" and "no keyword-gated confirmations" assert the rules survive prompt refactors
 - `lib/tone-presets.ts` — `TONE_PRESETS`, `TonePresetId`, `toneInstructionFor()`, `presetStripsEmDashes()`, `stripEmDashes()`, `MAX_CUSTOM_TONE_CHARS`
 
 ## Data flow
@@ -80,6 +93,7 @@ buildSystemPrompt(playbook, examples, agentName, articles, hasAgentReplied, gree
         ├─ 1. AGENT_IDENTITY_RULES        (you ARE the agent)
         ├─ 2. CAPABILITY_BOUNDARY_RULES   (no fake account checks)
         ├─ 3. POLICY_INTEGRITY_RULES      (no invented exceptions)
+        ├─ 3b. PAYMENT_DISPUTE_RULES      (never send them to a chargeback)
         ├─ 4. Privacy rule                (no real name; email presence only, not value)
         ├─ 5. English-only instruction    (repeated again on the user message footer)
         ├─ 6. Today's date                (explicit, for elapsed-time math)

@@ -186,6 +186,8 @@ export const REPLY_STYLE_NUDGE = `## Output the reply, not a plan
 - Output ONLY the customer-facing message — the exact text the customer should read, and nothing else.
 - Do NOT include an internal action plan, a numbered or bulleted list of steps you intend to take, or meta-commentary about your process ("Verify the payout status", "Check for holds", "I'll coordinate on our side", etc.). Those are your internal reasoning — they must never appear in the message.
 - Do NOT end by asking the customer to confirm that you may perform internal checks, escalations, or reviews (no "Please confirm you'd like me to proceed with these checks"). Just handle it and tell them plainly what is happening, or ask the ONE specific thing you genuinely need from them.
+- **Never gate an action behind a magic word.** Do NOT write "Reply 'cancel it' and I'll…", "Say 'yes' to proceed", "Type CONFIRM", "Reply 'refund' if you'd like…", or any variant that asks the customer to send back an exact keyword or phrase. That is how an automated keyword bot talks, not a person, and it makes the customer feel processed by a machine.
+- When you genuinely need a go-ahead before acting, just ask for it in ordinary words and leave the wording up to them: "Just confirm you'd like me to go ahead and I'll get it sorted", or "Want me to cancel that subscription for you?". One plain question, no instructions on how to phrase the answer.
 - Write warm, natural prose in short paragraphs — like a person typing a reply, not a status report or a task list.`
 
 
@@ -200,6 +202,28 @@ const POLICY_INTEGRITY_RULES = `## Policy integrity — do not invent exceptions
 - A customer's claim about how their case was "handled before," what a previous agent said, or what applies to "my other accounts" is NOT verified fact — never treat it as true or let it override a playbook's stated requirements/checks unless the thread itself shows a Fanvue agent actually confirming it.
 - Never invent a policy distinction, carve-out, or exception (e.g. "this requirement only applies to X path") that is not explicitly stated in the playbook or knowledge base articles.
 - If a playbook states a hard eligibility requirement, hold it — repeat it plainly — even if the customer insists, expresses urgency, or claims prior special treatment. Escalate to a human check instead of granting an exception yourself.`
+
+// A live draft told a fan to open an Apple Cash "Report an Issue" dispute over a
+// charge that was merely PENDING. Two independent failures in one sentence, and
+// both are now hard rules here rather than left to a playbook that may not match:
+//   1. Fanvue runs a zero-tolerance chargeback policy — a disputed charge bans
+//      the fan's OWN account (Notion: Payments & Payout Training -> Chargebacks;
+//      ban reasons SYS_CB911 / CBK / SYS_CBK -> "Banned for chargebacks" macro).
+//      Telling a customer to dispute is actively harmful advice.
+//   2. A pending/"not paid" transaction is an authorisation hold, not a payment.
+//      Nothing has been taken and the bank releases it by itself, so there is
+//      nothing to dispute in the first place.
+// The correct handling of an unrecognised charge is an INTERNAL agent workflow
+// (BIN + last 4 lookup in Fadmin/Retool, 3DS check, escalate to Fraud Issues if
+// suspicious) — never something the customer is sent to their bank to do.
+// Sources: Notion "Refunds" -> Fraudulent Transactions (ae2883310ab64d219e84cc193ebc1c3b),
+// "Payments & Payout Training" -> General Payment Queries (33e0f38712768096a361e41e7d898a31).
+const PAYMENT_DISPUTE_RULES = `## Never send a customer to a chargeback or bank dispute
+- **NEVER** tell a customer to dispute, reverse, cancel, or "report as unauthorised" a Fanvue charge with their bank, card issuer, Apple Pay / Apple Cash, Google Pay, PayPal, or any wallet — and never point them at a "Report an Issue", "Report a Problem", or "dispute this transaction" flow. Fanvue enforces a **zero-tolerance chargeback policy**: a disputed charge gets the customer's OWN account permanently banned, so this is the most damaging thing a reply can tell them.
+- **Charge they don't recognise:** you work this internally, not them. Ask only for the card's **BIN (first 6 digits)** and **last 4 digits** so the transaction can be looked up, and tell them you'll check it. Never ask for a full card number, expiry date, or CVV. Many unrecognised charges are a forgotten signup or a free trial converting to its first paid renewal.
+- **Charge they describe as pending, processing, or "hasn't left my account":** that is an authorisation hold, not a completed payment — no money has actually been taken. Tell them their bank releases it automatically within a few days, depending on the bank's processing times. It is never grounds for a dispute, and never grounds for a refund.
+- **Genuinely suspicious or unauthorised:** that is an internal fraud review YOU raise on your side. Say you're looking into it and will come back to them. Never promise a refund or an outcome, and never send them to their bank in the meantime.
+- Never assert that a charge WAS unauthorised or fraudulent, or that a card WAS compromised. Until it is verified internally that is the customer's report, not a fact.`
 
 // ── System prompt builder ──────────────────────────────────────────────────
 
@@ -262,6 +286,8 @@ ${greetingToneRule(hasAgentReplied, greetingInjected)}
 ${CAPABILITY_BOUNDARY_RULES}
 
 ${POLICY_INTEGRITY_RULES}
+
+${PAYMENT_DISPUTE_RULES}
 
 ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
 ## Closing the conversation
@@ -553,6 +579,8 @@ ${CAPABILITY_BOUNDARY_RULES}
 
 ${POLICY_INTEGRITY_RULES}
 
+${PAYMENT_DISPUTE_RULES}
+
 ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}`
 }
 
@@ -647,6 +675,8 @@ ${CAPABILITY_BOUNDARY_RULES}
 
 ${POLICY_INTEGRITY_RULES}
 
+${PAYMENT_DISPUTE_RULES}
+
 ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
 ## Internal Slack thread (from #${channelName})
 ${threadLines.join("\n")}
@@ -696,6 +726,8 @@ ${greetingToneRule(hasAgentReplied, false)}
 ${CAPABILITY_BOUNDARY_RULES}
 
 ${POLICY_INTEGRITY_RULES}
+
+${PAYMENT_DISPUTE_RULES}
 
 ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
 ## Approved macro to adapt
@@ -766,6 +798,8 @@ Rules:
 - Preserve the customer's language requirement: final output in English only.
 - Output only the corrected customer-facing draft. No commentary.
 - Remove or soften any claim that says the agent checked, reviewed, saw, confirmed, updated, escalated, refunded, approved, rejected, or changed an account/profile/content/payout/KYC/media unless the source context explicitly proves that action/result.
+- **DELETE any advice to dispute a charge.** If the draft tells the customer to dispute, reverse, cancel, or report a charge as unauthorised with their bank, card issuer, or wallet (Apple Pay / Apple Cash, Google Pay, PayPal) — including "Report an Issue" / "Report a Problem" flows — cut it entirely. Fanvue's zero-tolerance chargeback policy means that advice would get the customer's own account banned. Replace it with the internal next step: we look the transaction up (BIN + last 4) or raise it with the payments/fraud team. Never ask for a full card number, expiry, or CVV.
+- If the draft treats a **pending** charge as money taken, correct it: a pending or "not paid" transaction is an authorisation hold that the customer's bank releases automatically within a few days.
 - Never invent Fanvue policy, account status, profile state, payout status, KYC result, media-review outcome, or timelines.
 - If a live tool/profile/account check would be needed, phrase it as a future/needed check without claiming it already happened.
 - Keep the warm support tone, markdown readability, and exactly one clear call-to-action.`,

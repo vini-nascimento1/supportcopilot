@@ -16,6 +16,7 @@ import {
   getTextDraftModel,
   getAuxDraftModel,
   getDefaultReasoningEffort,
+  REPLY_STYLE_NUDGE,
 } from "./draft-ai"
 import type { OpenAIMessage } from "./draft-ai"
 import type { NotionSnippet } from "./notion-retrieval"
@@ -122,6 +123,54 @@ describe("grounding and capability boundaries", () => {
     expect(out[0].content).toContain("strict grounding verifier")
     expect(out[0].content).toContain("Remove or soften any claim")
     expect(out[1].content).toContain("I've checked your account")
+  })
+})
+
+// A live draft told a fan to open an Apple Cash "Report an Issue" dispute over a
+// pending charge. Under Fanvue's zero-tolerance chargeback policy that advice
+// would have banned the fan's own account, so the rule is a hard part of every
+// prompt rather than a playbook that may or may not match — these lock that in.
+describe("chargeback / bank-dispute guardrail", () => {
+  const builders: Array<[string, string]> = [
+    ["buildSystemPrompt", buildSystemPrompt(undefined, [], "Vini", [])],
+    ["buildNotionAwareSystemPrompt", buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])],
+    ["buildImproveSystemPrompt", buildImproveSystemPrompt("Vini")],
+    ["buildMacroAdaptSystemPrompt", buildMacroAdaptSystemPrompt("Some approved macro text.", "Vini")],
+  ]
+
+  it.each(builders)("%s forbids sending the customer to a bank dispute", (_name, out) => {
+    expect(out).toContain("Never send a customer to a chargeback or bank dispute")
+    expect(out).toContain("zero-tolerance chargeback policy")
+    expect(out).toContain("Report an Issue")
+  })
+
+  it.each(builders)("%s explains a pending charge as an authorisation hold", (_name, out) => {
+    expect(out).toContain("authorisation hold, not a completed payment")
+  })
+
+  it.each(builders)("%s asks for BIN + last 4 only, never full card details", (_name, out) => {
+    expect(out).toContain("BIN (first 6 digits)")
+    expect(out).toContain("Never ask for a full card number, expiry date, or CVV")
+  })
+
+  it("makes the verifier delete dispute advice as a last line of defence", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Use the KB only." },
+      { role: "user", content: "Customer does not recognise a charge." },
+    ]
+    const out = buildDraftVerifierMessages(messages, "Please tap Report an Issue and report it as unauthorised.")
+    expect(out[0].content).toContain("DELETE any advice to dispute a charge")
+    expect(out[0].content).toContain("authorisation hold")
+  })
+})
+
+// gpt-5-family tic: ending a reply with "Reply 'cancel it' and I'll…", which
+// reads as an automated keyword bot rather than the human agent it claims to be.
+describe("no keyword-gated confirmations", () => {
+  it("bans magic-word replies and asks for a plain go-ahead instead", () => {
+    expect(REPLY_STYLE_NUDGE).toContain("Never gate an action behind a magic word")
+    expect(REPLY_STYLE_NUDGE).toContain("Type CONFIRM")
+    expect(REPLY_STYLE_NUDGE).toContain("Just confirm you'd like me to go ahead")
   })
 })
 
