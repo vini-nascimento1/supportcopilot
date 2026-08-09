@@ -4,6 +4,7 @@ import {
   isNonRead,
   hasCapabilityGap,
   deriveRiskBand,
+  deriveEvidenceRiskBand,
   isSendLocked,
   classifyWebhookTopic,
   hasBodyChanged,
@@ -79,6 +80,15 @@ describe("deriveRiskBand", () => {
     ).toBe("low_confidence")
   })
 
+  it("documents the defect v2 fixes: a gate match alone earns the top band", () => {
+    // Kept as a characterisation test. This is exactly why matched drafts
+    // outperformed nothing-matched ones on approval (57.6% vs 67.5%): the gate
+    // could be wrong and the card still arrived as "ready".
+    expect(
+      deriveRiskBand({ capabilityGap: false, gateMatched: true, notionHadHits: false })
+    ).toBe("ready")
+  })
+
   it("playbook requiring a manual action -> needs_check, even on a clean gate match", () => {
     expect(
       deriveRiskBand({
@@ -88,6 +98,63 @@ describe("deriveRiskBand", () => {
         playbookRequiresManualAction: true,
       })
     ).toBe("needs_check")
+  })
+})
+
+describe("deriveEvidenceRiskBand", () => {
+  const base = {
+    capabilityGap: false,
+    abstained: false,
+    topScore: 0.03,
+    agreedCount: 1,
+    customerSafeCount: 2,
+  }
+
+  it("keeps the capability-gap lock as the highest-priority rule", () => {
+    expect(deriveEvidenceRiskBand({ ...base, capabilityGap: true })).toBe("needs_check")
+  })
+
+  it("keeps the manual-action lock", () => {
+    expect(deriveEvidenceRiskBand({ ...base, playbookRequiresManualAction: true })).toBe("needs_check")
+  })
+
+  it("promotes to ready only when both arms agreed on something customer-safe", () => {
+    expect(deriveEvidenceRiskBand(base)).toBe("ready")
+  })
+
+  it("does NOT promote a single-arm hit — this is the 57.6% defect", () => {
+    // v1 would have called this "ready" purely because a playbook matched.
+    expect(deriveEvidenceRiskBand({ ...base, agreedCount: 0 })).toBe("low_confidence")
+  })
+
+  it("does NOT promote when the only evidence is internal-only", () => {
+    // Internal material shapes what the agent does, never what the customer is
+    // told — so there is nothing to ground a customer-facing reply on.
+    expect(deriveEvidenceRiskBand({ ...base, customerSafeCount: 0 })).toBe("low_confidence")
+  })
+
+  it("bands a deliberate abstain as low_confidence, not ready", () => {
+    expect(
+      deriveEvidenceRiskBand({ ...base, abstained: true, topScore: null, agreedCount: 0, customerSafeCount: 0 })
+    ).toBe("low_confidence")
+  })
+
+  it("still locks a capability-gap card even when it abstained", () => {
+    expect(
+      deriveEvidenceRiskBand({ ...base, capabilityGap: true, abstained: true, agreedCount: 0 })
+    ).toBe("needs_check")
+  })
+
+  it("only ever returns the three existing band values, so the UI and send-lock are unchanged", () => {
+    const cases = [
+      base,
+      { ...base, agreedCount: 0 },
+      { ...base, capabilityGap: true },
+      { ...base, abstained: true },
+    ]
+    for (const c of cases) {
+      expect(["ready", "needs_check", "low_confidence"]).toContain(deriveEvidenceRiskBand(c))
+    }
   })
 })
 

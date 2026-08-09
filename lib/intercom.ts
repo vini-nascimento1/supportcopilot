@@ -851,8 +851,58 @@ export type IntercomArticle = {
  * Returns empty array if the token is missing, the request fails, or Help
  * Center is not set up on this workspace.
  */
+// Words that carry no retrieval signal. Deliberately short: over-filtering
+// throws away real support vocabulary ("payout", "refund", "verify").
+const ARTICLE_STOPWORDS = new Set([
+  "the", "and", "for", "you", "your", "this", "that", "with", "have", "has", "was", "were",
+  "but", "not", "are", "can", "could", "would", "should", "will", "from", "they", "them",
+  "there", "their", "what", "when", "why", "how", "who", "please", "hello", "hi", "hey",
+  "thanks", "thank", "regards", "any", "all", "get", "got", "been", "being", "just", "now",
+  "help", "issue", "problem", "account", "fanvue", "support", "team", "message", "email",
+])
+
+/**
+ * Turns a ticket into a handful of search keywords.
+ *
+ * Intercom's article search matches `body` with `~` (contains), so the previous
+ * code — which passed the ENTIRE ticket text as one needle — was asking whether
+ * any article body literally contains a whole customer paragraph. It essentially
+ * never matched, which silently emptied the layer the draft prompt calls "your
+ * factual source of truth".
+ *
+ * Identifier-shaped tokens (w-8ben, sys_cb911, 3ds) are kept ahead of prose
+ * because they are the highest-signal thing a ticket can contain.
+ */
+export function extractArticleKeywords(text: string, max = 6): string[] {
+  const tokens = text
+    .toLowerCase()
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[^a-z0-9\-_]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+
+  const seen = new Set<string>()
+  const identifiers: string[] = []
+  const words: string[] = []
+
+  for (const token of tokens) {
+    if (token.length < 3 || token.length > 32) continue
+    if (ARTICLE_STOPWORDS.has(token)) continue
+    if (seen.has(token)) continue
+    seen.add(token)
+    // Digits or internal punctuation => looks like a code, form name or status.
+    if (/[0-9]/.test(token) || /[-_]/.test(token)) identifiers.push(token)
+    else words.push(token)
+  }
+
+  return [...identifiers, ...words].slice(0, max)
+}
+
 export async function searchArticles(query: string): Promise<IntercomArticle[]> {
   if (!intercomToken || !query.trim()) return []
+
+  const keywords = extractArticleKeywords(query)
+  if (keywords.length === 0) return []
 
   try {
     const response = await fetchIntercom("https://api.intercom.io/articles/search", {
@@ -864,8 +914,10 @@ export async function searchArticles(query: string): Promise<IntercomArticle[]> 
       },
       body: JSON.stringify({
         query: {
-          operator: "AND",
-          value: [{ field: "body", operator: "~", value: query }],
+          // OR, not AND: an article rarely contains every keyword from a ticket,
+          // and requiring all of them reproduces the old empty-result behaviour.
+          operator: "OR",
+          value: keywords.map((keyword) => ({ field: "body", operator: "~", value: keyword })),
         },
         pagination: { per_page: 5 },
       }),

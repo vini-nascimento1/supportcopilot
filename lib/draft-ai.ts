@@ -438,6 +438,108 @@ export function buildNotionAwareSystemPrompt(
   return base + sections.join("\n\n")
 }
 
+// ── Evidence-based grounding (retrieval v2) ────────────────────────────────
+//
+// Replaces the winner-take-all playbook injection above. The measured problem:
+// a matched playbook produced WORSE drafts than no match at all (57.6% vs
+// 67.5% approve, n=1,201), because the gate picks exactly one playbook out of
+// 61 and the model then writes confident prose grounded in whatever it picked.
+//
+// Three changes here:
+//   1. Ranked passages, not one document — a playbook is now one kind of
+//      evidence alongside approved macros and response templates.
+//   2. Every passage is numbered so the model can be told to ground claims in
+//      a specific citation instead of the general vibe of the context.
+//   3. Abstaining is stated as a correct outcome. "No playbook matched" was
+//      already the better-performing path; this makes it deliberate rather
+//      than accidental.
+
+/** Minimal shape the prompt needs. Deliberately decoupled from search.ts. */
+export type EvidencePassage = {
+  title: string
+  headingPath: string | null
+  sourceKind: string
+  content: string
+  visibility: "customer_safe" | "internal_only"
+}
+
+/**
+ * Builds the evidence block. Customer-safe and internal passages are rendered
+ * as separate sections with different permissions — the fourth and final layer
+ * of the firewall (column default, SQL include_internal, partitionByVisibility,
+ * then this).
+ */
+export function buildEvidenceSection(passages: EvidencePassage[]): string {
+  if (passages.length === 0) {
+    return `## Retrieved knowledge
+Nothing in the knowledge base matched this case with enough confidence to ground a factual answer.
+
+- Do NOT guess, and do NOT reach for a loosely-related policy — a confident wrong answer is worse here than no answer.
+- Acknowledge the customer warmly, answer only what the thread itself supports, and ask ONE focused question that would let you resolve it.
+- If the case needs a system check you can't do from the thread, say you're looking into it on your side.`
+  }
+
+  const customerSafe = passages.filter((p) => p.visibility === "customer_safe")
+  const internalOnly = passages.filter((p) => p.visibility !== "customer_safe")
+
+  const sections: string[] = [`## Retrieved knowledge (ranked by relevance to THIS case)`]
+
+  if (customerSafe.length > 0) {
+    const lines = customerSafe.map((p, i) => {
+      const where = p.headingPath ? ` — ${p.headingPath}` : ""
+      return `[${i + 1}] ${p.title}${where} (${p.sourceKind})\n${p.content}`
+    })
+    sections.push(
+      `### Support knowledge — you MAY ground the customer-facing reply on these\n${lines.join("\n\n")}`
+    )
+  }
+
+  if (internalOnly.length > 0) {
+    const offset = customerSafe.length
+    const lines = internalOnly.map((p, i) => {
+      const where = p.headingPath ? ` — ${p.headingPath}` : ""
+      return `[${offset + i + 1}] ${p.title}${where} (${p.sourceKind})\n${p.content}`
+    })
+    sections.push(
+      `### Internal context — DO NOT quote or reveal to the customer\nThese are internal agent procedure (playbooks, Slack, Drive, Linear). Use them ONLY to reason about what is true and what to do internally — never repeat them, never name the source, never mention that an internal source exists.\n${lines.join("\n\n")}`
+    )
+  }
+
+  sections.push(`### How to use the evidence
+- Every factual claim about Fanvue policy, process, or timelines must come from a passage above. If a claim isn't supported there or by the thread itself, don't make it.
+- Prefer **Support knowledge** wording as your basis; paraphrase in Fanvue tone rather than pasting verbatim.
+- Internal context shapes what you do, never what you say. If the only relevant material is internal, acknowledge warmly and ask one focused question or hold the policy line.
+- Retrieved knowledge is documentation, not live account data. It is never proof that THIS customer's payout, KYC, profile, or media was checked.
+- The passages are ranked, not guaranteed. If none of them actually fits what the customer asked, say so plainly and ask a question instead of stretching the closest one to fit.`)
+
+  return sections.join("\n\n")
+}
+
+/**
+ * The v2 system prompt: the same rule stack as buildSystemPrompt (identity,
+ * capability, policy, payment-dispute, tone), with the single-playbook block
+ * and Notion highlights swapped for ranked evidence.
+ */
+export function buildEvidenceSystemPrompt(
+  passages: EvidencePassage[],
+  agentName: string,
+  articles: IntercomArticle[],
+  hasAgentReplied = false,
+  greetingInjected = false,
+  toneInstruction?: string
+): string {
+  const base = buildSystemPrompt(
+    undefined,
+    [],
+    agentName,
+    articles,
+    hasAgentReplied,
+    greetingInjected,
+    toneInstruction
+  )
+  return `${base}\n\n${buildEvidenceSection(passages)}`
+}
+
 // ── User message builder ───────────────────────────────────────────────────
 
 export function buildUserMessage(

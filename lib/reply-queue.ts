@@ -68,6 +68,53 @@ export function deriveRiskBand(input: RiskBandInput): RiskBand {
   return "low_confidence"
 }
 
+// ── Evidence-based banding (retrieval v2) ──────────────────────────────────
+//
+// The v1 rule above promotes ANY gate match straight to "ready". That is
+// backwards: playbook-matched drafts were approved 57.6% of the time versus
+// 67.5% when nothing matched (n=1,201 reply_queue_events). A wrong match
+// corrupted the prompt AND raised the trust signal, so the worst drafts
+// arrived wearing the highest-confidence badge.
+//
+// v2 keys off how good the retrieved evidence actually was. Same three band
+// values, so the UI, send-lock and audit log are unchanged.
+
+export type EvidenceBandInput = {
+  capabilityGap: boolean
+  playbookRequiresManualAction?: boolean
+  /** Retrieval deliberately returned nothing (below the score floor). */
+  abstained: boolean
+  /** Fused score of the top passage, if any. */
+  topScore: number | null
+  /** Passages found by BOTH the vector and lexical arms — the strongest signal. */
+  agreedCount: number
+  /** How many passages the customer-facing reply may actually be grounded on. */
+  customerSafeCount: number
+}
+
+/**
+ * "ready" now requires real corroboration: at least one passage that both
+ * retrieval arms agreed on, and something customer-safe to ground the reply in.
+ * A confident-but-unsupported draft lands in low_confidence where it belongs,
+ * instead of being waved through.
+ */
+export function deriveEvidenceRiskBand(input: EvidenceBandInput): RiskBand {
+  if (input.capabilityGap) return "needs_check"
+  if (input.playbookRequiresManualAction) return "needs_check"
+
+  // Abstaining is a correct, deliberate outcome — but the draft is then written
+  // from the thread alone, so it must not claim to be grounded.
+  if (input.abstained) return "low_confidence"
+
+  // Internal-only evidence can inform what the agent does, never what the
+  // customer is told. Nothing customer-safe means nothing to ground a reply on.
+  if (input.customerSafeCount === 0) return "low_confidence"
+
+  if (input.agreedCount > 0) return "ready"
+
+  return "low_confidence"
+}
+
 // The send button is locked only for capability-gap cards.
 export function isSendLocked(band: RiskBand): boolean {
   return band === "needs_check"

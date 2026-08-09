@@ -17,6 +17,8 @@ import {
   getAuxDraftModel,
   getDefaultReasoningEffort,
   REPLY_STYLE_NUDGE,
+  buildEvidenceSection,
+  buildEvidenceSystemPrompt,
 } from "./draft-ai"
 import type { OpenAIMessage } from "./draft-ai"
 import type { NotionSnippet } from "./notion-retrieval"
@@ -123,6 +125,102 @@ describe("grounding and capability boundaries", () => {
     expect(out[0].content).toContain("strict grounding verifier")
     expect(out[0].content).toContain("Remove or soften any claim")
     expect(out[1].content).toContain("I've checked your account")
+  })
+})
+
+// Retrieval v2: ranked cited evidence replaces the single-playbook injection.
+// The defect being fixed is measured — playbook-matched drafts were approved
+// 57.6% of the time vs 67.5% when nothing matched (n=1,201) — so "we found
+// nothing" has to be a first-class, well-handled outcome, not a fallback.
+describe("buildEvidenceSection", () => {
+  const safe = {
+    title: "Payout Already Submitted (Pending)",
+    headingPath: "Payouts > Pending",
+    sourceKind: "response",
+    content: "Pending payouts settle within 5-7 business days.",
+    visibility: "customer_safe" as const,
+  }
+  const internal = {
+    title: "Red Flag Handbook",
+    headingPath: "Fraud > Escalation",
+    sourceKind: "playbook",
+    content: "Escalate to #fraud-issues with the account handle.",
+    visibility: "internal_only" as const,
+  }
+
+  it("tells the model to ask rather than guess when nothing was retrieved", () => {
+    const out = buildEvidenceSection([])
+    expect(out).toContain("Nothing in the knowledge base matched")
+    expect(out).toContain("do NOT reach for a loosely-related policy")
+    expect(out).toContain("ask ONE focused question")
+  })
+
+  it("numbers passages so claims can be tied to a specific citation", () => {
+    const out = buildEvidenceSection([safe])
+    expect(out).toContain("[1] Payout Already Submitted (Pending)")
+    expect(out).toContain("Payouts > Pending")
+  })
+
+  it("puts customer-safe and internal passages in separate sections", () => {
+    const out = buildEvidenceSection([safe, internal])
+    expect(out).toContain("you MAY ground the customer-facing reply on these")
+    expect(out).toContain("DO NOT quote or reveal to the customer")
+  })
+
+  it("never files internal content under the groundable heading", () => {
+    const out = buildEvidenceSection([internal])
+    const safeHeading = out.indexOf("you MAY ground")
+    expect(safeHeading).toBe(-1)
+    expect(out).toContain("DO NOT quote or reveal to the customer")
+  })
+
+  it("numbers internal passages continuing from the customer-safe ones", () => {
+    const out = buildEvidenceSection([safe, internal])
+    expect(out).toContain("[1] Payout Already Submitted (Pending)")
+    expect(out).toContain("[2] Red Flag Handbook")
+  })
+
+  it("states that ranked evidence is not a guarantee of fit", () => {
+    const out = buildEvidenceSection([safe])
+    expect(out).toContain("ranked, not guaranteed")
+    expect(out).toContain("ask a question instead of stretching the closest one")
+  })
+
+  it("forbids treating retrieved docs as proof this customer's account was checked", () => {
+    const out = buildEvidenceSection([safe])
+    expect(out).toContain("never proof that THIS customer's payout, KYC, profile, or media was checked")
+  })
+})
+
+describe("buildEvidenceSystemPrompt", () => {
+  const passages = [
+    {
+      title: "Chargebacks",
+      headingPath: null,
+      sourceKind: "macro",
+      content: "Zero tolerance: a disputed charge bans the account.",
+      visibility: "customer_safe" as const,
+    },
+  ]
+
+  it("keeps every hard rule from the base prompt", () => {
+    const out = buildEvidenceSystemPrompt(passages, "Vini", [])
+    expect(out).toContain("Capability boundaries")
+    expect(out).toContain("Never send a customer to a chargeback or bank dispute")
+    expect(out).toContain("You ARE the agent handling this")
+    expect(out).toContain("Policy integrity")
+  })
+
+  it("appends the evidence block", () => {
+    const out = buildEvidenceSystemPrompt(passages, "Vini", [])
+    expect(out).toContain("Retrieved knowledge (ranked by relevance")
+    expect(out).toContain("[1] Chargebacks")
+  })
+
+  it("handles the abstain case without losing the rule stack", () => {
+    const out = buildEvidenceSystemPrompt([], "Vini", [])
+    expect(out).toContain("Nothing in the knowledge base matched")
+    expect(out).toContain("Never send a customer to a chargeback or bank dispute")
   })
 })
 

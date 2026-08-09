@@ -14,6 +14,7 @@ import {
 import {
   buildSystemPrompt,
   buildNotionAwareSystemPrompt,
+  buildEvidenceSystemPrompt,
   buildGroundedDraftUserMessage,
   buildDraftVerifierMessages,
   buildVerifierGroundingContext,
@@ -29,6 +30,7 @@ import {
   classifyWebhookTopic,
   hasCapabilityGap,
   deriveRiskBand,
+  deriveEvidenceRiskBand,
   type RiskBand,
 } from "@/lib/reply-queue"
 import {
@@ -38,6 +40,8 @@ import {
   type SuggestionSource,
 } from "@/lib/reply-queue-store"
 import { resolveToneForAgentId } from "@/lib/agent-tone"
+import { isRetrievalV2Enabled } from "@/lib/retrieval/flag"
+import { searchKnowledge } from "@/lib/retrieval/search"
 import { stripEmDashes } from "@/lib/tone-presets"
 
 // The always-on reply-queue pipeline — runs off the Intercom webhook (in the
@@ -90,6 +94,13 @@ function buildJustification(args: {
   matchedName: string | null
   gateConfidence: number | null
   snippets: NotionSnippet[]
+  /** Retrieval v2 summary. Null on the v1 path. */
+  evidence?: {
+    abstained: boolean
+    customerSafe: number
+    internalOnly: number
+    agreed: number
+  } | null
 }): string {
   const lines: string[] = []
   if (args.requiresManualAction) {
@@ -102,7 +113,23 @@ function buildJustification(args: {
       "⚠️ Sensitive category (payout/KYC/media/ban) — verify in fadmin before sending; send is locked."
     )
   }
-  if (args.matchedName) {
+  if (args.evidence) {
+    // v2: describe what actually grounded the draft, including the honest
+    // "nothing matched" case — that is a deliberate outcome here, not a gap.
+    if (args.evidence.abstained) {
+      lines.push(
+        "No knowledge matched this case confidently — drafted from the thread alone, and the reply asks rather than asserts."
+      )
+    } else {
+      const parts = [`${args.evidence.customerSafe} customer-safe passage(s)`]
+      if (args.evidence.internalOnly > 0) {
+        parts.push(`${args.evidence.internalOnly} internal-only (reasoning only, never quoted)`)
+      }
+      lines.push(
+        `Grounded in ${parts.join(", ")}; ${args.evidence.agreed} corroborated by both keyword and semantic search.`
+      )
+    }
+  } else if (args.matchedName) {
     const conf = args.gateConfidence != null ? ` (confidence ${args.gateConfidence.toFixed(2)})` : ""
     lines.push(`Matched playbook: ${args.matchedName}${conf}.`)
   } else {
@@ -206,22 +233,49 @@ export async function computeAndPersistSuggestion(
         : null
   const gateMatched = Boolean(matched)
 
+  // NOTE: the gate above still runs under v2, deliberately. It no longer
+  // grounds the draft, but `requires_manual_action` is a SAFETY control — it
+  // forces needs_check and locks the send when a playbook needs a human to do
+  // a system step the AI can't (e.g. resend a payout email). Dropping the gate
+  // would silently drop that lock. Folding the flag into the retrieved chunks
+  // would remove the extra call; until then, correctness beats the saving.
+  const requiresManualAction = matched?.requiresManualAction ?? false
+
+  // ── Retrieval v2 (flagged off by default) ────────────────────────────────
+  // Hybrid search over knowledge_chunks replaces BOTH the winner-take-all
+  // playbook injection and the Notion MCP highlights. See lib/retrieval/flag.ts
+  // for why this ships on eval evidence rather than judgement.
+  const useV2 = isRetrievalV2Enabled()
+  let evidence: Awaited<ReturnType<typeof searchKnowledge>> | null = null
+  if (useV2) {
+    evidence = await searchKnowledge(ticketText, { includeInternal: true })
+  }
+
   // Notion deep search ONLY for an assigned conversation (per-user token, D10).
   // Unassigned → cheap precompute (gate + band); the deep search fires later on
-  // [Assign to me].
+  // [Assign to me]. Skipped entirely under v2, which retrieves from our own
+  // index instead of a per-agent third-party token.
   let snippets: NotionSnippet[] = []
-  if (owner.email) {
+  if (!useV2 && owner.email) {
     snippets = await retrieveNotionSnippets(owner.email, origin, ticketText)
   }
   const notionHadHits = snippets.length > 0
 
-  const requiresManualAction = matched?.requiresManualAction ?? false
-  const band = deriveRiskBand({
-    capabilityGap,
-    gateMatched,
-    notionHadHits,
-    playbookRequiresManualAction: requiresManualAction,
-  })
+  const band = evidence
+    ? deriveEvidenceRiskBand({
+        capabilityGap,
+        playbookRequiresManualAction: requiresManualAction,
+        abstained: evidence.abstained,
+        topScore: evidence.passages[0]?.fusedScore ?? null,
+        agreedCount: evidence.passages.filter((p) => p.agreed).length,
+        customerSafeCount: evidence.passages.filter((p) => p.visibility === "customer_safe").length,
+      })
+    : deriveRiskBand({
+        capabilityGap,
+        gateMatched,
+        notionHadHits,
+        playbookRequiresManualAction: requiresManualAction,
+      })
 
   // Generate the reply (reuse the draft brain). Even a capability-gap card gets a
   // drafted safe part — only the SEND is locked, not the drafting.
@@ -246,9 +300,27 @@ export async function computeAndPersistSuggestion(
   // greeting (with their name) is injected deterministically below — so the
   // model is told NOT to write its own greeting and never double up.
   const greetingInjected = !hasAgentReplied
-  let systemPrompt = notionHadHits
-    ? buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied, greetingInjected, toneInstruction)
-    : buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied, greetingInjected, toneInstruction)
+  let systemPrompt: string
+  if (evidence) {
+    systemPrompt = buildEvidenceSystemPrompt(
+      evidence.passages.map((p) => ({
+        title: p.title,
+        headingPath: p.headingPath,
+        sourceKind: p.sourceKind,
+        content: p.content,
+        visibility: p.visibility,
+      })),
+      agentName,
+      articles,
+      hasAgentReplied,
+      greetingInjected,
+      toneInstruction
+    )
+  } else if (notionHadHits) {
+    systemPrompt = buildNotionAwareSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, snippets, hasAgentReplied, greetingInjected, toneInstruction)
+  } else {
+    systemPrompt = buildSystemPrompt(matched ?? undefined, responseTemplates, agentName, articles, hasAgentReplied, greetingInjected, toneInstruction)
+  }
   // Steer the model away from emitting its action plan as a checklist and
   // asking to proceed — output just the reply.
   systemPrompt += `\n\n${REPLY_STYLE_NUDGE}`
@@ -307,9 +379,18 @@ export async function computeAndPersistSuggestion(
     body = `${buildAgentGreeting(agentName)}\n\n${body.trim()}`
   }
 
-  const sources: SuggestionSource[] = snippets
-    .filter((s) => classifyNotionSnippetUse(s) === "customerSafe")
-    .map((s) => ({ title: s.title, url: s.url, kind: s.source }))
+  // Under v2 the card must cite what actually grounded the draft — the
+  // retrieved passages — not the Notion snippets that were never fetched.
+  // Internal-only passages are excluded here for the same reason they are
+  // walled off in the prompt: the sources list is agent-visible UI, but it
+  // names what the CUSTOMER-facing text was built from.
+  const sources: SuggestionSource[] = evidence
+    ? evidence.passages
+        .filter((p) => p.visibility === "customer_safe")
+        .map((p) => ({ title: p.title, url: p.sourceUrl ?? "", kind: p.sourceKind }))
+    : snippets
+        .filter((s) => classifyNotionSnippetUse(s) === "customerSafe")
+        .map((s) => ({ title: s.title, url: s.url, kind: s.source }))
 
   const res = await upsertPendingSuggestion({
     intercomConversationId: conversationId,
@@ -321,9 +402,20 @@ export async function computeAndPersistSuggestion(
       band,
       capabilityGap,
       requiresManualAction,
-      matchedName: matched?.caseType ?? null,
-      gateConfidence: gate.reason === "error" ? null : gate.confidence,
+      // Under v2 the playbook gate still runs (see the manual-action note
+      // above) but does NOT ground the draft, so claiming "matched playbook"
+      // on the card would misdescribe where the reply came from.
+      matchedName: evidence ? null : matched?.caseType ?? null,
+      gateConfidence: evidence || gate.reason === "error" ? null : gate.confidence,
       snippets,
+      evidence: evidence
+        ? {
+            abstained: evidence.abstained,
+            customerSafe: evidence.passages.filter((p) => p.visibility === "customer_safe").length,
+            internalOnly: evidence.passages.filter((p) => p.visibility !== "customer_safe").length,
+            agreed: evidence.passages.filter((p) => p.agreed).length,
+          }
+        : null,
     }),
     sources,
     confidence: gate.reason === "error" ? null : gate.confidence,
