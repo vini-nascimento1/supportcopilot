@@ -11,7 +11,8 @@
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval:retrieval": "tsx scripts/eval-retrieval.mts"
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.2.8",
@@ -47,6 +48,7 @@
     "prettier-plugin-tailwindcss": "^0.8.0",
     "shadcn": "^4.10.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.11",
     "typescript": "^5",
     "vitest": "^4.1.8"
   }

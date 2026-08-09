@@ -67,6 +67,27 @@ describe("chunkPlaybook", () => {
     const keys = chunkPlaybook(playbook).map((c) => `${c.section}:${c.chunkIndex}`)
     expect(new Set(keys).size).toBe(keys.length)
   })
+
+  // Real playbook fields reach ~4,700 chars. One oversized vector matches
+  // everything weakly — the exact failure field-level chunking exists to avoid.
+  it("windows an oversized field instead of emitting one blurry chunk", () => {
+    const huge = Array.from({ length: 140 }, (_, i) => `Step ${i}: do the thing carefully and completely.`).join("\n\n")
+    const chunks = chunkPlaybook({ ...playbook, resolution: huge })
+    const resolutionChunks = chunks.filter((c) => c.section === "resolution")
+    expect(resolutionChunks.length).toBeGreaterThan(1)
+  })
+
+  it("keeps the natural key unique when a field windows into several chunks", () => {
+    const huge = Array.from({ length: 140 }, (_, i) => `Step ${i}: do the thing carefully and completely.`).join("\n\n")
+    const keys = chunkPlaybook({ ...playbook, resolution: huge }).map((c) => `${c.section}:${c.chunkIndex}`)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it("repeats the case type on every window of a split field", () => {
+    const huge = Array.from({ length: 140 }, (_, i) => `Step ${i}: do the thing carefully and completely.`).join("\n\n")
+    const chunks = chunkPlaybook({ ...playbook, resolution: huge }).filter((c) => c.section === "resolution")
+    for (const c of chunks) expect(c.content).toContain("Chargebacks from the fan's perspective")
+  })
 })
 
 describe("chunkResponse and chunkMacro", () => {
@@ -86,6 +107,28 @@ describe("chunkResponse and chunkMacro", () => {
   it("drops empty bodies rather than indexing blanks", () => {
     expect(chunkMacro({ id: "m3", name: "Empty", bodyText: "  ", visibility: "public" })).toEqual([])
     expect(chunkResponse({ id: "r2", title: "Empty", body: "", playbookId: null })).toEqual([])
+  })
+
+  // The longest real macro is ~4,900 chars (~1,230 tokens).
+  it("windows a long macro and keeps the title on every window", () => {
+    const long = Array.from({ length: 140 }, (_, i) => `Paragraph ${i} of a long policy macro explaining things.`).join("\n\n")
+    const chunks = chunkMacro({ id: "m4", name: "Long policy", bodyText: long, visibility: "public" })
+    expect(chunks.length).toBeGreaterThan(1)
+    for (const c of chunks) expect(c.content).toContain("Long policy")
+    expect(new Set(chunks.map((c) => c.chunkIndex)).size).toBe(chunks.length)
+  })
+
+  it("windows a long response template too", () => {
+    const long = Array.from({ length: 140 }, (_, i) => `Paragraph ${i} of a long response template.`).join("\n\n")
+    const chunks = chunkResponse({ id: "r3", title: "Long template", body: long, playbookId: null })
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(new Set(chunks.map((c) => c.chunkIndex)).size).toBe(chunks.length)
+  })
+
+  it("still emits exactly one chunk for a normal-length macro", () => {
+    const chunks = chunkMacro({ id: "m5", name: "Short", bodyText: "Sorry about the delay.", visibility: "public" })
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0].chunkIndex).toBe(0)
   })
 })
 
