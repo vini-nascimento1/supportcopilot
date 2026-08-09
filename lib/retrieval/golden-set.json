@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "frozenAt": "2026-08-09",
+  "cutoff": "2026-08-09T18:14:47.720728+00:00",
+  "eventsAtCutoff": 1216,
+  "note": "Frozen offline eval set drawn from reply_queue_events. Selection is a deterministic SQL rule (below) rather than a hardcoded id list: rows at or before `cutoff` never change, so the rule reproduces the same 361 cases forever. The runner asserts `strata` and `total` still match and fails loudly if they drift (rows deleted, bodies nulled, or the cutoff edited). No customer text is stored here - bodies are hydrated from the DB at run time.",
+  "rule": {
+    "source": "reply_queue_events",
+    "filter": "suggested_body is not null and created_at <= cutoff",
+    "stratumKey": "action / coalesce(risk_band,'unknown') / (playbook_id is not null ? 'pb' : 'nopb')",
+    "order": "row_number() over (partition by stratum order by md5(id::text))",
+    "take": "least(stratum_n, greatest(12, ceil(stratum_n * 0.25)))"
+  },
+  "cohorts": {
+    "paired": {
+      "total": 285,
+      "actions": ["approve", "edit"],
+      "scoredBy": ["groundedSupport", "divergence", "recallAtK", "guardrails"],
+      "note": "Has both suggested_body and final_body, so the human's sent text is the target."
+    },
+    "reject": {
+      "total": 76,
+      "actions": ["reject"],
+      "scoredBy": ["abstain", "guardrails"],
+      "note": "suggested_body only - nothing was sent, so there is no target text. Scored on whether retrieval should have abstained rather than on similarity."
+    }
+  },
+  "total": 361,
+  "strata": {
+    "approve/ready/pb": 117,
+    "edit/ready/pb": 48,
+    "approve/needs_check/pb": 32,
+    "reject/ready/pb": 28,
+    "edit/needs_check/pb": 24,
+    "approve/ready/nopb": 20,
+    "approve/low_confidence/nopb": 12,
+    "approve/needs_check/nopb": 12,
+    "edit/low_confidence/nopb": 12,
+    "edit/ready/nopb": 12,
+    "reject/low_confidence/nopb": 12,
+    "reject/needs_check/pb": 12,
+    "reject/ready/nopb": 10,
+    "edit/needs_check/nopb": 5,
+    "reject/needs_check/nopb": 5
+  }
+}
