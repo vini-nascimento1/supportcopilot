@@ -164,6 +164,24 @@ describe("chargeback / bank-dispute guardrail", () => {
   })
 })
 
+// A live draft said "I'll ... request a review if needed" for a check the
+// agent performs themselves in Fadmin — "request" implies handing it to a
+// separate reviewing party, which isn't what happens. Same family as the
+// AGENT_IDENTITY_RULES ban on "our team will review" / "escalate to a real
+// agent": the agent IS the one doing the work, so say so directly.
+describe("no vague 'request/submit a review' framing for self-performed checks", () => {
+  const builders: Array<[string, string]> = [
+    ["buildSystemPrompt", buildSystemPrompt(undefined, [], "Vini", [])],
+    ["buildNotionAwareSystemPrompt", buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])],
+    ["buildMacroAdaptSystemPrompt", buildMacroAdaptSystemPrompt("Some approved macro text.", "Vini")],
+  ]
+
+  it.each(builders)("%s tells the model to say it's doing the check, not requesting it", (_name, out) => {
+    expect(out).toContain("don't describe it as \"requesting\" or \"submitting\" it to someone else")
+    expect(out).toContain("I'll review this now")
+  })
+})
+
 // gpt-5-family tic: ending a reply with "Reply 'cancel it' and I'll…", which
 // reads as an automated keyword bot rather than the human agent it claims to be.
 describe("no keyword-gated confirmations", () => {

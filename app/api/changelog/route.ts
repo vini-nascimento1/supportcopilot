@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-09-c",
+    date: "2026-08-09",
+    title: "\"I'll request a review\" is now \"I'll review this now\"",
+    description:
+      "Drafts had a habit of describing a check you were about to do yourself as something being \"requested\" or \"submitted\", as if it went off to a separate reviewing team. When you're the one doing the check, the draft now says so plainly instead of making it sound like it's out of your hands.",
+  },
+  {
     id: "seed-2026-08-09-b",
     date: "2026-08-09",
     title: "Drafts never tell a customer to dispute a charge again",
