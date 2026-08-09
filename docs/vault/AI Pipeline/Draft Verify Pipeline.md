@@ -58,6 +58,17 @@ Once a draft exists, it's classified into a `RiskBand` (`"ready" | "needs_check"
 
 `computeAndPersistSuggestion()` is the main function for the autonomous path. It runs generation + verification, builds a **justification** — a short explanation surfaced as a tooltip in the Queue UI explaining *why* this particular suggestion was generated (playbook matched, Notion hits found, etc.) — and calls `upsertPendingSuggestion()` (in `lib/reply-queue-store.ts`) to write the row into `suggested_replies` (see [[Database Schema Reference]]). `runReplyQueuePipeline()` is the outer loop that the webhook/sweep calls, which fans out to `computeAndPersistSuggestion()` per eligible conversation.
 
+## Retrieval is being replaced (2026-08-09)
+
+The playbook gate + Notion-MCP grounding described below is measurably
+net-negative: playbook-matched drafts were approved 57.6% of the time versus
+67.5% when nothing matched (n=1,201 `reply_queue_events`). A chunked corpus with
+hybrid search, an explicit abstain, and evidence-based risk banding is built and
+sits behind `RETRIEVAL_V2` (default off) until the frozen eval set clears it.
+
+Read [[Retrieval Architecture]] for the replacement. The sections below still
+describe the **live default** path.
+
 ## Verifier flow
 
 The verifier is what makes the unattended path safe to leave to `suggested_replies` without a human watching generation happen live. It's a second, cheaper model call whose only job is to strip claims the draft can't actually back up.

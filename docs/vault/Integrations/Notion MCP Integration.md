@@ -6,6 +6,18 @@ updated: 2026-07-29
 
 # Notion MCP Integration
 
+> [!warning] Being replaced as the drafting grounding source (2026-08-09)
+> This path returns `highlight` excerpts of roughly **200 characters** as the
+> grounding text, behind a **per-agent** OAuth token that silently yields
+> nothing when an agent hasn't connected Notion. Both properties contributed to
+> retrieval being measurably net-negative — see [[Retrieval Architecture]].
+>
+> The replacement retrieves full passages from our own chunked corpus. It is
+> built and sits behind `RETRIEVAL_V2` (default off) pending the eval. Notion
+> itself is **not yet ingested** into that corpus: a background job cannot use a
+> per-agent token, so it needs a service credential and an explicit page
+> allowlist first. Until then this integration remains the live Notion path.
+
 This integration lets AI-drafted replies ground themselves in the team's Notion knowledge base — plus whatever Notion has connected on top (Google Drive, Slack, Linear, etc.) — for support cases that don't already match a known playbook. It plugs into the draft path described in [[Draft Verify Pipeline]] as an optional, best-effort context source: if Notion is unreachable or unauthenticated, drafting proceeds on the base prompt with no retrieval.
 
 ## Architecture

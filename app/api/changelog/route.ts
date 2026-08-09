@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-09-d",
+    date: "2026-08-09",
+    title: "Drafts can actually find help centre articles now",
+    description:
+      "Drafts are supposed to be grounded in our help centre articles, but the search behind that was looking for the customer's entire message as one exact phrase inside an article, so it almost never found anything. It now searches on the key terms from the ticket, which means the article content genuinely reaches the draft instead of quietly coming back empty.",
+  },
+  {
     id: "seed-2026-08-09-c",
     date: "2026-08-09",
     title: "\"I'll request a review\" is now \"I'll review this now\"",

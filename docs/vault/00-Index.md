@@ -24,6 +24,7 @@ This vault documents **how the app works**, not what to do on any given ticket �
 
 - [[Draft Verify Pipeline]] — the three drafting paths, verifier flow, models/routing, reliability
 - [[System Prompt Architecture]] — why the prompt is layered the way it is, tone presets
+- [[Retrieval Architecture]] — chunked corpus, hybrid search, abstain, and the eval that gates the cutover
 
 ## Integrations
 
