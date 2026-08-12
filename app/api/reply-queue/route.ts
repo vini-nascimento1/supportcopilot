@@ -11,11 +11,30 @@ import {
 import { computeAndPersistSuggestion } from "@/lib/reply-queue-pipeline"
 
 export const dynamic = "force-dynamic"
+// The backfill loop below runs inside after(), which is still bound by the
+// function's duration — without this it was killed partway and the drafts it
+// hadn't reached yet silently never appeared.
+export const maxDuration = 300
 
 // Don't recompute a draft for the same conversation more than once per window,
 // and cap how many we backfill per request — bounds background LLM work.
 const BACKFILL_WINDOW_MS = 5 * 60 * 1000
 const BACKFILL_MAX = 8
+
+// Wall-clock budget for the background backfill, kept under maxDuration so the
+// loop stops itself rather than being killed mid-generation. Anything it
+// doesn't reach is caught by /api/cron/draft-recovery.
+const BACKFILL_BUDGET_MS = 240_000
+
+// How long a freshly written draft is protected from being marked stale by this
+// reconciler. Membership comes from Intercom's SEARCH index, which is only
+// eventually consistent: right after an assignment the conversation often isn't
+// in the results yet, so a draft generated seconds earlier looked like it
+// belonged to an already-answered ticket and was destroyed — and then the
+// attempt marker blocked regeneration for BACKFILL_WINDOW_MS. A conversation
+// the agent genuinely answered is resolved by the send flow and the webhook, so
+// this grace period costs nothing but stops the race from eating live drafts.
+const STALE_GRACE_MS = 10 * 60 * 1000
 
 // The autonomous reply queue for the signed-in agent: their NON-READ conversations
 // (the customer is waiting on us), each with its precomputed AI draft. Membership
@@ -86,8 +105,14 @@ export async function GET(request: Request) {
     // drafts whose conversation left the non-read set; on-request drafts are
     // durable (the agent asked for them) and keep living in the "On request"
     // group even once the ticket is read.
+    const staleCutoffMs = Date.now() - STALE_GRACE_MS
     const noLongerNonRead = pending
       .filter((p) => !nonReadIds.has(p.intercomConversationId) && !p.onRequest)
+      // Only stale drafts old enough that Intercom's search index has certainly
+      // caught up (see STALE_GRACE_MS). A young draft missing from the index is
+      // left pending: it simply reappears on the next poll instead of being
+      // destroyed and blocked from regenerating.
+      .filter((p) => Date.parse(p.createdAt) < staleCutoffMs)
       .map((p) => p.intercomConversationId)
     const missing = drafting.map((d) => d.conversationId)
     const url = new URL(request.url)
@@ -109,8 +134,14 @@ export async function GET(request: Request) {
             const recent = await getRecentlyTouchedConversationIds(missing, sinceIso)
             toCompute = missing.filter((id) => !recent.has(id))
           }
+          const deadline = Date.now() + BACKFILL_BUDGET_MS
           for (const id of toCompute.slice(0, BACKFILL_MAX)) {
-            await computeAndPersistSuggestion(id, origin).catch(() => {})
+            // Out of budget — leave the rest untouched (no attempt marker) so
+            // the recovery sweep or the next poll picks them straight up.
+            if (Date.now() >= deadline) break
+            await computeAndPersistSuggestion(id, origin, {
+              owner: { id: agentId, email },
+            }).catch(() => {})
           }
         }
       } catch {

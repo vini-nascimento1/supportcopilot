@@ -329,17 +329,30 @@ export function InboxPanel({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ conversationId: id }),
-          }).then((r) => {
+          }).then(async (r) => {
             if (!r.ok) throw new Error()
+            const data = (await r.json().catch(() => null)) as { drafted?: boolean } | null
+            return data?.drafted !== false
           })
         )
       )
-      const ok = results.filter((r) => r.status === "fulfilled").length
+      const fulfilled = results.filter(
+        (r): r is PromiseFulfilledResult<boolean> => r.status === "fulfilled"
+      )
+      const ok = fulfilled.length
       const failed = ids.length - ok
+      // Assigned but undrafted is its own outcome — the ticket is claimed and
+      // the recovery sweep will redraft it, but nothing is waiting in the Queue
+      // yet. Saying "drafts are regenerating" for those hid the failure.
+      const undrafted = fulfilled.filter((r) => !r.value).length
       clearSelection()
       if (ok > 0) {
         toast.success(
-          `Assigned ${ok} to you${failed > 0 ? `, ${failed} failed` : ""}. Drafts are regenerating.`
+          `Assigned ${ok} to you${failed > 0 ? `, ${failed} failed` : ""}.${
+            undrafted > 0
+              ? ` ${undrafted} couldn't be drafted yet — retrying in the background.`
+              : " Drafts are regenerating."
+          }`
         )
       } else {
         toast.error("Couldn't assign — try again.")

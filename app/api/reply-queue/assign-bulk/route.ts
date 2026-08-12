@@ -3,11 +3,23 @@ import { NextResponse, after } from "next/server"
 import { resolveIntercomAdminId } from "@/lib/auth"
 import { getAgentContext } from "@/lib/automation/rules"
 import { assignConversationToAdmin } from "@/lib/intercom"
-import { assignSuggestion } from "@/lib/reply-queue-store"
+import { assignSuggestion, settleSuggestionAttempt } from "@/lib/reply-queue-store"
 import { removeTriageItems } from "@/lib/triage/store"
 import { computeAndPersistSuggestion } from "@/lib/reply-queue-pipeline"
 
 export const dynamic = "force-dynamic"
+// Drafting for the whole batch runs in after() below, and after() work is still
+// bound by the function's duration. With no maxDuration set, a batch of 15 at
+// p90 generation speed was killed roughly a third of the way through and the
+// remaining conversations were left assigned with no draft and no error
+// anywhere — the single biggest source of "assign + draft failed silently".
+export const maxDuration = 300
+
+// Wall-clock budget for the background drafting loop, kept under maxDuration so
+// the loop stops itself and records what it skipped instead of being killed
+// mid-generation. Whatever it doesn't reach is picked up by
+// /api/cron/draft-recovery.
+const DRAFT_BUDGET_MS = 240_000
 
 const INTERCOM_TOKEN = process.env.INTERCOM_ACCESS_TOKEN
 
@@ -91,10 +103,26 @@ export async function POST(req: Request) {
 
   // Background draft generation — see the top-of-file comment. Does not block
   // the response; a failure here never unwinds the assignment already made.
+  //
+  // Each conversation's outcome is recorded (settleSuggestionAttempt inside the
+  // pipeline, or the explicit marker below when we run out of budget), so a
+  // draft that never arrives leaves a trace instead of disappearing. The
+  // recovery sweep redrafts anything this loop couldn't reach.
   const origin = new URL(req.url).origin
   after(async () => {
+    const deadline = Date.now() + DRAFT_BUDGET_MS
     for (const id of assigned) {
-      await computeAndPersistSuggestion(id, origin).catch(() => {})
+      // Out of budget: stop cleanly and leave the rest completely untouched —
+      // no attempt marker, so the recovery sweep treats them as never-drafted
+      // and picks them up on its next run instead of waiting out a cooloff.
+      if (Date.now() >= deadline) break
+      try {
+        await computeAndPersistSuggestion(id, origin, {
+          owner: { id: agentId, email },
+        })
+      } catch {
+        await settleSuggestionAttempt(id, "skipped", "generation error").catch(() => {})
+      }
     }
   })
 

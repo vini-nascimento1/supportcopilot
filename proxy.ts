@@ -34,9 +34,16 @@ export async function proxy(request: NextRequest) {
   // header (NOT a user session) — they must NOT be redirected to /login, or the
   // caller (pg_cron, Intercom webhook) can never reach the handler. Each route
   // enforces its own auth (CRON_SECRET, webhook signature).
+  // Every /api/cron/* route is listed by prefix rather than one path at a time:
+  // naming them individually silently broke each new cron. `triage-sweep` was
+  // registered in pg_cron and reported success for months while actually being
+  // redirected here to /login on every run (pg_net logs a 200 for the login
+  // page HTML, so nothing looked wrong), which is why the triage pool only ever
+  // filled when somebody pressed "Sweep now" by hand. Safe as a prefix because
+  // every route under /api/cron/ checks CRON_SECRET itself and 401s without it.
   const isMachineRoute =
     pathname === "/api/automation/sweep" ||
-    pathname === "/api/cron/refresh-metrics" ||
+    pathname.startsWith("/api/cron/") ||
     pathname.startsWith("/api/webhooks/")
 
   // Allow unauthenticated access to the login page, auth API routes, and machine routes.

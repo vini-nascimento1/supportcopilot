@@ -1170,7 +1170,14 @@ function QueueRow({
         body: JSON.stringify({ conversationId: item.intercomConversationId }),
       })
       if (!res.ok) throw new Error(await res.text())
-      toast.success("Assigned to you. Regenerating with your Notion context.")
+      // The regeneration half can fail on its own — say so rather than
+      // promising a refreshed draft that never lands.
+      const data = (await res.json().catch(() => null)) as { drafted?: boolean } | null
+      if (data?.drafted === false) {
+        toast.warning("Assigned to you, but the draft didn't regenerate — retrying in the background.")
+      } else {
+        toast.success("Assigned to you. Regenerating with your Notion context.")
+      }
       await onRefresh()
     } catch {
       toast.error("Couldn't assign this case.")

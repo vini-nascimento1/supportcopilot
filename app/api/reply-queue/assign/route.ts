@@ -11,6 +11,11 @@ import {
 } from "@/lib/reply-queue-pipeline"
 
 export const dynamic = "force-dynamic"
+// The draft is generated inline below (the agent is waiting on it, and the
+// canvas opens with it ready). Generation is p50 ~11s but has a long tail, so
+// without this the function was killed at the platform default: Intercom had
+// the assignment, the draft was lost, and the client saw a failed request.
+export const maxDuration = 300
 
 const INTERCOM_TOKEN = process.env.INTERCOM_ACCESS_TOKEN
 
@@ -67,16 +72,33 @@ export async function POST(req: Request) {
   // up (the sweep can lag or run partial). Best-effort.
   await removeTriageItems([conversationId])
 
-  // Trigger the Notion deep search (D10: now has an owner, so ai_search runs)
+  // Trigger the Notion deep search (D10: now has an owner, so ai_search runs).
+  // `owner` is passed explicitly because we KNOW whose draft this is — we just
+  // wrote the assignment. Without it the pipeline has to map the Intercom
+  // assignee back to an agent row, which silently yields nobody when the
+  // assignment went out under the shared INTERCOM_ADMIN_ID fallback, or when
+  // Intercom's read lags the write we just made.
   const origin = new URL(req.url).origin
   let outcome: PipelineOutcome | null = null
+  let draftError: string | null = null
   try {
-    outcome = await computeAndPersistSuggestion(conversationId, origin)
+    outcome = await computeAndPersistSuggestion(conversationId, origin, {
+      owner: { id: agentId, email },
+    })
   } catch {
-    // Best-effort — the suggestion row is already assigned; the deep-search
-    // recompute is a bonus, not a requirement. The next webhook event will
-    // recompute it anyway.
+    // The assignment itself stands — it's already written in Intercom. But the
+    // draft is genuinely missing, and the caller is told so rather than being
+    // shown a success toast for a draft that will never appear.
+    draftError = "generation error"
   }
 
-  return NextResponse.json({ ok: true, suggestionOutcome: outcome?.action })
+  // The draft half can fail while the assignment half succeeds. Report both,
+  // so the client can stop claiming "drafting a reply" when nothing is.
+  const drafted = outcome?.action === "suggested"
+  return NextResponse.json({
+    ok: true,
+    drafted,
+    suggestionOutcome: outcome?.action ?? "skipped",
+    draftError: drafted ? null : (draftError ?? outcome?.reason ?? "no draft"),
+  })
 }

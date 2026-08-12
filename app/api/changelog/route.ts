@@ -16,6 +16,34 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-12-d",
+    date: "2026-08-12",
+    title: "Assigning a ticket no longer loses the draft",
+    description:
+      "Claiming tickets from Triage sometimes left you with the ticket and no draft, with nothing saying anything had gone wrong. Several causes: a big \"Assign N + draft\" batch ran out of time partway through and quietly abandoned the rest, and a freshly written draft could be thrown away by a background tidy-up that hadn't yet noticed the ticket was yours. Both are fixed, and drafting now has enough time to finish the whole batch.",
+  },
+  {
+    id: "seed-2026-08-12-c",
+    date: "2026-08-12",
+    title: "Missing drafts now get retried on their own",
+    description:
+      "Until now, a draft that failed was only ever retried while you had the Queue tab open and in front of you. If you assigned a batch and switched away, nothing picked it back up. A background check now runs regularly and drafts anything that's assigned to you and still waiting on a customer reply, so a missing draft fixes itself instead of waiting for you to notice.",
+  },
+  {
+    id: "seed-2026-08-12-b",
+    date: "2026-08-12",
+    title: "\"Assigned — drafting a reply\" now tells you the truth",
+    description:
+      "When you assigned a ticket, you always got the same cheerful message about a draft being written, even on the occasions when the draft had actually failed. It now tells you when the ticket was claimed but the draft didn't come through, so you know to expect it shortly rather than waiting on something that was never coming.",
+  },
+  {
+    id: "seed-2026-08-12-a",
+    date: "2026-08-12",
+    title: "The Triage list refreshes itself again",
+    description:
+      "The automatic 5-minute Triage refresh had never actually been running, so the pool was only ever filled when someone pressed \"Sweep now\" by hand, and it went empty again after. The scheduled refresh now works, so Triage keeps showing unassigned tickets without anyone having to prompt it.",
+  },
+  {
     id: "seed-2026-08-09-d",
     date: "2026-08-09",
     title: "Drafts can actually find help centre articles now",

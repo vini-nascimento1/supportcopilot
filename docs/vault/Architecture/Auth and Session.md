@@ -1,7 +1,7 @@
 ---
 title: Auth and Session
 tags: [architecture, auth, security]
-updated: 2026-07-29
+updated: 2026-08-12
 ---
 
 # Auth and Session
@@ -19,7 +19,7 @@ This is a deliberate security control, not an oversight: this app is a gateway i
 Session refresh and route gating live in `proxy.ts` at the repo root — Next.js's current convention for what used to be `middleware.ts`. It runs on every request matched by its `config.matcher` (everything except static assets, images, favicon, and `version.json`) and:
 
 1. Builds a request-scoped Supabase server client and calls `supabase.auth.getUser()` — this validates the session against Supabase, not just a cookie presence check, so an expired/revoked session is caught here.
-2. Allows a fixed set of **machine routes** through without a user session: `/api/automation/sweep`, `/api/cron/refresh-metrics`, and anything under `/api/webhooks/`. These authenticate via a shared secret or signature header instead (`CRON_SECRET`, webhook signatures), enforced by each route individually — they must not be redirected to `/login` or callers like pg_cron / Intercom webhooks could never reach the handler.
+2. Allows **machine routes** through without a user session: `/api/automation/sweep`, anything under `/api/cron/`, and anything under `/api/webhooks/`. These authenticate via a shared secret or signature header instead (`CRON_SECRET`, webhook signatures), enforced by each route individually — they must not be redirected to `/login` or callers like pg_cron / Intercom webhooks could never reach the handler. Cron routes are matched by **prefix**, deliberately: they used to be listed one exact path at a time, and `/api/cron/triage-sweep` was simply never added, so it was redirected to `/login` on every scheduled run for months while both pg_cron and pg_net reported success (see INC-002 in `INCIDENTS.md`). The prefix is safe because every route under `/api/cron/` checks `CRON_SECRET` itself and returns 401 without it — so a new cron route is reachable by construction rather than by remembering to edit this list.
 3. Redirects unauthenticated users to `/login` for everything else except `/login` itself and `/api/auth/*`.
 4. Redirects already-authenticated users away from `/login` back to `/`.
 

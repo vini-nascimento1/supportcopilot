@@ -49,3 +49,51 @@ correctly) and added `turbopack: {}` to `next.config.ts` to explicitly declare T
   in production webpack builds while passing in dev.
 - If a new edge entry starts failing with `__dirname`/`__filename` errors, add the
   matching `config.node` polyfill to the `nextRuntime === "edge"` block in `next.config.ts`.
+
+---
+
+## INC-002 · 2026-08-12 · Triage sweep cron never ran — `proxy.ts` redirected it to `/login`
+
+**Symptom**
+`triage_items` was empty (0 rows, `swept_at` null) even though `cron.job` listed
+`triage-sweep-5min` as active and `cron.job_run_details` reported `succeeded` on every
+single run. The Triage panel only ever had content right after somebody pressed
+"Sweep now" by hand, and it emptied again afterwards.
+
+**Root cause**
+`proxy.ts` allowlisted machine-to-machine routes by exact path:
+```ts
+pathname === "/api/automation/sweep" ||
+pathname === "/api/cron/refresh-metrics" ||
+pathname.startsWith("/api/webhooks/")
+```
+`/api/cron/triage-sweep` was never added, so every pg_cron call was redirected to
+`/login` before reaching the handler and its `CRON_SECRET` check. `/api/cron/reindex-knowledge`
+had the same gap.
+
+Nothing surfaced this because **both layers report success for a failed run**:
+- `cron.job_run_details.status = 'succeeded'` only means `net.http_post` queued the
+  request, not that the HTTP call did anything useful.
+- `net._http_response.status_code = 200` — because the redirect was followed and the
+  **login page HTML** came back with a normal 200. The only tell is that the response
+  body is `<!DOCTYPE html>...` instead of the route's JSON.
+
+**Fix**
+Allowlist by prefix, so a new cron route can't silently be born broken:
+```ts
+pathname.startsWith("/api/cron/")
+```
+Safe as a prefix because every route under `/api/cron/` checks `CRON_SECRET` itself and
+401s when it is absent or wrong.
+
+**How to avoid in future**
+- Never verify a cron by its pg_cron status. Check the response body:
+  ```sql
+  select status_code, left(content, 120), created
+  from net._http_response order by created desc limit 10;
+  ```
+  A body starting with `<!DOCTYPE html>` means the call was redirected to `/login`.
+- When adding any machine-called endpoint, confirm it is covered by `isMachineRoute`
+  in `proxy.ts` in the same change that registers the cron job.
+- A route that authenticates by shared secret should be reachable without a session by
+  construction (prefix rule), never by remembering to add one more `===` branch.

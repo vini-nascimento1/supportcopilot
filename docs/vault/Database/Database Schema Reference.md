@@ -1,7 +1,7 @@
 ---
 title: Database Schema Reference
 tags: [database, supabase, reference]
-updated: 2026-07-29
+updated: 2026-08-12
 ---
 
 # Database Schema Reference
@@ -75,14 +75,19 @@ Precomputed AI reply suggestions for the autonomous non-read reply queue (migrat
 
 ### `reply_queue_attempts`
 
-Dedup marker written at the very start of the drafting pipeline, before the (multi-second) LLM call, so the backfill guard can skip conversations that are in-flight or that keep failing — not just ones that already produced a `suggested_replies` row. This closes the "regenerated dozens of times" bug (see [[Reply-queue over-generation fix]] / project notes). **Correction vs. the original briefing:** this table has only two columns, no `id` or `attempt_id`; the primary key is the conversation id itself.
+Dedup marker written at the very start of the drafting pipeline, before the (multi-second) LLM call, so the backfill guard can skip conversations that are in-flight or that keep failing — not just ones that already produced a `suggested_replies` row. This closes the "regenerated dozens of times" bug (see [[Reply-queue over-generation fix]] / project notes). The primary key is the conversation id itself, not a generated `id`/`attempt_id`.
+
+**Extended 2026-08-12** (migration `reply_queue_attempts_outcome`): three columns added so a drafting attempt's end state is recorded, not just its start. `recordSuggestionAttempts()` clears `outcome`/`reason`/`settled_at` back to null at the start of every attempt; `settleSuggestionAttempt()` (`lib/reply-queue-store.ts`) fills them in at each terminal branch of `computeAndPersistSuggestion()` (generation failed, empty generation, persist failed, success). The recovery sweep (`app/api/cron/draft-recovery/route.ts`) reads these via `filterRecoveryCandidates()` to decide what to redraft. See [[Draft Verify Pipeline]] for the full reliability story.
 
 | Column | Type | Notes |
 |---|---|---|
 | intercom_conversation_id | text | PK |
 | attempted_at | timestamptz | default `now()`, upserted on conflict |
+| outcome | text | nullable — `null` = in flight or killed before settling, `'suggested'` = draft written, `'skipped'` = terminal failure |
+| reason | text | nullable — short fixed pipeline string (e.g. `generation failed`, `empty generation`, `persist failed`), never customer data |
+| settled_at | timestamptz | nullable — when `outcome` was written |
 
-**Read/write:** `lib/reply-queue-store.ts` (`recordSuggestionAttempts`, `getRecentlyTouchedConversationIds`) only.
+**Read/write:** `lib/reply-queue-store.ts` (`recordSuggestionAttempts`, `getRecentlyTouchedConversationIds`, `settleSuggestionAttempt`, `filterRecoveryCandidates`) only.
 
 ### `reply_queue_events`
 

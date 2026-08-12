@@ -226,6 +226,11 @@ export async function markSuggestionsStaleByConversations(
 // the very start of the pipeline, BEFORE the (multi-second) LLM work, so the
 // backfill guard can dedup in-flight and failed generations, not just completed
 // ones. Upsert on the conversation-id PK; best-effort (never blocks drafting).
+//
+// The outcome columns are explicitly cleared here so they always describe THIS
+// attempt: a row with attempted_at set and outcome still null is either in
+// flight or was killed before it could settle (the serverless timeout case).
+// That distinction is what makes a silent failure diagnosable at all.
 export async function recordSuggestionAttempts(conversationIds: string[]): Promise<void> {
   if (conversationIds.length === 0) return
   const db = getSupabaseAdminClient()
@@ -234,10 +239,30 @@ export async function recordSuggestionAttempts(conversationIds: string[]): Promi
   const rows = conversationIds.map((id) => ({
     intercom_conversation_id: id,
     attempted_at: nowIso,
+    outcome: null,
+    reason: null,
+    settled_at: null,
   }))
   await db
     .from("reply_queue_attempts")
     .upsert(rows, { onConflict: "intercom_conversation_id" })
+}
+
+// How a drafting attempt ENDED. Written at every terminal branch of the
+// pipeline once the attempt marker exists, so "no draft appeared" carries a
+// reason instead of vanishing into an empty catch. `reason` is one of the
+// pipeline's short fixed strings — never customer text.
+export async function settleSuggestionAttempt(
+  conversationId: string,
+  outcome: "suggested" | "skipped",
+  reason?: string
+): Promise<void> {
+  const db = getSupabaseAdminClient()
+  if (!db) return
+  await db
+    .from("reply_queue_attempts")
+    .update({ outcome, reason: reason ?? null, settled_at: new Date().toISOString() })
+    .eq("intercom_conversation_id", conversationId)
 }
 
 // Conversation ids (from the given set) we drafted or ATTEMPTED to draft at/after
@@ -270,6 +295,55 @@ export async function getRecentlyTouchedConversationIds(
   for (const r of attempts.data ?? []) touched.add(r.intercom_conversation_id as string)
   for (const r of suggestions.data ?? []) touched.add(r.intercom_conversation_id as string)
   return touched
+}
+
+// Which of these conversations the recovery sweep should actually redraft.
+// Two different clocks, because two different failures need different patience:
+//   • `retryAfterIso` — anything touched since then is either in flight or just
+//     finished; leave it alone. This is what stops the sweep racing the client
+//     backfill and re-drafting the same conversation.
+//   • `failureCooloffIso` — a conversation whose last attempt ended in a
+//     TERMINAL failure (outcome 'skipped') gets a much longer cooloff. Without
+//     it, a permanently un-draftable conversation would burn a generation on
+//     every sweep, forever.
+// A killed-mid-flight attempt (outcome still null) is deliberately NOT given
+// the long cooloff — that is precisely the case recovery exists to rescue.
+export async function filterRecoveryCandidates(
+  conversationIds: string[],
+  opts: { retryAfterIso: string; failureCooloffIso: string }
+): Promise<string[]> {
+  if (conversationIds.length === 0) return []
+  const db = getSupabaseAdminClient()
+  if (!db) return []
+
+  const { data, error } = await db
+    .from("reply_queue_attempts")
+    .select("intercom_conversation_id, attempted_at, outcome, settled_at")
+    .in("intercom_conversation_id", conversationIds)
+
+  // On a read error, skip this run rather than redraft everything blindly.
+  if (error) return []
+
+  // Compare as epoch ms, not as strings: Postgres returns "+00:00" offsets
+  // while Date#toISOString emits "Z", so a lexical compare is wrong exactly
+  // when the two timestamps are closest together.
+  const retryAfterMs = Date.parse(opts.retryAfterIso)
+  const failureCooloffMs = Date.parse(opts.failureCooloffIso)
+
+  const blocked = new Set<string>()
+  for (const row of data ?? []) {
+    const id = row.intercom_conversation_id as string
+    const attemptedMs = Date.parse((row.attempted_at as string | null) ?? "")
+    const settledMs = Date.parse((row.settled_at as string | null) ?? "")
+    if (Number.isFinite(attemptedMs) && attemptedMs >= retryAfterMs) {
+      blocked.add(id)
+      continue
+    }
+    if (row.outcome === "skipped" && Number.isFinite(settledMs) && settledMs >= failureCooloffMs) {
+      blocked.add(id)
+    }
+  }
+  return conversationIds.filter((id) => !blocked.has(id))
 }
 
 export type ReplyQueueAction = "approve" | "reject" | "edit"

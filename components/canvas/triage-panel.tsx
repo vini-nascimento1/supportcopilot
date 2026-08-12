@@ -337,7 +337,16 @@ export function TriagePanel({
         body: JSON.stringify({ conversationId }),
       })
       if (!res.ok) throw new Error(await readApiError(res, `Failed (${res.status})`))
-      toast.success("Assigned — drafting a reply")
+      // Assignment and drafting can succeed independently. Reporting "drafting a
+      // reply" when the draft actually failed is what made this look like a
+      // silent failure: the ticket was claimed, nothing ever appeared in the
+      // Queue, and nothing said why.
+      const data = (await res.json().catch(() => null)) as { drafted?: boolean } | null
+      if (data?.drafted === false) {
+        toast.warning("Assigned to you, but the draft didn't generate — retrying in the background.")
+      } else {
+        toast.success("Assigned — drafting a reply")
+      }
       markRecentlyAssigned([conversationId])
       remove(conversationId)
       if (nav) nav.open(conversationId)

@@ -1,7 +1,7 @@
 ---
 title: Triage System
 tags: [triage, intercom, automation]
-updated: 2026-07-29
+updated: 2026-08-12
 ---
 
 The Triage System periodically sweeps Intercom's open-and-unassigned conversations into a ranked pool, so agents aren't limited to working only what's directly assigned to them. Each agent can filter the shared pool by keyword and audience and claim ("Assign to me") whatever best matches their own strengths, rather than waiting for a manual assignment.
@@ -11,6 +11,9 @@ It is deliberately LLM-free: classification reuses the same keyword playbook mat
 ## The sweep (`lib/triage/sweep.ts`)
 
 `runTriageSweep()` runs every 5 minutes via `POST /api/cron/triage-sweep`, and can also be triggered manually ("Sweep now" in the Triage panel). For each run:
+
+> [!warning] The scheduled half of this only started working on 2026-08-12.
+> `proxy.ts` allowlisted machine routes by exact path and `/api/cron/triage-sweep` was never on the list, so every pg_cron run was redirected to `/login` before reaching the handler. Both layers reported success (pg_cron logs the queued request; pg_net logs a 200 for the login page HTML), so `triage_items` sat empty and the pool only ever filled when somebody pressed "Sweep now". Fixed by matching `/api/cron/` as a prefix — see INC-002 in `INCIDENTS.md`.
 
 1. Fetch open conversations from Intercom filtered server-side to `admin_assignee_id = 0` (Intercom's "unassigned" sentinel) via `searchOpenConversations({ unassignedOnly: true })`. This keeps the fetch scoped to just the pool being kept (roughly one page in practice) instead of the whole workspace's open queue.
 2. Filter again client-side (`isUnassigned()`) as a belt-and-braces check — a conversation already assigned to any teammate, whether or not they use the copilot, stays out of the pool.
@@ -46,7 +49,9 @@ Because the sweep only runs every 5 minutes, a conversation that gets claimed or
 
 ## UI
 
-The Triage tab lives in the Canvas left sidebar, alongside Inbox and Queue (see [[Canvas Workflow]]). It shows the ranked pool best-match-first, offers one-click "Assign to me" (`app/api/cases/assign/`), and opening a triage item into the Canvas auto-triggers the background draft-generation pipeline described in [[Draft Verify Pipeline]].
+The Triage tab lives in the Canvas left sidebar, alongside Inbox and Queue (see [[Canvas Workflow]]). It shows the ranked pool best-match-first, offers one-click "Assign to me" (`POST /api/reply-queue/assign`) and a multi-select "Assign N + draft" (`POST /api/reply-queue/assign-bulk`) for claiming several rows at once, and opening a triage item into the Canvas auto-triggers the background draft-generation pipeline described in [[Draft Verify Pipeline]].
+
+Assigning used to be able to fail silently on the drafting half: the toast claimed a reply was being generated even when it wasn't, and nothing recorded why. Since 2026-08-12, a failed or killed draft attempt is recorded (`reply_queue_attempts.outcome`/`reason`) and picked back up by a periodic recovery sweep (`app/api/cron/draft-recovery/route.ts`) instead of vanishing — see [[Draft Verify Pipeline]] for the full mechanism. The single-row "Assign to me" toast now reflects the real outcome; the bulk "Assign N + draft" action still reports assignment counts only and relies on the recovery sweep for any draft that fails in the background.
 
 ## Data flow
 

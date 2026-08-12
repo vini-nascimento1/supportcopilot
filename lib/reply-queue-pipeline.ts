@@ -37,6 +37,7 @@ import {
   upsertPendingSuggestion,
   resolveSuggestionOnReply,
   recordSuggestionAttempts,
+  settleSuggestionAttempt,
   type SuggestionSource,
 } from "@/lib/reply-queue-store"
 import { resolveToneForAgentId } from "@/lib/agent-tone"
@@ -175,7 +176,17 @@ export type PipelineOutcome = {
 export async function computeAndPersistSuggestion(
   conversationId: string,
   origin: string,
-  opts?: { onRequest?: boolean }
+  opts?: {
+    onRequest?: boolean
+    /** The agent this draft belongs to, when the caller already knows it (the
+        assign routes just wrote the assignment, so they do). Used ONLY as a
+        fallback when mapping the conversation's admin_assignee_id back to an
+        agent row fails — which happens whenever the assignment was made under
+        the shared INTERCOM_ADMIN_ID env fallback rather than the agent's own
+        Intercom id. Without this the assigned-only gate below skipped forever
+        and the card sat on "Drafting…" with nothing ever explaining why. */
+    owner?: { id: string; email: string | null }
+  }
 ): Promise<PipelineOutcome> {
   const [conversation, playbooksData] = await Promise.all([
     getConversationDetail(conversationId),
@@ -190,7 +201,8 @@ export async function computeAndPersistSuggestion(
   // Resolve the owner from the conversation's CURRENT assignee. On the webhook
   // path this matches the incoming event; on the assign path it reflects the
   // assignment we just wrote, so the per-user Notion token kicks in.
-  const owner = await resolveOwner(conversation.adminAssigneeId)
+  const resolved = await resolveOwner(conversation.adminAssigneeId)
+  const owner: Owner = resolved.id ? resolved : (opts?.owner ?? resolved)
 
   // ASSIGNED-ONLY GATE. Only draft for conversations owned by one of our agents.
   // Previously every inbound customer message across the whole Intercom
@@ -334,9 +346,13 @@ export async function computeAndPersistSuggestion(
   try {
     for await (const chunk of streamChatCompletion(messages)) body += chunk
   } catch {
+    await settleSuggestionAttempt(conversationId, "skipped", "generation failed").catch(() => {})
     return { handled: false, action: "skipped", reason: "generation failed" }
   }
-  if (!body.trim()) return { handled: false, action: "skipped", reason: "empty generation" }
+  if (!body.trim()) {
+    await settleSuggestionAttempt(conversationId, "skipped", "empty generation").catch(() => {})
+    return { handled: false, action: "skipped", reason: "empty generation" }
+  }
 
   let verifiedBody = ""
   try {
@@ -425,7 +441,18 @@ export async function computeAndPersistSuggestion(
     onRequest: opts?.onRequest ?? false,
   })
 
-  return { handled: true, action: "suggested", suggestionId: res?.id, band }
+  // A null here means the row never landed (the supersede-then-insert in
+  // upsertPendingSuggestion is not atomic, so a lost race or a failed insert
+  // leaves the conversation with NO pending row). That used to be completely
+  // silent — the caller saw "suggested" either way. Record it as a failure so
+  // the recovery sweep picks the conversation back up.
+  if (!res) {
+    await settleSuggestionAttempt(conversationId, "skipped", "persist failed").catch(() => {})
+    return { handled: false, action: "skipped", reason: "persist failed" }
+  }
+
+  await settleSuggestionAttempt(conversationId, "suggested").catch(() => {})
+  return { handled: true, action: "suggested", suggestionId: res.id, band }
 }
 
 export async function runReplyQueuePipeline(

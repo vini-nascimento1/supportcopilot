@@ -1,7 +1,7 @@
 ---
 title: Draft Verify Pipeline
 tags: [ai, drafting, intercom, reply-queue]
-updated: 2026-07-29
+updated: 2026-08-12
 ---
 
 # Draft Verify Pipeline
@@ -20,14 +20,21 @@ Same route, `POST /api/draft` with `mode: "improve"`. The agent already has a dr
 
 ### 3. Autonomous Queue Pipeline
 
-The only path that runs without an agent watching. Triggered by `app/api/webhooks/intercom/route.ts` (real-time, on events like `conversation.admin.assigned` / `conversation.user.replied`) or by a periodic sweep. It calls `runReplyQueuePipeline()` in `lib/reply-queue-pipeline.ts`, which:
+The only path that runs without an agent watching. The shared compute step, `computeAndPersistSuggestion()` in `lib/reply-queue-pipeline.ts`, is reached from four places:
+
+- `app/api/webhooks/intercom/route.ts` → `runReplyQueuePipeline()` — real-time, on events like `conversation.admin.assigned` / `conversation.user.replied`.
+- `app/api/reply-queue/assign/route.ts` and `app/api/reply-queue/assign-bulk/route.ts` — right after the human-gated Intercom assignment write (foreground for a single assign, background `after()` for a bulk batch).
+- `app/api/reply-queue/route.ts` — a background backfill that runs while an agent has the Queue tab open and polling.
+- `app/api/cron/draft-recovery/route.ts` (added 2026-08-12) — a periodic sweep, independent of any agent's browser, that catches whatever the three paths above missed. See Reliability below.
+
+Whichever path calls it, `computeAndPersistSuggestion()`:
 
 - Only processes **assigned** conversations — the unassigned/triage pool is explicitly skipped (see [[Triage System]]).
 - Skips conversations the agent (or Fin) has already replied to since the triggering event.
 - Runs the full chain: playbook gate → Notion retrieval → generation → **verifier** → persist.
 - Writes a row to `suggested_replies` via `upsertPendingSuggestion()`. It **never auto-sends** — the result is always a draft sitting in the agent's Queue tab, waiting for approval.
 
-Because this path runs unattended, it's the only one of the three with a verifier pass — there's no human in the loop yet to catch an ungrounded claim, so the pipeline has to catch it itself.
+Because this path runs unattended, it's the only one of the three drafting *paths* with a verifier pass — there's no human in the loop yet to catch an ungrounded claim, so the pipeline has to catch it itself.
 
 ## Key library: `lib/draft-ai.ts`
 
@@ -56,7 +63,59 @@ Once a draft exists, it's classified into a `RiskBand` (`"ready" | "needs_check"
 
 ## Autonomous entry point: `lib/reply-queue-pipeline.ts`
 
-`computeAndPersistSuggestion()` is the main function for the autonomous path. It runs generation + verification, builds a **justification** — a short explanation surfaced as a tooltip in the Queue UI explaining *why* this particular suggestion was generated (playbook matched, Notion hits found, etc.) — and calls `upsertPendingSuggestion()` (in `lib/reply-queue-store.ts`) to write the row into `suggested_replies` (see [[Database Schema Reference]]). `runReplyQueuePipeline()` is the outer loop that the webhook/sweep calls, which fans out to `computeAndPersistSuggestion()` per eligible conversation.
+`computeAndPersistSuggestion()` is the main function for the autonomous path. It runs generation + verification, builds a **justification** — a short explanation surfaced as a tooltip in the Queue UI explaining *why* this particular suggestion was generated (playbook matched, Notion hits found, etc.) — and calls `upsertPendingSuggestion()` (in `lib/reply-queue-store.ts`) to write the row into `suggested_replies` (see [[Database Schema Reference]]). `runReplyQueuePipeline()` is the thin wrapper the webhook calls: it classifies the incoming event's topic (agent reply vs. customer message) and, for a customer message, calls `computeAndPersistSuggestion()` for that one conversation. The assign routes, the `/api/reply-queue` backfill, and the recovery sweep all call `computeAndPersistSuggestion()` directly instead, since each already has a specific conversation id in hand and doesn't need the webhook's topic routing.
+
+It resolves the conversation's owner from Intercom's current `admin_assignee_id` via `resolveOwner()`. Since 2026-08-12 it also accepts an explicit `opts.owner = { id, email }`, used only as a **fallback** when that resolve comes back empty — which happens when the assignment went out under the shared `INTERCOM_ADMIN_ID` env fallback rather than the agent's own Intercom id, or when Intercom's read simply lags the assignment write that was just made. Both assign routes and the `/api/reply-queue` backfill pass their own agent in as this fallback, since they either just wrote the assignment themselves or are actively reconciling it and already know whose draft it is. Before this fix, the assigned-only gate below would skip forever with nothing explaining why, and the Queue card sat on "Drafting…" indefinitely.
+
+## Reliability: budgets, the recovery sweep, and attempt outcomes (2026-08-12)
+
+Before this pass, every drafting path was opportunistic: the assign routes drafted in the foreground or in `after()` (both bounded by the platform's function-duration limit), and the `/api/reply-queue` backfill only ran while an agent had the Queue tab open and polling. A conversation could be assigned, sit non-read with the customer waiting, and simply never get a draft — with nothing anywhere reporting it. The fix touched four things:
+
+**Duration limits.** `app/api/reply-queue/assign/route.ts`, `app/api/reply-queue/assign-bulk/route.ts`, and `app/api/reply-queue/route.ts` now all set `maxDuration = 300` (previously unset, so the platform default killed a background `after()` drafting loop partway through — a 15-conversation bulk batch at p90 generation speed needed far longer than the default allowed). Each loop also stops itself at a self-imposed wall-clock budget under that limit — `DRAFT_BUDGET_MS` (assign-bulk) and `BACKFILL_BUDGET_MS` (the reply-queue backfill), both `240_000`ms — and leaves anything it doesn't reach completely untouched (no attempt marker), so the recovery sweep below picks it up cleanly rather than finding a half-written attempt.
+
+**Stale grace period.** The `/api/reply-queue` reconciler marks a pending draft stale when its conversation is missing from `getNonReadAssignedConversations()`. That set comes from Intercom's SEARCH index, which is only eventually consistent — right after an assignment the conversation is often not indexed yet, so a draft generated seconds earlier was destroyed, and the attempt marker then blocked regeneration for the backfill's own `BACKFILL_WINDOW_MS` (5 min). `STALE_GRACE_MS` (10 min) now protects a freshly-created draft from this race: a pending row younger than the grace period is left alone and simply reappears on the next poll instead of being staled and re-blocked.
+
+**Explicit owner fallback.** Covered above — `computeAndPersistSuggestion()`'s `opts.owner`.
+
+**Attempt outcomes.** `reply_queue_attempts` (see [[Database Schema Reference]]) gained three columns. `recordSuggestionAttempts()` clears `outcome` / `reason` / `settled_at` back to null at the start of every attempt, before the LLM call; `settleSuggestionAttempt()` (`lib/reply-queue-store.ts`) fills them in at every terminal branch of `computeAndPersistSuggestion()` — generation failed, empty generation, persist failed, and success. `persist failed` is a newly-caught case: `upsertPendingSuggestion()`'s supersede-then-insert isn't a DB transaction, so a lost race can return `null` with no row actually written, which previously reported success to the caller anyway.
+
+### The recovery sweep (`app/api/cron/draft-recovery/route.ts`)
+
+A cron endpoint, authenticated the same `x-cron-secret` way as [[Triage System|the triage sweep]], `maxDuration = 300`. For each agent with an `intercom_admin_id`, it fetches `getNonReadAssignedConversations()`, finds non-read conversations with no pending draft, runs the candidates through `filterRecoveryCandidates()` (`lib/reply-queue-store.ts`), and calls `computeAndPersistSuggestion()` for each survivor. Two independent cooloff clocks decide what counts as a candidate:
+
+- `RETRY_AFTER_MS` (15 min) — skip anything attempted more recently than this; it's either still in flight or was just handled by one of the client-driven paths.
+- `FAILURE_COOLOFF_MS` (6 hours) — a conversation whose last attempt ended in a terminal `'skipped'` outcome waits this long before being retried, so a permanently un-draftable ticket can't burn a generation on every single sweep. A killed-mid-flight attempt (`outcome` still `null`) deliberately does **not** get this long cooloff — that's exactly the case recovery exists to rescue.
+
+The run is bounded by `RUN_BUDGET_MS` (240s, under the 300s `maxDuration`) and a hard cap, `MAX_DRAFTS_PER_RUN` (12), and dedupes conversations across agents within the same run (two agents sharing an Intercom admin id, or the env fallback, would otherwise both draft the same conversation). Strictly draft-only, like every other path here: it never sends, assigns, or writes to Intercom. The response is counts only (`agentsScanned`, `candidates`, `drafted`, `failed`, `intercomErrors`, `budgetExhausted`) — no conversation ids or customer data — and returns HTTP 207 when the run was partial (an Intercom error, or the budget/cap ran out with work still queued).
+
+**Not yet scheduled.** The route exists but is not yet registered in Supabase `pg_cron` — do that **after** the deploy that ships the route, or it will 404 every 5 minutes. The intended cadence matches the triage sweep. Register it with the snippet below, which lifts `CRON_SECRET` from an existing job rather than having anyone paste the secret into a query:
+
+```sql
+select cron.schedule(
+  'draft-recovery-5min',
+  '*/5 * * * *',
+  format(
+    $job$
+    select net.http_post(
+      url     := 'https://project-z4cpw.vercel.app/api/cron/draft-recovery',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'x-cron-secret', %L
+      ),
+      body    := '{}'::jsonb
+    );
+    $job$,
+    (select (regexp_match(command, '''x-cron-secret'',\s*''([^'']+)'''))[1]
+     from cron.job where jobname = 'triage-sweep-5min')
+  )
+);
+```
+
+Note that `pg_net` gives up waiting after its default 5s and logs a timeout, while the function keeps running to completion server-side. That is normal here (the automation sweep already behaves this way) — a timeout row in `net._http_response` means the response wasn't captured, not that the sweep didn't run. To confirm a run really happened, check `drafted`/`candidates` counts in the response when one is captured, or the `reply_queue_attempts` rows it settled.
+
+### Honest client toasts
+
+`/api/reply-queue/assign` now returns `{ ok, drafted, suggestionOutcome, draftError }` instead of just `{ ok: true }`. `components/canvas/triage-panel.tsx`, `components/canvas/queue-panel.tsx`, and `components/canvas/inbox-panel.tsx` (which loops the same single-assign endpoint for its own bulk action) all read `drafted` and show a warning toast — "Assigned to you, but the draft didn't generate/regenerate — retrying in the background." — instead of unconditionally claiming a draft is on its way. Previously all three claimed success even when the draft had already failed. `app/api/reply-queue/assign-bulk/route.ts` (the Triage panel's own multi-select "Assign N + draft") still reports assignment counts only, not per-conversation draft success — a bulk-assigned conversation whose draft fails is caught by the recovery sweep rather than surfaced in that toast.
 
 ## Retrieval is being replaced (2026-08-09)
 
@@ -156,11 +215,15 @@ The actual customer send happens through `/api/draft/send` (the same human-gated
 - `lib/playbook-gate.ts` — `buildGatePrompt()`, `classifyPlaybookMatch()`, `GATE_CONFIDENCE_THRESHOLD`
 - `lib/reply-queue.ts` — `deriveRiskBand()`, `isSendLocked()`, `hasCapabilityGap()`, `LOCKED_CATEGORIES`
 - `lib/reply-queue-pipeline.ts` — `computeAndPersistSuggestion()`, `runReplyQueuePipeline()`
-- `lib/reply-queue-store.ts` — `upsertPendingSuggestion()`, `resolveSuggestionOnReply()`, `logReplyQueueEvent()`, `getPendingSuggestionsForAgent()`
+- `lib/reply-queue-store.ts` — `upsertPendingSuggestion()`, `resolveSuggestionOnReply()`, `logReplyQueueEvent()`, `getPendingSuggestionsForAgent()`, `recordSuggestionAttempts()`, `settleSuggestionAttempt()`, `filterRecoveryCandidates()`
 - `lib/ai-throttle.ts` — shared-key throttle + the shared OpenAI client (`openaiFetch()`, `openaiApiKey()`, `openaiBaseUrl()`)
 - `app/api/draft/route.ts` — manual Generate/Improve endpoint
 - `app/api/draft/send/route.ts` — human-gated Intercom send
+- `app/api/reply-queue/route.ts` — Queue GET endpoint; reconciles cached suggestions against live Intercom, backfills missing drafts in the background (`STALE_GRACE_MS`, `BACKFILL_BUDGET_MS`)
+- `app/api/reply-queue/assign/route.ts` — human-gated Intercom assignment + inline draft generation; returns `{ drafted, suggestionOutcome, draftError }`
+- `app/api/reply-queue/assign-bulk/route.ts` — bulk assignment + background draft generation (`DRAFT_BUDGET_MS`)
 - `app/api/reply-queue/resolve/route.ts` — queue bookkeeping after a send
+- `app/api/cron/draft-recovery/route.ts` — recovery sweep cron; catches drafts the other paths missed (not yet scheduled in `pg_cron`)
 - `app/api/webhooks/intercom/route.ts` — webhook trigger for the autonomous pipeline
 
 See also: [[System Prompt Architecture]], [[Canvas Workflow]], [[Triage System]], [[Intercom Integration]], [[Database Schema Reference]], [[Settings and Profile]], [[Automation Rules Engine]].
