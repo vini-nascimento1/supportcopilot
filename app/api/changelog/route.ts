@@ -16,6 +16,20 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-12-f",
+    date: "2026-08-12",
+    title: "Drafts hold firm when a customer just repeats the same demand",
+    description:
+      "When a customer had already been given a final answer (e.g. a refund decline) and pushed back with the same demand again, just louder, drafts could treat an incidental detail in that message as a new fact worth reinvestigating and reopen the case instead of closing it. Drafts now recognise a restated demand for what it is and hold the decision unless the customer actually provides something new.",
+  },
+  {
+    id: "seed-2026-08-12-e",
+    date: "2026-08-12",
+    title: "Drafts stop second-guessing a customer's own date",
+    description:
+      "When a customer's local calendar date was a day ahead or behind the server's (a normal timezone gap), drafts sometimes stalled and asked them to \"confirm\" a date they'd already given correctly, instead of just using it to check the case. Drafts now treat a one-day gap as expected and only ask for clarification when a date is genuinely off by more than that.",
+  },
+  {
     id: "seed-2026-08-12-d",
     date: "2026-08-12",
     title: "Assigning a ticket no longer loses the draft",

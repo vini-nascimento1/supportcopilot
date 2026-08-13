@@ -128,6 +128,19 @@ describe("grounding and capability boundaries", () => {
   })
 })
 
+// A live draft reopened a refund decision it had already stated as final,
+// because the customer's follow-up message (repeating the same demand) also
+// happened to restate a date that was a day off due to timezone. The model
+// treated that incidental detail as new information worth investigating,
+// instead of recognizing the message as the same already-answered demand.
+describe("closing the conversation — a restated demand is not new information", () => {
+  it("tells the model an incidental detail in a repeated demand doesn't justify reopening a final decision", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    expect(out).toContain("A restated demand is not new information")
+    expect(out).toContain("Only genuinely new, material evidence")
+  })
+})
+
 // Retrieval v2: ranked cited evidence replaces the single-playbook injection.
 // The defect being fixed is measured — playbook-matched drafts were approved
 // 57.6% of the time vs 67.5% when nothing matched (n=1,201) — so "we found
@@ -459,6 +472,15 @@ describe("buildUserMessage", () => {
     expect(text).toContain("Customer:")
     expect(text).toContain(LATEST_CUSTOMER_INSTRUCTION)
     expect(text).not.toContain(ATTACHED_NOTICE)
+  })
+
+  it("includes a timezone caveat so a customer-stated date one day off UTC isn't flagged as a discrepancy", () => {
+    const result = buildUserMessage(multimodalConvo)
+    expect(typeof result).toBe("string")
+    const text = result as string
+    expect(text).toContain("server UTC")
+    expect(text).toContain("one calendar day ahead or behind")
+    expect(text).toContain("don't ask the customer to confirm or clarify a date solely because it's a day off")
   })
 
   it("labels AI helper messages separately from customer messages", () => {

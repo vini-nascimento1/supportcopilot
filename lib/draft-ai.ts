@@ -112,9 +112,17 @@ function customerPrivacyHeader(hasKnownEmail: boolean): string {
 // window (e.g. 7/28-day payout pending) — it can only recite the policy in
 // the abstract and then defer ("I'll check the status") instead of directly
 // concluding whether the window has actually been exceeded.
+//
+// This date is server UTC, but customers write in their own local calendar
+// day, which can be up to a day ahead or behind UTC. Without a caveat, the
+// model treated that offset as a factual inconsistency and stalled the reply
+// asking the customer to "clarify" a date they'd already given correctly
+// (e.g. a customer in UTC+3 says "today, Aug 13" a few hours after midnight
+// local time, while the server's UTC date still reads Aug 12). The fix is to
+// tell the model a same-day-either-direction gap is expected, not an error.
 function todaysDateLine(): string {
   const today = new Date().toISOString().slice(0, 10)
-  return `Today's date: ${today}. Use this to compute elapsed time (e.g. days since a payment/date the customer mentions) against any playbook window — don't defer to "checking" something you can work out yourself from a stated date.`
+  return `Today's date: ${today} (server UTC). Use this to compute elapsed time (e.g. days since a payment/date the customer mentions) against any playbook window — don't defer to "checking" something you can work out yourself from a stated date. Customers are in their own local timezone, so a date they state can legitimately be one calendar day ahead or behind this UTC date — treat that as normal, not a discrepancy, and don't ask the customer to confirm or clarify a date solely because it's a day off from this one. Only question a stated date if it's off by more than a day (e.g. weeks or months out, or before the account existed).`
 }
 
 // ── Greeting logic ──────────────────────────────────────────────────────────
@@ -294,7 +302,8 @@ ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
 ## Closing the conversation
 - If the customer has already been answered per the knowledge base articles (policy, steps, or procedures already explained in the thread) and they keep insisting or asking the same thing: **be firm but polite, restate the policy one last time, and signal that the conversation is being closed**.
 - Do not keep re-explaining the same thing. One final clear summary + close.
-- This is especially important for policy or moderation decisions — acknowledge their frustration, hold the line, and end the conversation.`)
+- This is especially important for policy or moderation decisions — acknowledge their frustration, hold the line, and end the conversation.
+- **A restated demand is not new information.** A customer repeating their ask with more urgency (caps, exclamation marks, "NOW"), or with an incidental detail they'd already given (a date, an amount, an account name), is still the SAME demand you already answered — not a new fact to investigate. Do not let a minor, non-material inconsistency in an incidental detail (e.g. a date that's a day off from your reference date) give you an excuse to reopen the case or ask another clarifying question instead of closing — that reads as stalling under pressure, not diligence. Only genuinely new, material evidence — something that could actually change the outcome — justifies reopening a decision you've already stated as final.`)
 
   if (playbook) {
     const sections: string[] = [`\n## Playbook: ${playbook.caseType}`]

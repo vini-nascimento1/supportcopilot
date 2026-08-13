@@ -56,9 +56,17 @@ Stated twice — once in the system prompt, and again as a footer appended to th
 
 ## 6. Today's date
 
-The current date is injected explicitly into the prompt rather than left for the model to infer.
+The current date is injected explicitly into the prompt (server UTC) rather than left for the model to infer.
 
 **Why it exists:** the model's training data has its own implicit sense of "now," which is wrong by construction for a live support case. Payout and eligibility windows depend on real elapsed time — e.g. "paid July 12, it's now July 29, that's 17 days, still within the 28-day window" — and a model guessing at today's date from training-era assumptions will get that arithmetic wrong. Explicitly stating today's date turns this into simple subtraction instead of a guess.
+
+**Timezone caveat:** the line explicitly tells the model that a customer's stated date can legitimately be one calendar day ahead or behind this UTC value, and that this alone isn't a discrepancy worth questioning. Without it, a customer writing shortly after their local midnight (e.g. UTC+3, so still "yesterday" in UTC) got a draft that stalled the reply asking them to "clarify" a date they'd already stated correctly, instead of just using it. Only a date that's off by more than a day should prompt a clarifying question.
+
+## Closing the conversation — a restated demand is not new information
+
+The system prompt already told the model to hold the line and close a conversation once a customer had been given a final policy/decision answer and kept repeating the same ask. That instruction alone wasn't enough: in a live case, a customer whose refund had already been declined replied "I WANT MY MONEY BACK NOW!!!" — same demand, no new facts — but the message also happened to restate a date that read as a day off under the "Today's date" UTC line above. The model treated that incidental mismatch as a new fact worth investigating and reopened the case with a clarifying question, instead of recognizing the message as the same already-answered demand and closing per the existing rule.
+
+**Fix:** the closing-conversation rule now says explicitly that a restated demand — repeated with more urgency, or with an incidental detail (a date, an amount, an account name) the customer already gave — is still the same demand, not new information, and that a minor/non-material inconsistency in that detail is not grounds to reopen a decision already stated as final. Only genuinely new, material evidence justifies reopening. This matters most in exactly the cases where it failed: the model has several independent instructions (compute elapsed time from a date, don't invent exceptions under pressure, close once already answered) that can pull against each other under customer pressure, and the more literal one (verify this date) can quietly override the firmer one (hold the line) unless it's told which one wins.
 
 ## 7. Tone Preference (optional, last)
 
