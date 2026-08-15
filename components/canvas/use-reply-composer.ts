@@ -24,6 +24,12 @@ export function useReplyComposer(opts: {
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const [busy, setBusy] = useState<null | GenMode | "send">(null)
   const [needsCheckConfirming, setNeedsCheckConfirming] = useState(false)
+  // Overrides `riskBand` after the server tells us (via a 409 on send) that
+  // the pending draft has since been superseded into needs_check - the prop
+  // is a one-shot snapshot from the initial suggestion fetch and won't
+  // otherwise update while this card stays open.
+  const [forcedNeedsCheck, setForcedNeedsCheck] = useState(false)
+  const effectiveRiskBand = forcedNeedsCheck ? "needs_check" : riskBand
   const dirtyRef = useRef(false)
   const idRef = useRef(0)
   // Lets the user cancel an in-flight generation, and backstops a hung stream:
@@ -46,9 +52,13 @@ export function useReplyComposer(opts: {
 
   const prefill = useCallback(
     (body: string) => {
-      dirtyRef.current = false
       resetSendConfirmation()
-      setText(body)
+      // The queued suggestion fetch resolves async after mount; if the agent
+      // is already typing (or the composer otherwise has manual text) by the
+      // time it lands, keep their reply - don't clobber it. The suggestion
+      // still exists server-side, so the caller sets pendingSuggestion/riskBand
+      // regardless of whether the text gets applied here.
+      setText((current) => (dirtyRef.current || current.trim() ? current : body))
     },
     [resetSendConfirmation]
   )
@@ -196,7 +206,7 @@ export function useReplyComposer(opts: {
       return
     }
     if (!text.trim() && attachments.length === 0) return
-    if (riskBand === "needs_check" && !needsCheckConfirming) {
+    if (effectiveRiskBand === "needs_check" && !needsCheckConfirming) {
       setNeedsCheckConfirming(true)
       toast.warning("Needs check: click Send again to confirm.")
       return
@@ -211,9 +221,9 @@ export function useReplyComposer(opts: {
           conversationId,
           body: text,
           // Reaching this point already implies the two-step confirm above
-          // has been satisfied for a locked draft (riskBand !== "needs_check",
-          // or it is and needsCheckConfirming was already true).
-          needsCheckConfirmed: riskBand === "needs_check",
+          // has been satisfied for a locked draft (effectiveRiskBand !==
+          // "needs_check", or it is and needsCheckConfirming was already true).
+          needsCheckConfirmed: effectiveRiskBand === "needs_check",
           attachmentFiles: attachments.map((attachment) => ({
             name: attachment.name,
             contentType: attachment.contentType,
@@ -223,7 +233,16 @@ export function useReplyComposer(opts: {
       })
 
       if (!res.ok) {
-        toast.error(await readApiError(res, `Failed to send (${res.status})`))
+        const message = await readApiError(res, `Failed to send (${res.status})`)
+        toast.error(message)
+        if (res.status === 409) {
+          // Server found the draft was superseded into needs_check after our
+          // one-shot riskBand snapshot was taken. Re-arm the confirm gate so
+          // the agent's next click is the explicit confirm (and carries
+          // needsCheckConfirmed: true) - keep their text, don't auto-retry.
+          setForcedNeedsCheck(true)
+          setNeedsCheckConfirming(true)
+        }
         return
       }
 
@@ -245,6 +264,7 @@ export function useReplyComposer(opts: {
       setText("")
       clearAttachments()
       resetSendConfirmation()
+      setForcedNeedsCheck(false)
       onSent?.()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Network error")
@@ -256,10 +276,10 @@ export function useReplyComposer(opts: {
     busy,
     clearAttachments,
     conversationId,
+    effectiveRiskBand,
     needsCheckConfirming,
     onSent,
     resetSendConfirmation,
-    riskBand,
     suggestionId,
     text,
   ])

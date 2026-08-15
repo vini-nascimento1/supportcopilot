@@ -94,6 +94,14 @@ export function TriagePanel({
   const [expandSaving, setExpandSaving] = useState(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastKeywordsKeyRef = useRef<string>("")
+  // Mirrors `prefs` synchronously (unlike the state itself, which only
+  // updates on the next render). The keyword handlers below read/write this
+  // instead of using a setPrefs(prev => ...) updater, so that a burst of
+  // synchronous commits (e.g. pasting "a, b, c") each see the previous
+  // commit's result instead of racing off the same stale value — and so
+  // savePrefs (setTimeout + fetch + setState) is never called from inside a
+  // setState updater, which React is allowed to invoke more than once.
+  const prefsRef = useRef<TriagePrefs>(EMPTY_TRIAGE_PREFS)
   // True from the moment a prefs change is scheduled until its save settles.
   // The 45s poll must not sync prefs from the server in that window — it would
   // clobber the user's in-progress chip edits with stale server state (the
@@ -113,7 +121,9 @@ export function TriagePanel({
           : null
       )
       if (!prefsDirtyRef.current) {
-        setPrefs(data.prefs ?? EMPTY_TRIAGE_PREFS)
+        const nextPrefs: TriagePrefs = data.prefs ?? EMPTY_TRIAGE_PREFS
+        prefsRef.current = nextPrefs
+        setPrefs(nextPrefs)
         lastKeywordsKeyRef.current = (data.prefs?.keywords ?? []).join(",")
       }
       setError(typeof data.error === "string" ? data.error : null)
@@ -128,7 +138,14 @@ export function TriagePanel({
   useEffect(() => {
     if (!active) return
     queueMicrotask(() => void load())
-    const id = setInterval(() => void load(), 45_000)
+    const id = setInterval(() => {
+      void load()
+      // The 90s TTL (lib/triage-recently-assigned.ts) only gets re-checked
+      // when something dispatches the storage/custom event — an entry can sit
+      // expired-but-still-filtering-out-its-row until then. Re-reading here
+      // enforces the TTL at most one poll late.
+      setRecentlyAssigned(readRecentlyAssigned())
+    }, 45_000)
     const off = onCanvasRefresh(() => void load())
     return () => {
       clearInterval(id)
@@ -207,6 +224,7 @@ export function TriagePanel({
           if (!res.ok) throw new Error(await readApiError(res, `Failed (${res.status})`))
           const data = await res.json()
           const saved: TriagePrefs = data.prefs ?? next
+          prefsRef.current = saved
           setPrefs(saved)
           lastKeywordsKeyRef.current = saved.keywords.join(",")
           if (data.warning === "expansion unavailable") {
@@ -226,11 +244,10 @@ export function TriagePanel({
 
   const updatePrefs = useCallback(
     (patch: Partial<TriagePrefs>) => {
-      setPrefs((prev) => {
-        const next = { ...prev, ...patch }
-        savePrefs(next)
-        return next
-      })
+      const next = { ...prefsRef.current, ...patch }
+      prefsRef.current = next
+      setPrefs(next)
+      savePrefs(next)
     },
     [savePrefs]
   )
@@ -243,12 +260,12 @@ export function TriagePanel({
     (text: string) => {
       const term = text.trim().toLowerCase()
       if (!term) return
-      setPrefs((prev) => {
-        if (prev.keywords.includes(term) || prev.keywords.length >= MAX_KEYWORDS) return prev
-        const next = { ...prev, keywords: [...prev.keywords, term] }
-        savePrefs(next)
-        return next
-      })
+      const current = prefsRef.current
+      if (current.keywords.includes(term) || current.keywords.length >= MAX_KEYWORDS) return
+      const next = { ...current, keywords: [...current.keywords, term] }
+      prefsRef.current = next
+      setPrefs(next)
+      savePrefs(next)
     },
     [savePrefs]
   )
@@ -277,29 +294,29 @@ export function TriagePanel({
 
   const removeKeyword = useCallback(
     (term: string) => {
-      setPrefs((prev) => {
-        const next = { ...prev, keywords: prev.keywords.filter((k) => k !== term) }
-        savePrefs(next)
-        return next
-      })
+      const current = prefsRef.current
+      const next = { ...current, keywords: current.keywords.filter((k) => k !== term) }
+      prefsRef.current = next
+      setPrefs(next)
+      savePrefs(next)
     },
     [savePrefs]
   )
 
   const toggleAudience = useCallback(
     (audience: string) => {
-      const has = prefs.audiences.includes(audience)
+      const current = prefsRef.current.audiences
+      const has = current.includes(audience)
       updatePrefs({
-        audiences: has
-          ? prefs.audiences.filter((a) => a !== audience)
-          : [...prefs.audiences, audience],
+        audiences: has ? current.filter((a) => a !== audience) : [...current, audience],
       })
     },
-    [prefs.audiences, updatePrefs]
+    [updatePrefs]
   )
 
   const clearFilters = useCallback(() => {
     setKeywordDraft("")
+    prefsRef.current = EMPTY_TRIAGE_PREFS
     setPrefs(EMPTY_TRIAGE_PREFS)
     savePrefs(EMPTY_TRIAGE_PREFS)
   }, [savePrefs])
@@ -386,10 +403,12 @@ export function TriagePanel({
 
   const toggleSelectAll = useCallback(() => {
     triageAnchorRef.current = null
+    const all = visibleRanked ?? []
+    // Match Inbox/Queue semantics: only a full selection clears; a partial
+    // one extends to select everything (see inbox-panel.tsx toggleAll /
+    // queue-panel.tsx toggleAllReady).
     setSelected(
-      selectedVisible.size > 0
-        ? new Set()
-        : new Set((visibleRanked ?? []).map((r) => r.item.conversationId))
+      selectedVisible.size === all.length ? new Set() : new Set(all.map((r) => r.item.conversationId))
     )
   }, [selectedVisible, visibleRanked])
 

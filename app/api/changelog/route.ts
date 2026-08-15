@@ -16,6 +16,76 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-15-r",
+    date: "2026-08-15",
+    title: "You can see at a glance which drafts are locked",
+    description:
+      "Drafts waiting on a fadmin check are skipped by bulk send, but nothing marked them unless you opened the row — so selecting 6 and being offered \"Approve & send 3\" looked like a glitch. Locked drafts now carry a \"needs check\" badge in the list, and the selection bar shows how many of your selected drafts are locked.",
+  },
+  {
+    id: "seed-2026-08-15-q",
+    date: "2026-08-15",
+    title: "\"Open on canvas\" works from the workspace command palette",
+    description:
+      "Using the command palette to open a tool card (Fadmin, ONDATO…) did nothing useful in the tabbed workspace — it opened a plain browser tab with a broken link instead of adding the card to your canvas. It now adds the card to the canvas you're looking at, and only that one.",
+  },
+  {
+    id: "seed-2026-08-15-p",
+    date: "2026-08-15",
+    title: "Embedded tools keep your place when you switch tabs",
+    description:
+      "Switching workspace tabs and coming back used to reset an embedded tool (Fadmin, ONDATO…) to its starting page, losing wherever you'd navigated — while the address bar still showed the old deep link. Tools now reopen exactly where you left them, and pinned cards also adapt correctly when you resize the window instead of drifting off-screen.",
+  },
+  {
+    id: "seed-2026-08-15-o",
+    date: "2026-08-15",
+    title: "A cleared canvas stays cleared",
+    description:
+      "If you closed every card to get a clean canvas, reloading brought the default cards straight back. An intentionally emptied canvas now stays the way you left it (case canvases keep the essential Case Info and Conversation cards).",
+  },
+  {
+    id: "seed-2026-08-15-n",
+    date: "2026-08-15",
+    title: "Select-all in Triage now behaves like the other tabs",
+    description:
+      "In Inbox and Queue, Ctrl+A with a few rows selected extends the selection to everything; in Triage it cleared your selection instead. Triage now matches the others.",
+  },
+  {
+    id: "seed-2026-08-15-m",
+    date: "2026-08-15",
+    title: "A locked draft no longer dead-ends the reply box",
+    description:
+      "If a draft became \"needs your check\" while you had the case open, sending just failed with an error and there was no way past it. The reply box now recognises that situation, keeps everything you wrote, and switches into the normal confirm-to-send step so one more click (after your fadmin check) sends it.",
+  },
+  {
+    id: "seed-2026-08-15-l",
+    date: "2026-08-15",
+    title: "Your typing is never replaced by an arriving AI draft",
+    description:
+      "If you started typing a reply the moment a case opened, the queued AI draft could load a second later and silently wipe what you'd written. Anything you've typed now stays put; the AI draft only fills the box when it's empty.",
+  },
+  {
+    id: "seed-2026-08-15-k",
+    date: "2026-08-15",
+    title: "Bulk assign asks before grabbing tickets",
+    description:
+      "Ctrl+Enter in the Inbox used to instantly assign (or draft for) everything selected — one stray keystroke after a select-all could claim every unassigned ticket in the workspace. It now arms a confirm first, exactly like the Queue's bulk send: press again (or click) to run it.",
+  },
+  {
+    id: "seed-2026-08-15-j",
+    date: "2026-08-15",
+    title: "Switching inboxes can't briefly show the wrong list",
+    description:
+      "Flipping between Mine, Unassigned, or a teammate's inbox could momentarily display the previous inbox's tickets under the new label if the older request finished late — with the wrong bulk button attached. Late responses are now discarded, and the refresh button honestly reports when a refresh actually failed.",
+  },
+  {
+    id: "seed-2026-08-15-i",
+    date: "2026-08-15",
+    title: "Shift-click selection stays accurate while lists refresh",
+    description:
+      "Inbox rows shuffle as tickets come and go, and a shift-click range was counted by row position — so after a background refresh it could select different tickets than the ones you saw when you started. Ranges are now tracked by ticket, and \"Drafting…\" placeholders land on the exact tickets the server accepted when a big batch gets trimmed.",
+  },
+  {
     id: "seed-2026-08-15-h",
     date: "2026-08-15",
     title: "Reopened cases refresh their tool links",

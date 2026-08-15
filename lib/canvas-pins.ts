@@ -25,7 +25,16 @@ const PINS_EVENT = "fv-canvas-pins-changed"
 // measurement on the next render, so pinned cards heal without user action.
 const LEGACY_PINS_KEY = "fv-canvas-pins-v1"
 
+// getPins() runs on every ToolNode/PinButton render (useSyncExternalStore
+// getSnapshot), so the migration probe below — 2 localStorage.getItem calls,
+// occasionally a setItem/removeItem — must not repeat forever. Gate it to
+// once per page load; migrateLegacyPins() itself stays idempotent (safe to
+// call again) so this is purely a perf gate, not a correctness dependency.
+let migrated = false
+
 function migrateLegacyPins(): void {
+  if (migrated) return
+  migrated = true
   try {
     if (localStorage.getItem(PINS_KEY) !== null) return
     const raw = localStorage.getItem(LEGACY_PINS_KEY)
@@ -52,6 +61,14 @@ function migrateLegacyPins(): void {
   } catch {
     // no localStorage (SSR) — nothing to migrate
   }
+}
+
+// Test-only: vitest stubs a fresh localStorage per test (vi.stubGlobal), but
+// the `migrated` flag above lives outside that stub and would otherwise leak
+// across tests — the second test to touch a legacy pin would silently skip
+// migration against its own, unrelated fake store. Call from beforeEach.
+export function resetPinMigrationForTests(): void {
+  migrated = false
 }
 
 export function getPins(): Record<string, PinnedGeometry> {

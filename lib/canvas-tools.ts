@@ -102,10 +102,20 @@ const TAG_KEYWORDS: Record<string, string[]> = {
   media: ["media", "photo", "video", "upload", "content", "removed"],
 }
 
+// Groups that are always suggested regardless of tags/keywords (Fadmin is
+// needed on virtually every case). Two spellings are accepted here: the live
+// case_tools table's group_name is free text (see
+// components/case-tools-settings.tsx — a plain input, no fixed options) and
+// there's no local migration/seed fixture in this repo to confirm which
+// spelling production rows use, while FALLBACK_TOOLS below groups its Fadmin
+// entry "Fadmin", not "Fanvue". Accepting both avoids guessing a single
+// canonical name and silently breaking the "always suggested" guarantee.
+const ALWAYS_SUGGESTED_GROUPS = new Set(["Fanvue", "Fadmin"])
+
 /**
  * Tools suggested for a case: matched by Intercom tag OR by keywords found in
- * the ticket text. Fanvue tools (Fadmin) are always suggested — the agent
- * needs them on virtually every case.
+ * the ticket text. Fanvue/Fadmin tools are always suggested — the agent needs
+ * them on virtually every case.
  */
 export function suggestedTools(
   tools: CanvasTool[],
@@ -115,11 +125,42 @@ export function suggestedTools(
   const wanted = new Set(tags.map((t) => t.toLowerCase()))
   const text = ticketText.toLowerCase()
   return tools.filter((tool) => {
-    if (tool.group === "Fanvue") return true
+    if (tool.group && ALWAYS_SUGGESTED_GROUPS.has(tool.group)) return true
     return tool.tags.some(
       (t) =>
         wanted.has(t) ||
         (TAG_KEYWORDS[t] ?? [t]).some((k) => text.includes(k)),
     )
+  })
+}
+
+// Toolbox group display order — groups not listed come after, alphabetically.
+// "Fadmin" and "Payouts" are included alongside "Fanvue"/"Payments" for the
+// same free-text-group reason as ALWAYS_SUGGESTED_GROUPS above: FALLBACK_TOOLS
+// uses "Fadmin"/"Payouts" and the live table's spelling isn't confirmable from
+// this repo, so both are accepted rather than guessing one.
+export const GROUP_ORDER = [
+  "Fanvue",
+  "Fadmin",
+  "KYC",
+  "Payments",
+  "Payouts",
+  "Workspace",
+  "Personal",
+]
+
+export function groupTools(tools: CanvasTool[]): Array<[string, CanvasTool[]]> {
+  const byGroup = new Map<string, CanvasTool[]>()
+  for (const tool of tools) {
+    const key = tool.group || "Other"
+    byGroup.set(key, [...(byGroup.get(key) ?? []), tool])
+  }
+  return [...byGroup.entries()].sort(([a], [b]) => {
+    const ia = GROUP_ORDER.indexOf(a)
+    const ib = GROUP_ORDER.indexOf(b)
+    if (ia === -1 && ib === -1) return a.localeCompare(b)
+    if (ia === -1) return 1
+    if (ib === -1) return -1
+    return ia - ib
   })
 }

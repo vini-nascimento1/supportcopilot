@@ -144,7 +144,15 @@ export function CommandPalette() {
                 icon: GlobeIcon,
                 keywords: ["tool", "canvas", ...t.tags],
                 action: () => {
-                  if (window.location.pathname.includes("/canvas")) {
+                  // The workspace host (/workspace) renders canvases too —
+                  // without this it fell into the new-tab branch below with
+                  // template placeholders just stripped, on the one page
+                  // where most agents actually work canvases.
+                  const pathname = window.location.pathname
+                  if (
+                    pathname.includes("/canvas") ||
+                    pathname.includes("/workspace")
+                  ) {
                     window.dispatchEvent(
                       new CustomEvent("canvas-add-tool", {
                         detail: { toolId: t.id },

@@ -58,6 +58,7 @@ import { getPins, clearAllPins, geometryForSave } from "@/lib/canvas-pins"
 import { broadcastCanvasRefresh } from "@/lib/canvas-refresh"
 import {
   FALLBACK_TOOLS,
+  groupTools,
   reconcileRestoredToolUrl,
   resolveToolUrl,
   suggestedTools,
@@ -142,24 +143,8 @@ function readEdgesVisible(): string {
   }
 }
 
-// Toolbox group order — groups not listed come after, alphabetically
-const GROUP_ORDER = ["Fanvue", "KYC", "Payments", "Workspace", "Personal"]
-
-function groupTools(tools: CanvasTool[]): Array<[string, CanvasTool[]]> {
-  const byGroup = new Map<string, CanvasTool[]>()
-  for (const tool of tools) {
-    const key = tool.group || "Other"
-    byGroup.set(key, [...(byGroup.get(key) ?? []), tool])
-  }
-  return [...byGroup.entries()].sort(([a], [b]) => {
-    const ia = GROUP_ORDER.indexOf(a)
-    const ib = GROUP_ORDER.indexOf(b)
-    if (ia === -1 && ib === -1) return a.localeCompare(b)
-    if (ia === -1) return 1
-    if (ib === -1) return -1
-    return ia - ib
-  })
-}
+// Group ordering + suggestion rules live in lib/canvas-tools.ts (testable,
+// and shared with the group-name-consistency fix there — see GROUP_ORDER).
 
 type SavedLayout = {
   nodes: Array<
@@ -277,7 +262,13 @@ function readSavedLayout(key: string): SavedLayout | null {
 
 function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
   const saved = readSavedLayout(key)
-  if (saved && saved.nodes.length > 0) {
+  // Bug 2: `{nodes: []}` is a legitimate saved state (the agent intentionally
+  // cleared the canvas), not "nothing was ever saved" — only missing/corrupt
+  // storage (readSavedLayout returning null) should fall through to
+  // buildDefaultLayout. For a case canvas the Case Info + Conversation cards
+  // are essential context, so they're re-injected below even into an emptied
+  // layout; an emptied ad-hoc canvas (no case info) stays truly empty.
+  if (saved) {
     // Fresh customer context for re-resolving tool-card URLs below. Gathered
     // BEFORE mapping: the case-info node can appear after a tool node in
     // saved.nodes, and both need the same (agent-corrected-if-any) values.
@@ -335,6 +326,21 @@ function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
     const nodesWithoutRetired = nodes.filter(
       (n) => n.type !== "draft" && n.type !== "ai"
     )
+    // Case Info is essential context for a case canvas — reinject it if an
+    // emptied (or pre-case-info) saved layout doesn't have one (Bug 2).
+    if (
+      props.caseInfo &&
+      !nodesWithoutRetired.some((n) => n.type === "case-info")
+    ) {
+      nodesWithoutRetired.push({
+        id: "case-info",
+        type: "case-info",
+        position: { x: 0, y: 0 },
+        width: 320,
+        height: 460,
+        data: props.caseInfo,
+      })
+    }
     // Layouts saved before the Conversation card existed: inject it
     if (
       props.conversation &&
@@ -398,6 +404,40 @@ function applyPins(layout: SavedLayout): { nodes: Node[]; edges: Edge[] } {
     }
   })
   return { nodes, edges: layout.edges }
+}
+
+// Bug 1: what a node actually needs persisted to localStorage. loadLayout
+// above always re-seeds conversation/case-info/macros data fresh from props
+// at load time, keeping only the few fields listed here from storage — so
+// saving the rest (the full Intercom `messages` thread, customer contact
+// details, etc.) would be pure PII sitting in localStorage plus wasted quota
+// across up to 12 tabs, for no gain. Tool/notes/queue nodes keep their full
+// data: notes content and tool-card url state ARE the persisted value, and
+// loadLayout doesn't rebuild them from anything else.
+function dataForSave(node: {
+  type?: string
+  data: Record<string, unknown>
+}): Record<string, unknown> {
+  switch (node.type) {
+    case "conversation": {
+      const d = node.data as Partial<ConversationReplyData>
+      return {
+        playbookId: d.playbookId,
+        playbookName: d.playbookName,
+        copilotTranscript: d.copilotTranscript,
+      }
+    }
+    case "case-info": {
+      const d = node.data as Partial<CaseInfoData>
+      return { overrides: d.overrides }
+    }
+    case "macros": {
+      const d = node.data as { conversationId?: string }
+      return { conversationId: d.conversationId }
+    }
+    default:
+      return node.data
+  }
 }
 
 function CanvasInner(props: CaseCanvasProps) {
@@ -493,6 +533,11 @@ function CanvasInner(props: CaseCanvasProps) {
   // that node before (e.g. added then pinned in the same session).
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
+    // Bug 7: on the web build (no desktop host) the canvas renders a
+    // "desktop only" gate — nothing here is visible or editable, so there's
+    // nothing worth persisting. Every mounted pane would otherwise still
+    // write a layout on every node/edge change for a screen nobody sees.
+    if (!host) return
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
       let pins: ReturnType<typeof getPins> = {}
@@ -512,7 +557,14 @@ function CanvasInner(props: CaseCanvasProps) {
             { position, width, height },
             prev && { position: prev.position, width: prev.width, height: prev.height }
           )
-          return { id, type, position: geom.position, width: geom.width, height: geom.height, data }
+          return {
+            id,
+            type,
+            position: geom.position,
+            width: geom.width,
+            height: geom.height,
+            data: dataForSave({ type, data }),
+          }
         }),
         edges,
       }
@@ -525,7 +577,7 @@ function CanvasInner(props: CaseCanvasProps) {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
-  }, [nodes, edges, storageKey])
+  }, [nodes, edges, storageKey, host])
 
   // Leaving the page must never strand native views over the UI. In the
   // workspace host several canvases are mounted at once, so a blanket
@@ -601,7 +653,12 @@ function CanvasInner(props: CaseCanvasProps) {
   useEffect(() => {
     toolsRef.current = props.tools ?? FALLBACK_TOOLS
   }, [props.tools])
+  // Bug 6: this listener fires "add this tool" — every mounted keep-alive
+  // pane in the workspace host subscribes to the same window event, so a
+  // hidden pane must not react to it or the card gets added everywhere at
+  // once. Gated on `active`, same as every other cross-pane subscriber below.
   useEffect(() => {
+    if (!active) return
     const handler = (e: Event) => {
       const toolId = (e as CustomEvent<{ toolId: string }>).detail?.toolId
       const tool = toolsRef.current.find((t) => t.id === toolId)
@@ -609,13 +666,25 @@ function CanvasInner(props: CaseCanvasProps) {
     }
     window.addEventListener("canvas-add-tool", handler)
     return () => window.removeEventListener("canvas-add-tool", handler)
-  }, [addTool])
+  }, [addTool, active])
+
+  // Bug 4: resetLayout (below) needs the LATEST props (tools/caseInfo/
+  // conversation may have changed since mount) — a plain closure over `props`
+  // would keep rebuilding from the mount-time snapshot forever. Same ref
+  // pattern as toolsRef above, but for the whole props object.
+  const propsRef = useRef(props)
+  useEffect(() => {
+    propsRef.current = props
+  })
 
   const addNote = useCallback(() => {
     setNodes((nds) => [
       ...nds,
       {
-        id: `notes:${nds.length}-${nds.filter((n) => n.type === "notes").length}`,
+        // Bug 3: `notes:${nds.length}-${notesCount}` collided after a delete
+        // (e.g. delete note 0 of 2, then add — recomputes the same id as an
+        // existing node). A random suffix can't collide the same way.
+        id: `notes:${Math.random().toString(36).slice(2, 10)}`,
         type: "notes",
         position: { x: 60 + nds.length * 20, y: 60 + nds.length * 20 },
         width: 300,
@@ -704,11 +773,14 @@ function CanvasInner(props: CaseCanvasProps) {
 
   const resetLayout = useCallback(() => {
     localStorage.removeItem(storageKey)
-    const fresh = buildDefaultLayout(props)
+    // Bug 4: rebuild from the latest props (propsRef, not the stale `props`
+    // closure) and run the result through applyPins — otherwise a pinned
+    // node would come back draggable at its non-pinned default position/size
+    // instead of its global pinned geometry.
+    const fresh = applyPins(buildDefaultLayout(propsRef.current))
     setNodes(fresh.nodes)
     setEdges(fresh.edges)
     setTimeout(() => fitView({ padding: 0.1 }), 50)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey, setNodes, setEdges, fitView])
 
   // Lets PinButton put a card back where THIS case had it on unpin, instead
@@ -777,7 +849,10 @@ function CanvasInner(props: CaseCanvasProps) {
   // instead of blocking the canvas from painting.
   const ticketText = props.ticketText
   useEffect(() => {
-    if (!conversationId || !ticketText) return
+    // Bug 7: this hits a live LLM classifier — skip it on the web build
+    // (no desktop host), where the canvas is behind the download gate and
+    // nobody can see the result anyway.
+    if (!host || !conversationId || !ticketText) return
     let cancelled = false
     fetch("/api/canvas/playbook-match", {
       method: "POST",
@@ -806,7 +881,7 @@ function CanvasInner(props: CaseCanvasProps) {
     return () => {
       cancelled = true
     }
-  }, [conversationId, ticketText, setNodes])
+  }, [conversationId, ticketText, setNodes, host])
 
   const manualRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -826,7 +901,10 @@ function CanvasInner(props: CaseCanvasProps) {
   // mount is already fresh from the server, so it's skipped.
   const prevActive = useRef(active)
   useEffect(() => {
-    if (!conversationId) return
+    // Bug 7: on the web build (no desktop host) this pane is only the
+    // download gate — polling Intercom every 30s for a view nobody can see
+    // is pure waste (and load on Intercom for every mounted workspace pane).
+    if (!host || !conversationId) return
     if (active && !prevActive.current)
       void refreshConversation().catch(() => {})
     prevActive.current = active
@@ -836,7 +914,7 @@ function CanvasInner(props: CaseCanvasProps) {
       30_000
     )
     return () => clearInterval(t)
-  }, [active, conversationId, refreshConversation])
+  }, [active, conversationId, refreshConversation, host])
 
   const mounted = useMounted()
   // The canvas is a desktop-only feature: embedded tools need the Electron

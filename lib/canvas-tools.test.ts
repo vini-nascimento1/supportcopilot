@@ -4,6 +4,7 @@ import {
   resolveToolUrl,
   suggestedTools,
   reconcileRestoredToolUrl,
+  groupTools,
   type CanvasTool,
 } from "./canvas-tools"
 
@@ -43,6 +44,45 @@ describe("suggestedTools", () => {
     expect(
       suggestedTools(tools, [], "please verify my identity").map((t) => t.id),
     ).toContain("ondato")
+  })
+
+  it("always includes a tool grouped \"Fadmin\" — FALLBACK_TOOLS' own spelling", () => {
+    const withFadminGroup: CanvasTool[] = [
+      { id: "fadmin", name: "Fadmin", icon: null, urlTemplate: "https://fadmin.fanvue.com", group: "Fadmin", tags: [] },
+    ]
+    expect(
+      suggestedTools(withFadminGroup, [], "").map((t) => t.id),
+    ).toContain("fadmin")
+  })
+
+  it("does not suggest an unrelated group with no matching tag/keyword", () => {
+    const other: CanvasTool[] = [
+      { id: "notion", name: "Notion", icon: null, urlTemplate: "https://notion.so", group: "Workspace", tags: ["docs"] },
+    ]
+    expect(suggestedTools(other, [], "").map((t) => t.id)).not.toContain("notion")
+  })
+})
+
+describe("groupTools", () => {
+  const tools: CanvasTool[] = [
+    { id: "masspay", name: "MassPay", icon: null, urlTemplate: "https://masspay.io", group: "Payouts", tags: [] },
+    { id: "ondato", name: "ONDATO", icon: null, urlTemplate: "https://os.ondato.com", group: "KYC", tags: [] },
+    { id: "fadmin", name: "Fadmin", icon: null, urlTemplate: "https://fadmin.fanvue.com", group: "Fadmin", tags: [] },
+    { id: "custom", name: "Custom", icon: null, urlTemplate: "https://example.com", group: "Zzz-Unlisted", tags: [] },
+  ]
+
+  it("orders known groups per GROUP_ORDER, with unlisted groups alphabetically after", () => {
+    expect(groupTools(tools).map(([group]) => group)).toEqual([
+      "Fadmin",
+      "KYC",
+      "Payouts",
+      "Zzz-Unlisted",
+    ])
+  })
+
+  it("keeps each group's tools together", () => {
+    const [, fadminTools] = groupTools(tools).find(([g]) => g === "Fadmin")!
+    expect(fadminTools.map((t) => t.id)).toEqual(["fadmin"])
   })
 })
 

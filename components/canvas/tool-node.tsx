@@ -96,7 +96,38 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
     () => getPinScreen(id),
     () => null,
   )
-  const anchored = pinned && !!anchorLayer && !!screenRect
+  // clampPinnedScreenRect needs the anchor layer's CURRENT size. Reading
+  // anchorLayer.clientWidth/Height at render time (as this used to) only
+  // reflects whatever size existed at the last render for some OTHER reason —
+  // nothing here re-renders on a plain window/pane resize, so a shrink can
+  // leave a pinned card clamped against stale, larger dimensions and sitting
+  // off-pane. Track it as state via ResizeObserver instead, so a real resize
+  // triggers a re-render with the right numbers. Seed it from the current
+  // size so an already-visible pane doesn't flash unanchored on first paint.
+  const [anchorSize, setAnchorSize] = useState<{
+    width: number
+    height: number
+  } | null>(() => {
+    if (!anchorLayer) return null
+    const { clientWidth: width, clientHeight: height } = anchorLayer
+    return width > 0 && height > 0 ? { width, height } : null
+  })
+  useEffect(() => {
+    if (!anchorLayer) return
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1]
+      if (!entry) return
+      const { width, height } = entry.contentRect
+      // Hidden keep-alive panes (case-canvas keeps every opened tab's anchor
+      // layer mounted, display:none while inactive) report 0×0 — never let
+      // that clamp a pinned card down to the MIN_VISIBLE floor. Keep the last
+      // real size instead; it'll be right again the moment the pane is shown.
+      if (width > 0 && height > 0) setAnchorSize({ width, height })
+    })
+    observer.observe(anchorLayer)
+    return () => observer.disconnect()
+  }, [anchorLayer])
+  const anchored = pinned && !!anchorLayer && !!screenRect && !!anchorSize
   const anchoredRef = useRef(anchored)
   useEffect(() => {
     anchoredRef.current = anchored
@@ -148,6 +179,14 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
   // Live URL of the native view (follows redirects/SSO hops); editable —
   // Enter navigates the view. Resets to the live value on blur/Escape.
   const [liveUrl, setLiveUrl] = useState(data.url)
+  // Mirrors liveUrl for the reopen effect below, which must NOT depend on
+  // liveUrl directly (it keys on [ghost, active] only — see that effect's
+  // comment) but still needs the latest navigated-to URL, not data.url, when
+  // a pane comes back from a keep-alive tab switch.
+  const liveUrlRef = useRef(liveUrl)
+  useEffect(() => {
+    liveUrlRef.current = liveUrl
+  }, [liveUrl])
   const [urlDraft, setUrlDraft] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   // Find-in-page (Ctrl/Cmd+F). Opened from the native view via a tool event,
@@ -178,7 +217,29 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
       if (event.kind === "find-result") setFindResult(event.value)
       if (event.kind === "find-open") setFindOpen(true)
     })
-    void host.openTool(id, data.url)
+    // This effect reruns whenever a keep-alive pane comes back into view
+    // (active flips true again) — openTool tears down and recreates the
+    // native view (see the cleanup below), so it always reopens from
+    // scratch. Reopen at wherever the agent last navigated to, not
+    // data.url, or a tab switch would silently rewind the view to its
+    // original landing page while the URL bar (liveUrl) kept showing the
+    // deep link the agent actually navigated to.
+    void host.openTool(id, liveUrlRef.current ?? data.url)
+    // Reset renderer-only state that the fresh view won't necessarily
+    // correct on its own: did-start-loading/did-navigate fire on every
+    // load (see desktop/src/main.js sendToolEvent) so loading/title/liveUrl
+    // re-sync quickly, but find-in-page has no "cleared" event at all — an
+    // open find bar with a stale match count would otherwise survive the
+    // reopen pointed at content that no longer matches it. Synchronous
+    // setState here is intentional — it's syncing local shadow state to the
+    // external native view this effect just tore down and reopened.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setLoading(true)
+    setTitle(null)
+    setFindOpen(false)
+    setFindText("")
+    setFindResult(null)
+    /* eslint-enable react-hooks/set-state-in-effect */
 
     const tick = () => {
       const el = bodyRef.current
@@ -505,17 +566,19 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
     </div>
   )
 
-  if (pinned && anchorLayer && screenRect) {
+  if (pinned && anchorLayer && screenRect && anchorSize) {
     // screenRect was captured once, possibly on a different window/pane size
     // (pins are deliberately global — see lib/canvas-pins.ts) and never
     // re-validated since. Clamp it to the CURRENT pane every render: a native
     // view positioned at a stale, oversized rect paints over the whole app
     // (it's an OS-level layer, CSS/z-index don't contain it — see
-    // lib/canvas-bounds.ts).
+    // lib/canvas-bounds.ts). anchorSize (not anchorLayer.clientWidth/Height)
+    // is what makes this re-run on an actual resize — see the ResizeObserver
+    // above.
     const clamped = clampPinnedScreenRect(
       screenRect,
-      anchorLayer.clientWidth,
-      anchorLayer.clientHeight,
+      anchorSize.width,
+      anchorSize.height,
     )
     return createPortal(
       <div

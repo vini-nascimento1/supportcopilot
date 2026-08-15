@@ -80,7 +80,15 @@ export function addPendingOnRequestDrafts(items: Array<Omit<PendingOnRequestDraf
 export function removePendingOnRequestDrafts(conversationIds: string[]) {
   if (conversationIds.length === 0) return
   const ids = new Set(conversationIds)
-  write(readPendingOnRequestDrafts().filter((item) => !ids.has(item.conversationId)))
+  const current = readPendingOnRequestDrafts()
+  const next = current.filter((item) => !ids.has(item.conversationId))
+  // Every 15s poll in queue-panel.tsx calls this with the full set of
+  // conversation ids already resolved into real rows — usually none of them
+  // match a pending placeholder. Skipping the write/event when nothing
+  // actually changed avoids handing every mounted QueuePanel (including
+  // hidden keep-alive panes) a fresh array identity on every poll tick.
+  if (next.length === current.length) return
+  write(next)
 }
 
 export function subscribePendingOnRequestDrafts(cb: () => void) {

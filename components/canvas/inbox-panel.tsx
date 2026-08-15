@@ -112,19 +112,31 @@ export function InboxPanel({
   const [acting, setActing] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
   const [confirmCheckin, setConfirmCheckin] = useState(false)
+  // Armed by a first Ctrl/Cmd+Enter (or the primary bulk button) — a second
+  // press/click actually runs Assign/Generate. Assign writes to Intercom, so
+  // it's never one keystroke away; Generate is draft-only but kept consistent.
+  const [confirmBulk, setConfirmBulk] = useState(false)
   // Wall-clock, ticked by the poll below (never Date.now() during render — that
   // would be impure). Drives the per-row SLA staleness colouring so a row can
   // tip amber/red between reloads. Starts at 0 → severity is "none" on first
   // paint (see lib/inbox-sla.ts), then hydrates in the poll effect.
   const [now, setNow] = useState(0)
   const masterRef = useRef<HTMLInputElement>(null)
-  // Anchor index for shift-click range selection (the last single-toggled row).
-  const anchorRef = useRef<number | null>(null)
+  // Monotonic request id for `load` — bumped at the start of every call and
+  // checked after the fetch resolves, so a stale response (an inbox switch or
+  // a manual refresh racing the poll interval) never overwrites newer data.
+  const loadGenRef = useRef(0)
+  // Anchor ID (not index) for shift-click range selection — the poll reorders
+  // or drops rows every 10s, so an index would select the wrong range after a
+  // refresh. Resolved back to an index against the current rows at range time.
+  const anchorRef = useRef<string | null>(null)
 
   const selectInbox = (key: string) => {
     setData(null) // show the skeleton while the new box loads
     setSelectedIds(new Set()) // selection doesn't carry across boxes
     setConfirmClose(false)
+    setConfirmCheckin(false)
+    setConfirmBulk(false)
     anchorRef.current = null
     try {
       localStorage.setItem(INBOX_KEY, key)
@@ -152,10 +164,17 @@ export function InboxPanel({
     }
   }, [active, admins.length])
 
-  const load = useCallback(async () => {
+  // Returns whether the load actually succeeded (used by manualRefresh to
+  // report a real failure instead of always toasting success — see below).
+  // A superseded response (a newer load started since) counts as success:
+  // it isn't an error, we just don't know its outcome, and the newer call
+  // will report for itself.
+  const load = useCallback(async (): Promise<boolean> => {
+    const gen = ++loadGenRef.current
     try {
       const res = await fetch(`/api/cases?inbox=${encodeURIComponent(inbox)}`)
       const json = await res.json()
+      if (gen !== loadGenRef.current) return true
       const nextRows: SupportCase[] = Array.isArray(json.rows) ? json.rows : []
       setData({
         mode: json.mode ?? "error",
@@ -171,8 +190,11 @@ export function InboxPanel({
         prev.forEach((id) => (present.has(id) ? next.add(id) : (changed = true)))
         return changed ? next : prev
       })
+      return true
     } catch {
+      if (gen !== loadGenRef.current) return true
       setData((prev) => prev ?? { mode: "error", error: "Couldn't load cases.", rows: [] })
+      return false
     }
   }, [inbox])
 
@@ -220,9 +242,12 @@ export function InboxPanel({
       const list = rows ?? []
       setSelectedIds((prev) => {
         const next = new Set(prev)
-        if (shift && anchorRef.current !== null) {
-          const lo = Math.min(anchorRef.current, index)
-          const hi = Math.max(anchorRef.current, index)
+        const anchorIdx = anchorRef.current
+          ? list.findIndex((r) => r.id === anchorRef.current)
+          : -1
+        if (shift && anchorIdx >= 0) {
+          const lo = Math.min(anchorIdx, index)
+          const hi = Math.max(anchorIdx, index)
           for (let i = lo; i <= hi; i++) {
             const id = list[i]?.id
             if (id) next.add(id)
@@ -233,7 +258,7 @@ export function InboxPanel({
             if (next.has(id)) next.delete(id)
             else next.add(id)
           }
-          anchorRef.current = index
+          anchorRef.current = list[index]?.id ?? null
         }
         return next
       })
@@ -252,6 +277,7 @@ export function InboxPanel({
     setSelectedIds(new Set())
     setConfirmClose(false)
     setConfirmCheckin(false)
+    setConfirmBulk(false)
     anchorRef.current = null
   }, [])
 
@@ -262,12 +288,16 @@ export function InboxPanel({
   const manualRefresh = async () => {
     setRefreshing(true)
     try {
-      await Promise.all([
+      const [ok] = await Promise.all([
         load(),
         fetch("/api/reply-queue?force=1").catch(() => {}),
       ])
       broadcastCanvasRefresh()
-      toast.success("Refreshed — AI drafts are generating; they'll land in the Queue tab.")
+      if (ok) {
+        toast.success("Refreshed — AI drafts are generating; they'll land in the Queue tab.")
+      } else {
+        toast.error("Couldn't refresh this inbox. Try again.")
+      }
     } finally {
       setRefreshing(false)
     }
@@ -291,7 +321,14 @@ export function InboxPanel({
       const json = (await res.json().catch(() => ({}))) as { started?: number; dropped?: number }
       const started = typeof json.started === "number" ? json.started : ids.length
       const dropped = typeof json.dropped === "number" ? json.dropped : 0
-      const selectedRows = (rows ?? []).filter((row) => ids.includes(row.id)).slice(0, started)
+      // Mirror the server's own slice (ids.slice(0, ON_REQUEST_MAX) in request
+      // order, not display order) so the placeholders land on the rows that
+      // were actually started, not just however many rows happen to match.
+      const rowById = new Map((rows ?? []).map((row) => [row.id, row]))
+      const selectedRows = ids
+        .slice(0, started)
+        .map((id) => rowById.get(id))
+        .filter((row): row is SupportCase => row !== undefined)
       addPendingOnRequestDrafts(
         selectedRows.map((row) => ({
           conversationId: row.id,
@@ -484,13 +521,19 @@ export function InboxPanel({
         ? "Unassigned"
         : admins.find((a) => `admin:${a.id}` === inbox)?.name ?? "Teammate"
 
-  // Ctrl/Cmd+A toggles select-all; Ctrl/Cmd+Enter fires the primary bulk
-  // action (Generate in Mine, Assign to me elsewhere) on the current selection.
+  // Ctrl/Cmd+A toggles select-all; Ctrl/Cmd+Enter arms the primary bulk action
+  // (Generate in Mine, Assign to me elsewhere) — a second press actually runs
+  // it. Mirrors queue-panel's Approve & send confirm: Assign is a real
+  // Intercom write, so it's never one keystroke away.
   useCanvasListHotkeys({
     active,
     onSelectAll: toggleAll,
     onPrimary: () => {
       if (selectedIds.size === 0 || acting) return
+      if (!confirmBulk) {
+        setConfirmBulk(true)
+        return
+      }
       if (showAssign) void bulkAssign()
       else void bulkGenerate()
     },
@@ -507,7 +550,7 @@ export function InboxPanel({
             checked={allSelected}
             onChange={toggleAll}
             aria-label="Select all"
-            title="Select all (Ctrl+A) · Ctrl+Enter runs the primary bulk action"
+            title="Select all (Ctrl+A) · Ctrl+Enter arms the primary bulk action, press again to run it"
             className="size-3.5 shrink-0 cursor-pointer rounded border-muted-foreground/40 accent-primary"
           />
         )}
@@ -646,34 +689,56 @@ export function InboxPanel({
                 Send &amp; close
               </Button>
             </div>
+          ) : confirmBulk ? (
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">
+                {showAssign ? "Assign" : "Generate"} {selectedIds.size}?
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2.5 text-[11px]"
+                onClick={() => setConfirmBulk(false)}
+                disabled={acting}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="h-7 gap-1.5 px-2.5 text-[11px]"
+                onClick={() => void (showAssign ? bulkAssign() : bulkGenerate())}
+                disabled={acting}
+              >
+                {acting ? (
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                ) : showAssign ? (
+                  <UserPlusIcon className="size-3.5" />
+                ) : (
+                  <SparklesIcon className="size-3.5" />
+                )}
+                {showAssign ? "Assign to me" : "Generate AI replies"}
+              </Button>
+            </div>
           ) : (
             <div className="ml-auto flex items-center gap-1.5">
               {showAssign ? (
                 <Button
                   size="sm"
                   className="h-7 gap-1.5 px-2.5 text-[11px]"
-                  onClick={() => void bulkAssign()}
+                  onClick={() => setConfirmBulk(true)}
                   disabled={acting}
                 >
-                  {acting ? (
-                    <Loader2Icon className="size-3.5 animate-spin" />
-                  ) : (
-                    <UserPlusIcon className="size-3.5" />
-                  )}
+                  <UserPlusIcon className="size-3.5" />
                   Assign to me
                 </Button>
               ) : (
                 <Button
                   size="sm"
                   className="h-7 gap-1.5 px-2.5 text-[11px]"
-                  onClick={() => void bulkGenerate()}
+                  onClick={() => setConfirmBulk(true)}
                   disabled={acting}
                 >
-                  {acting ? (
-                    <Loader2Icon className="size-3.5 animate-spin" />
-                  ) : (
-                    <SparklesIcon className="size-3.5" />
-                  )}
+                  <SparklesIcon className="size-3.5" />
                   Generate AI replies
                 </Button>
               )}
@@ -900,19 +965,25 @@ function QuickCloseButton({
   const run = async () => {
     if (sending) return
     setSending(true)
-    const res = await sendMacroAndClose(conversationId, macro.html)
-    if (!res.sent) {
-      toast.error("Couldn't send — nothing was closed. Try again.")
+    // finally — every terminal path resets `sending`, including the
+    // sent-but-not-closed case where the row survives the reload and the
+    // button needs to stay usable.
+    try {
+      const res = await sendMacroAndClose(conversationId, macro.html)
+      if (!res.sent) {
+        toast.error("Couldn't send — nothing was closed. Try again.")
+        return
+      }
+      setOpen(false)
+      if (res.closed) {
+        toast.success("Sent & closed.")
+      } else {
+        toast.warning("Sent, but couldn't close it — try closing manually.")
+      }
+      await onActed()
+    } finally {
       setSending(false)
-      return
     }
-    setOpen(false)
-    if (res.closed) {
-      toast.success("Sent & closed.")
-    } else {
-      toast.warning("Sent, but couldn't close it — try closing manually.")
-    }
-    await onActed()
   }
 
   return (
@@ -1001,7 +1072,7 @@ function EmptyState({ label, error }: { label: string; error: string | null }) {
       </p>
       <p className="text-[11px] leading-snug text-muted-foreground">
         {error
-          ? "Retrying every 30 seconds."
+          ? "Retrying every 10 seconds."
           : "Switch inbox above to see another box, or check back as new conversations come in."}
       </p>
     </div>

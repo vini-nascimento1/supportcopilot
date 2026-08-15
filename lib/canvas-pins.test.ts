@@ -10,6 +10,7 @@ import {
   clearAllPins,
   subscribePins,
   geometryForSave,
+  resetPinMigrationForTests,
 } from "./canvas-pins"
 import type { PinnedGeometry, NodeGeometry } from "./canvas-pins"
 
@@ -41,6 +42,10 @@ const geom = (over: Partial<PinnedGeometry> = {}): PinnedGeometry => ({
 beforeEach(() => {
   vi.stubGlobal("localStorage", makeLocalStorage())
   vi.stubGlobal("window", new EventTarget())
+  // migrateLegacyPins() only runs once per (real) page load — reset that
+  // gate per test or a test after the first would skip it against its own
+  // fresh fake localStorage above.
+  resetPinMigrationForTests()
 })
 
 afterEach(() => {

@@ -213,11 +213,18 @@ export function QueuePanel({
   const anchorRef = useRef<string | null>(null)
   const onReqAnchorRef = useRef<string | null>(null)
   const onReqMasterRef = useRef<HTMLInputElement>(null)
+  // Monotonically increasing id for the in-flight load() call. A manual
+  // refresh can race the 15s interval; if the older request's response lands
+  // after a newer one already committed, this drops it instead of clobbering
+  // fresher state.
+  const loadRequestIdRef = useRef(0)
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current
     try {
       const res = await fetch("/api/reply-queue")
       const data = await res.json()
+      if (requestId !== loadRequestIdRef.current) return
       const nextItems: QueueItem[] = Array.isArray(data.items) ? data.items : []
       const nextDrafting: DraftingItem[] = Array.isArray(data.drafting) ? data.drafting : []
       const nextOnRequest: QueueItem[] = Array.isArray(data.onRequest) ? data.onRequest : []
@@ -257,6 +264,7 @@ export function QueuePanel({
         return changed ? next : prev
       })
     } catch {
+      if (requestId !== loadRequestIdRef.current) return
       setError("Couldn't load the reply queue.")
       setItems((prev) => prev ?? [])
     }
@@ -848,6 +856,15 @@ export function QueuePanel({
                   <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-2 py-2">
                     <span className="text-xs font-medium tabular-nums">
                       {selectedOnReq.size} selected
+                      {lockedOnReqSelectedCount > 0 && (
+                        // Explains up front why "Approve & send" counts fewer
+                        // than the selection — locked drafts need their own
+                        // per-row fadmin confirm.
+                        <span className="font-normal text-muted-foreground">
+                          {" · "}
+                          {lockedOnReqSelectedCount} locked
+                        </span>
+                      )}
                     </span>
                     <button
                       type="button"
@@ -1283,6 +1300,19 @@ function QueueRow({
                 review carefully
               </Badge>
             )}
+            {/* Locked rows are skipped by bulk send, so the lock has to be
+                visible without expanding the row — otherwise a selection of
+                6 that sends 3 looks like a bug. */}
+            {locked && (
+              <Badge
+                variant="outline"
+                className="h-4 shrink-0 gap-1 border-amber-500/40 px-1 text-[10px] font-normal text-amber-700 dark:text-amber-400"
+                title="Verify payout / KYC / media in fadmin before sending"
+              >
+                <ShieldAlertIcon className="size-2.5" />
+                needs check
+              </Badge>
+            )}
             <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground">
               {relativeTime(item.createdAt)}
             </span>
@@ -1505,7 +1535,7 @@ function EmptyState({ error }: { error: string | null }) {
       </p>
       <p className="text-[11px] leading-snug text-muted-foreground">
         {error
-          ? "Retrying every 30 seconds. Open a case directly if you need it now."
+          ? "Retrying every 15 seconds. Open a case directly if you need it now."
           : "Suggestions for conversations assigned to you show up here as the AI drafts them — usually within a few seconds."}
       </p>
     </div>
