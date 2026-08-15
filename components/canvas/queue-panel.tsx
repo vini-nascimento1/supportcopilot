@@ -102,7 +102,15 @@ async function postSendAndResolve(
     const res = await fetch("/api/draft/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: item.intercomConversationId, body }),
+      body: JSON.stringify({
+        conversationId: item.intercomConversationId,
+        body,
+        // Callers only ever reach this for a locked (needs_check) item after
+        // the row's own two-step confirm has already happened (QueueRow.send
+        // is gated by `confirming`; bulk callers filter locked items out
+        // before calling this at all) — so it's safe to assert here.
+        needsCheckConfirmed: item.riskBand === "needs_check",
+      }),
     })
     if (!res.ok) {
       return {
@@ -607,9 +615,21 @@ export function QueuePanel({
     onReqAnchorRef.current = null
   }
 
+  const lockedSkippedWarning = (n: number) =>
+    `${n} locked draft${n > 1 ? "s" : ""} skipped — open each one and confirm after checking fadmin`
+
+  // The "On request" band has no separate needs_check split like "Ready to
+  // send" does, so a bulk send must not forward locked rows — each of those
+  // still needs its own per-row fadmin-check confirm (QueueRow handles that).
   const bulkSendOnReq = async () => {
-    const targets = onRequestSorted.filter((i) => selectedOnReq.has(i.id))
-    if (targets.length === 0) return
+    const selected = onRequestSorted.filter((i) => selectedOnReq.has(i.id))
+    const targets = selected.filter((i) => i.riskBand !== "needs_check")
+    const skipped = selected.length - targets.length
+    if (targets.length === 0) {
+      setConfirmOnReqSend(false)
+      if (skipped > 0) toast.warning(lockedSkippedWarning(skipped))
+      return
+    }
     setOnReqActing(true)
     let sent = 0
     let failed = 0
@@ -628,6 +648,7 @@ export function QueuePanel({
     setOnReqActing(false)
     if (sent > 0) toast.success(`Sent ${sent}`)
     if (failed > 0) toast.warning(`${failed} couldn't send`)
+    if (skipped > 0) toast.warning(lockedSkippedWarning(skipped))
     if (resolveFailed) void load()
   }
 
@@ -654,6 +675,13 @@ export function QueuePanel({
   const allOnReqSelected =
     onRequestSorted.length > 0 && selectedOnReq.size === onRequestSorted.length
   const someOnReqSelected = selectedOnReq.size > 0 && !allOnReqSelected
+  // How many of the current selection would actually go out — locked
+  // (needs_check) rows are skipped by bulkSendOnReq, so the button/confirm
+  // label must count only those, not the full selection.
+  const sendableOnReqCount = onRequestSorted.filter(
+    (i) => selectedOnReq.has(i.id) && i.riskBand !== "needs_check"
+  ).length
+  const lockedOnReqSelectedCount = selectedOnReq.size - sendableOnReqCount
   useEffect(() => {
     if (onReqMasterRef.current) onReqMasterRef.current.indeterminate = someOnReqSelected
   }, [someOnReqSelected])
@@ -764,7 +792,11 @@ export function QueuePanel({
               >
                 {ready.map((i, index) => (
                   <QueueRow
-                    key={i.intercomConversationId}
+                    // Keyed by suggestion id, not conversation id: a superseded
+                    // draft gets a NEW id for the SAME conversation, so this key
+                    // must change too — otherwise React reuses the row and its
+                    // local `body` state keeps showing the old (stale) text.
+                    key={i.id}
                     item={i}
                     onDone={remove}
                     onRefresh={load}
@@ -782,7 +814,8 @@ export function QueuePanel({
                 count={needsCheck.length}
               >
                 {needsCheck.map((i) => (
-                  <QueueRow key={i.intercomConversationId} item={i} onDone={remove} onRefresh={load} />
+                  // Same stale-state hazard as the "Ready to send" band above.
+                  <QueueRow key={i.id} item={i} onDone={remove} onRefresh={load} />
                 ))}
               </Band>
             )}
@@ -826,7 +859,9 @@ export function QueuePanel({
                     {confirmOnReqSend ? (
                       <div className="ml-auto flex items-center gap-1.5">
                         <span className="text-[11px] text-muted-foreground">
-                          Approve &amp; send {selectedOnReq.size}?
+                          Approve &amp; send {sendableOnReqCount}?
+                          {lockedOnReqSelectedCount > 0 &&
+                            ` (${lockedOnReqSelectedCount} locked skipped)`}
                         </span>
                         <Button
                           size="sm"
@@ -870,12 +905,18 @@ export function QueuePanel({
                         <Button
                           size="sm"
                           className="h-7 gap-1.5 px-2.5 text-[11px]"
-                          onClick={() => setConfirmOnReqSend(true)}
+                          onClick={() => {
+                            if (sendableOnReqCount === 0) {
+                              toast.warning(lockedSkippedWarning(lockedOnReqSelectedCount))
+                              return
+                            }
+                            setConfirmOnReqSend(true)
+                          }}
                           disabled={onReqActing}
                           title="Send is an irreversible outbound message to the customer"
                         >
                           <SendIcon className="size-3.5" />
-                          Approve &amp; send {selectedOnReq.size}
+                          Approve &amp; send {sendableOnReqCount}
                         </Button>
                       </div>
                     )}
@@ -884,7 +925,9 @@ export function QueuePanel({
                 <div className="flex flex-col gap-1.5">
                   {onRequestSorted.map((i, index) => (
                     <QueueRow
-                      key={i.intercomConversationId}
+                      // See the "Ready to send" band above: keyed by suggestion
+                      // id so a superseded draft remounts with fresh state.
+                      key={i.id}
                       item={i}
                       onDone={remove}
                       onRefresh={load}

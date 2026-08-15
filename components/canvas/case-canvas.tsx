@@ -54,10 +54,11 @@ import { Separator } from "@/components/ui/separator"
 import { ToolIcon } from "@/lib/tool-icons"
 import { cn } from "@/lib/utils"
 import { getCanvasHost } from "@/lib/canvas-host"
-import { getPins, clearAllPins } from "@/lib/canvas-pins"
+import { getPins, clearAllPins, geometryForSave } from "@/lib/canvas-pins"
 import { broadcastCanvasRefresh } from "@/lib/canvas-refresh"
 import {
   FALLBACK_TOOLS,
+  reconcileRestoredToolUrl,
   resolveToolUrl,
   suggestedTools,
   type CanvasTool,
@@ -65,6 +66,7 @@ import {
 import { CanvasActiveContext } from "@/components/canvas/active-context"
 import { AnchorLayerContext } from "@/components/canvas/anchor-layer"
 import { ToolNode, type ToolNodeData } from "@/components/canvas/tool-node"
+import { SavedLayoutProvider } from "@/components/canvas/pin-button"
 import {
   CaseInfoNode,
   type CaseInfoData,
@@ -259,90 +261,116 @@ function buildDefaultLayout(props: CaseCanvasProps): SavedLayout {
   return { nodes, edges }
 }
 
-function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
+// Guarded read of a per-case saved layout — shared by loadLayout, the
+// debounced save effect (Bug 1: pinned-node geometry) and the unpin restore
+// (see SavedLayoutProvider below).
+function readSavedLayout(key: string): SavedLayout | null {
   try {
     const raw = localStorage.getItem(key)
-    if (raw) {
-      const saved = JSON.parse(raw) as SavedLayout
-      if (Array.isArray(saved.nodes) && saved.nodes.length > 0) {
-        // Live data (case info, reply context) must never come from storage —
-        // refresh it from the server-provided props, keep saved geometry.
-        const nodes = saved.nodes.map((n) => {
-          if (n.type === "case-info" && props.caseInfo) {
-            // Fresh Intercom data + the agent's saved corrections (overrides)
-            const overrides = (n.data as Partial<CaseInfoData>)?.overrides
-            return { ...n, data: { ...props.caseInfo, overrides } }
-          }
-          if (
-            n.type === "conversation" &&
-            props.conversation &&
-            props.caseInfo
-          ) {
-            return {
-              ...n,
-              data: {
-                ...props.conversation,
-                conversationId: props.caseInfo.conversationId,
-                playbookId: (n.data as Partial<ConversationReplyData>)
-                  .playbookId,
-                playbookName: (n.data as Partial<ConversationReplyData>)
-                  .playbookName,
-                copilotTranscript: (n.data as Partial<ConversationReplyData>)
-                  .copilotTranscript,
-              },
-            }
-          }
-          if (n.type === "macros" && props.caseInfo) {
-            return {
-              ...n,
-              data: { conversationId: props.caseInfo.conversationId },
-            }
-          }
-          return n
-        })
-        const nodesWithoutRetired = nodes.filter(
-          (n) => n.type !== "draft" && n.type !== "ai"
-        )
-        // Layouts saved before the Conversation card existed: inject it
-        if (
-          props.conversation &&
-          props.caseInfo &&
-          !nodesWithoutRetired.some((n) => n.type === "conversation")
-        ) {
-          nodesWithoutRetired.unshift({
-            id: "conversation",
-            type: "conversation",
-            position: { x: -480, y: 0 },
-            width: 460,
-            height: 640,
-            data: {
-              ...props.conversation,
-              conversationId: props.caseInfo.conversationId,
-            },
-          })
-        }
-        // Layouts saved before the Macros card existed: inject it
-        if (
-          props.caseInfo &&
-          !nodesWithoutRetired.some((n) => n.type === "macros")
-        ) {
-          nodesWithoutRetired.push({
-            id: "macros",
-            type: "macros",
-            position: { x: 0, y: 960 },
-            width: 380,
-            height: 320,
-            data: { conversationId: props.caseInfo.conversationId },
-          })
-        }
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as SavedLayout
+    return Array.isArray(parsed?.nodes) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function loadLayout(key: string, props: CaseCanvasProps): SavedLayout {
+  const saved = readSavedLayout(key)
+  if (saved && saved.nodes.length > 0) {
+    // Fresh customer context for re-resolving tool-card URLs below. Gathered
+    // BEFORE mapping: the case-info node can appear after a tool node in
+    // saved.nodes, and both need the same (agent-corrected-if-any) values.
+    const caseInfoNode = saved.nodes.find((n) => n.type === "case-info")
+    const caseInfoOverrides = (caseInfoNode?.data as Partial<CaseInfoData> | undefined)
+      ?.overrides
+    const urlCtx = {
+      email: caseInfoOverrides?.customerEmail ?? props.caseInfo?.customerEmail,
+      name: caseInfoOverrides?.customerName ?? props.caseInfo?.customerName,
+    }
+    // Live data (case info, reply context) must never come from storage —
+    // refresh it from the server-provided props, keep saved geometry.
+    const nodes = saved.nodes.map((n) => {
+      if (n.type === "case-info" && props.caseInfo) {
+        // Fresh Intercom data + the agent's saved corrections (overrides)
+        return { ...n, data: { ...props.caseInfo, overrides: caseInfoOverrides } }
+      }
+      if (
+        n.type === "conversation" &&
+        props.conversation &&
+        props.caseInfo
+      ) {
         return {
-          nodes: nodesWithoutRetired as Node[],
-          edges: saved.edges ?? [],
+          ...n,
+          data: {
+            ...props.conversation,
+            conversationId: props.caseInfo.conversationId,
+            playbookId: (n.data as Partial<ConversationReplyData>)
+              .playbookId,
+            playbookName: (n.data as Partial<ConversationReplyData>)
+              .playbookName,
+            copilotTranscript: (n.data as Partial<ConversationReplyData>)
+              .copilotTranscript,
+          },
         }
       }
+      if (n.type === "macros" && props.caseInfo) {
+        return {
+          ...n,
+          data: { conversationId: props.caseInfo.conversationId },
+        }
+      }
+      if (n.type === "tool") {
+        // A restored tool card keeps last session's url as-is otherwise —
+        // if the customer's email/name changed since then this re-resolves
+        // it (ghost cards swap url directly, loaded cards get a pendingUrl
+        // banner instead of being yanked to a new page).
+        const data = n.data as ToolNodeData
+        const patch = reconcileRestoredToolUrl(data, urlCtx)
+        if (!patch) return n
+        return { ...n, data: { ...data, ...patch } }
+      }
+      return n
+    })
+    const nodesWithoutRetired = nodes.filter(
+      (n) => n.type !== "draft" && n.type !== "ai"
+    )
+    // Layouts saved before the Conversation card existed: inject it
+    if (
+      props.conversation &&
+      props.caseInfo &&
+      !nodesWithoutRetired.some((n) => n.type === "conversation")
+    ) {
+      nodesWithoutRetired.unshift({
+        id: "conversation",
+        type: "conversation",
+        position: { x: -480, y: 0 },
+        width: 460,
+        height: 640,
+        data: {
+          ...props.conversation,
+          conversationId: props.caseInfo.conversationId,
+        },
+      })
     }
-  } catch {
-    // corrupted layout — fall through to defaults
+    // Layouts saved before the Macros card existed: inject it
+    if (
+      props.caseInfo &&
+      !nodesWithoutRetired.some((n) => n.type === "macros")
+    ) {
+      nodesWithoutRetired.push({
+        id: "macros",
+        type: "macros",
+        position: { x: 0, y: 960 },
+        width: 380,
+        height: 320,
+        data: { conversationId: props.caseInfo.conversationId },
+      })
+    }
+    return {
+      nodes: nodesWithoutRetired as Node[],
+      edges: saved.edges ?? [],
+    }
   }
   return buildDefaultLayout(props)
 }
@@ -454,20 +482,38 @@ function CanvasInner(props: CaseCanvasProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedEmail, resolvedName])
 
-  // Debounced persistence of geometry + notes + edges
+  // Debounced persistence of geometry + notes + edges.
+  //
+  // Bug fix: a pinned node's live position/width/height is the GLOBAL pin
+  // geometry (applyPins overwrote it at mount, above) — saving that back
+  // verbatim would permanently overwrite this case's own layout the moment
+  // ANY pin exists. So for currently-pinned nodes we persist the geometry
+  // from the PREVIOUSLY saved layout instead of the node's current
+  // (pin-imposed) values, falling back to current when this case never saved
+  // that node before (e.g. added then pinned in the same session).
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
+      let pins: ReturnType<typeof getPins> = {}
+      try {
+        pins = getPins()
+      } catch {
+        // SSR — no pins
+      }
+      const previousById = new Map(
+        (readSavedLayout(storageKey)?.nodes ?? []).map((n) => [n.id, n])
+      )
       const payload: SavedLayout = {
-        nodes: nodes.map(({ id, type, position, width, height, data }) => ({
-          id,
-          type,
-          position,
-          width,
-          height,
-          data,
-        })),
+        nodes: nodes.map(({ id, type, position, width, height, data }) => {
+          const prev = previousById.get(id)
+          const geom = geometryForSave(
+            id in pins,
+            { position, width, height },
+            prev && { position: prev.position, width: prev.width, height: prev.height }
+          )
+          return { id, type, position: geom.position, width: geom.width, height: geom.height, data }
+        }),
         edges,
       }
       try {
@@ -665,6 +711,17 @@ function CanvasInner(props: CaseCanvasProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey, setNodes, setEdges, fitView])
 
+  // Lets PinButton put a card back where THIS case had it on unpin, instead
+  // of leaving it at the pin's global spot (see SavedLayoutProvider below).
+  const getSavedGeometry = useCallback(
+    (nodeId: string) => {
+      const node = readSavedLayout(storageKey)?.nodes.find((n) => n.id === nodeId)
+      if (!node) return undefined
+      return { position: node.position, width: node.width, height: node.height }
+    },
+    [storageKey]
+  )
+
   // Live refresh — the conversation/case-info cards are seeded once at mount
   // (loadLayout) and don't follow props, so a reopened or closed ticket would
   // otherwise stay stale. Re-fetch the thread and patch just those two cards,
@@ -817,6 +874,7 @@ function CanvasInner(props: CaseCanvasProps) {
   }
 
   return (
+    <SavedLayoutProvider value={getSavedGeometry}>
     <CanvasActiveContext.Provider value={active}>
       {/* data-canvas-pane marks the safe region for native tool views — they're
         clipped to it (minus the docked chrome below) so they never overlay the
@@ -1047,6 +1105,7 @@ function CanvasInner(props: CaseCanvasProps) {
         </AnchorLayerContext.Provider>
       </div>
     </CanvasActiveContext.Provider>
+    </SavedLayoutProvider>
   )
 }
 

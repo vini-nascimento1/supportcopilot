@@ -8,6 +8,7 @@ import { PlusIcon, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   readTabsRaw,
+  registerTab,
   subscribeTabs,
   writeTabs,
   type CanvasTab,
@@ -39,12 +40,13 @@ export function CanvasTabs({ current }: { current: CanvasTab }) {
     }
   }, [raw])
 
-  // Register/refresh the current canvas at the front of the strip
+  // Register/refresh the current canvas at the front of the strip. Goes
+  // through the same registerTab() eviction logic as the workspace host so
+  // the two tab surfaces can't drift on which tab gets dropped at the cap.
   useEffect(() => {
-    const existing = tabs.filter((t) => t.id !== current.id)
     const head = tabs[0]
     if (head?.id === current.id && head?.title === current.title) return
-    writeTabs([current, ...existing])
+    writeTabs(registerTab(tabs, current, "start"))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current.id, current.title])
 

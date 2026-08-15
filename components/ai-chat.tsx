@@ -216,18 +216,27 @@ export function AIChat() {
 
   return (
     <>
-      {/* FAB button */}
+      {/* FAB button. data-canvas-chrome: embedded native tool views (Fadmin
+          etc.) paint above ALL web content — this marks the button as chrome
+          so canvas tool views are clipped around it instead of burying it
+          (see lib/canvas-bounds.ts). */}
       <button
         onClick={() => setOpen(!open)}
+        data-canvas-chrome="right"
         className="fixed bottom-6 right-6 z-50 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-all hover:scale-105 hover:shadow-xl active:scale-95"
         aria-label={open ? "Close AI chat" : "Open AI chat"}
       >
         {open ? <XIcon className="size-5" /> : <BotIcon className="size-5" />}
       </button>
 
-      {/* Chat panel */}
+      {/* Chat panel. data-canvas-chrome keeps native tool views clipped to
+          its left edge while it's open (they'd otherwise paint over it); the
+          max-w keeps it usable on small laptops instead of a fixed 440px. */}
       {open && (
-        <div className="fixed bottom-22 right-6 z-50 flex w-[440px] flex-col rounded-xl border bg-card shadow-2xl transition-all duration-200 animate-in slide-in-from-bottom-4">
+        <div
+          data-canvas-chrome="right"
+          className="fixed bottom-22 right-6 z-50 flex w-[440px] max-w-[calc(100vw-3rem)] flex-col rounded-xl border bg-card shadow-2xl transition-all duration-200 animate-in slide-in-from-bottom-4"
+        >
           {/* Header */}
           <div className="flex items-center gap-2 border-b px-4 py-3">
             <BotIcon className="size-4 text-primary" />
@@ -248,7 +257,7 @@ export function AIChat() {
           {/* Messages */}
           <div
             ref={listRef}
-            className="flex max-h-[560px] min-h-[250px] flex-col gap-3 overflow-y-auto p-4"
+            className="flex max-h-[min(560px,calc(100dvh-16rem))] min-h-[250px] flex-col gap-3 overflow-y-auto p-4"
           >
             {messages.length === 0 && !loading && !confirmation && (
               <div className="flex flex-1 items-center justify-center">
@@ -257,7 +266,7 @@ export function AIChat() {
                   Intercom ticket to research it against Notion/Slack/Linear.
                   <br />
                   <span className="text-xs">
-                    e.g. "what playbook covers a stuck KYC?" or paste a ticket link and ask "what's going on here?"
+                    e.g. &ldquo;what playbook covers a stuck KYC?&rdquo; or paste a ticket link and ask &ldquo;what&rsquo;s going on here?&rdquo;
                   </span>
                 </p>
               </div>

@@ -64,6 +64,36 @@ export function resolveToolUrl(
   return missing ? null : url
 }
 
+/** Subset of ToolNodeData (components/canvas/tool-node.tsx) this needs — kept
+    structural instead of importing the component's type into this pure lib. */
+export interface RestorableToolUrlData {
+  url: string
+  urlTemplate?: string
+  ghost?: boolean
+}
+
+/**
+ * A layout restored from storage carries last session's tool-card URLs
+ * as-is (loadLayout only refreshes case-info/conversation/macros data). If the
+ * customer's email/name changed since then, re-resolve against the fresh
+ * context so a stale Fadmin/ONDATO link doesn't sit there silently.
+ *
+ * Returns a data patch to merge in, or null when nothing needs to change
+ * (no template, context still can't fill it, or the URL is already current).
+ * Ghost cards (nothing loaded yet) get `url` swapped directly; loaded cards
+ * get `pendingUrl` set instead — ToolNode shows a one-click Refresh banner
+ * rather than yanking an open card to a new page.
+ */
+export function reconcileRestoredToolUrl(
+  data: RestorableToolUrlData,
+  ctx: CustomerContext,
+): { url: string } | { pendingUrl: string } | null {
+  if (!data.urlTemplate) return null
+  const freshUrl = resolveToolUrl(data.urlTemplate, ctx)
+  if (!freshUrl || freshUrl === data.url) return null
+  return data.ghost ? { url: freshUrl } : { pendingUrl: freshUrl }
+}
+
 // Keywords that imply a tool tag even when the Intercom tag is missing —
 // matched against the ticket text (subject + customer messages).
 const TAG_KEYWORDS: Record<string, string[]> = {

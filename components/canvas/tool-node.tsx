@@ -113,13 +113,33 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
     if (!el || !pane) return
     const paneRect = pane.getBoundingClientRect()
     const r = el.getBoundingClientRect()
-    setPinScreen(id, {
-      left: Math.round(r.left - paneRect.left),
-      top: Math.round(r.top - paneRect.top),
-      width: Math.round(r.width),
-      height: Math.round(r.height),
-    })
-  }, [pinned, screenRect, id])
+    // Hidden keep-alive panes (canvas-workspace keeps every opened tab
+    // mounted, display:none) measure as 0×0 — never let one of them overwrite
+    // the pin with a garbage rect; the visible pane does the capturing.
+    if (r.width < 1 || r.height < 1 || paneRect.width < 1 || paneRect.height < 1)
+      return
+    // The in-flow card sits inside React Flow's pan/zoom transform, so this
+    // rect is scaled by the canvas zoom — and fitView routinely lands above 1
+    // on a sparse canvas (a lone tool card fits to nearly the whole pane).
+    // The anchored card renders its content at 1:1, so store the UNSCALED
+    // size; storing the visual size froze cards pinned while zoomed in at the
+    // blown-up, pane-covering rect. Position stays visual (where the user
+    // sees the card), clamped so the stored rect can never exceed the pane.
+    const zoom = store.getState().transform[2] || 1
+    setPinScreen(
+      id,
+      clampPinnedScreenRect(
+        {
+          left: Math.round(r.left - paneRect.left),
+          top: Math.round(r.top - paneRect.top),
+          width: Math.round(r.width / zoom),
+          height: Math.round(r.height / zoom),
+        },
+        paneRect.width,
+        paneRect.height,
+      ),
+    )
+  }, [pinned, screenRect, id, store])
 
   const [minimized, setMinimized] = useState(false)
   const minimizedRef = useRef(minimized)
@@ -162,31 +182,32 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
 
     const tick = () => {
       const el = bodyRef.current
-      if (el) {
-        // Anchored cards live outside the canvas's pan/zoom transform, so
-        // their content is always shown at 1:1 regardless of canvas zoom.
-        const zoom = anchoredRef.current ? 1 : store.getState().transform[2]
-        // Clip the view to the canvas area minus the chrome, so a native
-        // WebContentsView never paints over the sidebars or toolbox (it can't
-        // respect their z-index). null → the card is fully occluded; hide it.
-        const bounds =
-          minimizedRef.current || hasBlockingOverlay()
-            ? null
-            : clipToolBounds(
-                el.getBoundingClientRect(),
-                el.closest("[data-canvas-pane]"),
-              )
-        const key = bounds
-          ? `${bounds.x},${bounds.y},${bounds.width},${bounds.height},${zoom.toFixed(2)}`
-          : "hidden"
-        if (key !== lastKey) {
-          lastKey = key
-          if (!bounds) {
-            host.setToolVisible(id, false)
-          } else {
-            host.setToolBounds(id, bounds, zoom)
-            host.setToolVisible(id, true)
-          }
+      // Anchored cards live outside the canvas's pan/zoom transform, so
+      // their content is always shown at 1:1 regardless of canvas zoom.
+      const zoom = anchoredRef.current ? 1 : store.getState().transform[2]
+      // No body element — minimized (body unmounts before minimizedRef
+      // catches up) or not yet mounted — is just another hidden state, same
+      // as a blocking overlay or full occlusion: null bounds, view hidden.
+      // Clip the view to the canvas area minus the chrome, so a native
+      // WebContentsView never paints over the sidebars or toolbox (it can't
+      // respect their z-index). null → the card is hidden or fully occluded.
+      const bounds =
+        !el || minimizedRef.current || hasBlockingOverlay()
+          ? null
+          : clipToolBounds(
+              el.getBoundingClientRect(),
+              el.closest("[data-canvas-pane]"),
+            )
+      const key = bounds
+        ? `${bounds.x},${bounds.y},${bounds.width},${bounds.height},${zoom.toFixed(2)}`
+        : "hidden"
+      if (key !== lastKey) {
+        lastKey = key
+        if (!bounds) {
+          host.setToolVisible(id, false)
+        } else {
+          host.setToolBounds(id, bounds, zoom)
+          host.setToolVisible(id, true)
         }
       }
       raf = requestAnimationFrame(tick)
@@ -267,8 +288,11 @@ export function ToolNode({ id, data, selected }: NodeProps<ToolNodeType>) {
         selected && "ring-2 ring-ring",
       )}
     >
+      {/* Anchored (pinned) cards render outside React Flow's viewport, so the
+          resizer's world-space math no longer maps to what's on screen —
+          hide it; size is frozen while pinned. */}
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !anchored}
         minWidth={280}
         minHeight={minimized ? 40 : 200}
       />

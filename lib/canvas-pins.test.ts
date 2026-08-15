@@ -9,10 +9,12 @@ import {
   removePin,
   clearAllPins,
   subscribePins,
+  geometryForSave,
 } from "./canvas-pins"
-import type { PinnedGeometry } from "./canvas-pins"
+import type { PinnedGeometry, NodeGeometry } from "./canvas-pins"
 
-const PINS_KEY = "fv-canvas-pins-v1"
+const PINS_KEY = "fv-canvas-pins-v2"
+const LEGACY_PINS_KEY = "fv-canvas-pins-v1"
 
 // vitest's default node environment has no real localStorage/window; stand in
 // with an in-memory store and a plain EventTarget so write()'s
@@ -143,6 +145,69 @@ describe("setPinScreen / getPinScreen", () => {
     expect(second).not.toBe(first)
     expect(second?.left).toBe(999)
   })
+
+  it("treats a degenerate stored rect (zero/NaN size) as absent", () => {
+    setPin("tool:5", geom())
+    setPinScreen("tool:5", { left: 0, top: 0, width: 0, height: 0 })
+    expect(getPinScreen("tool:5")).toBeNull()
+    setPinScreen("tool:5", { left: 0, top: 0, width: NaN, height: 100 })
+    expect(getPinScreen("tool:5")).toBeNull()
+  })
+})
+
+describe("v1 → v2 migration", () => {
+  it("keeps world geometry but drops the (zoom-poisoned) screen rects", () => {
+    localStorage.setItem(
+      LEGACY_PINS_KEY,
+      JSON.stringify({
+        "tool:fadmin": {
+          position: { x: 10, y: 20 },
+          width: 640,
+          height: 520,
+          screen: { left: 0, top: 0, width: 5000, height: 4000 },
+        },
+      }),
+    )
+    const pins = getPins()
+    expect(pins["tool:fadmin"]).toEqual({
+      position: { x: 10, y: 20 },
+      width: 640,
+      height: 520,
+    })
+    expect(pins["tool:fadmin"].screen).toBeUndefined()
+    expect(localStorage.getItem(LEGACY_PINS_KEY)).toBeNull()
+    expect(localStorage.getItem(PINS_KEY)).not.toBeNull()
+  })
+
+  it("migrates a corrupt v1 payload to an empty registry", () => {
+    localStorage.setItem(LEGACY_PINS_KEY, "{not json")
+    expect(getPins()).toEqual({})
+    expect(localStorage.getItem(LEGACY_PINS_KEY)).toBeNull()
+    expect(localStorage.getItem(PINS_KEY)).toBe("{}")
+  })
+
+  it("never overwrites an existing v2 registry with v1 data", () => {
+    setPin("ai", geom({ position: { x: 1, y: 1 } }))
+    localStorage.setItem(
+      LEGACY_PINS_KEY,
+      JSON.stringify({ ai: { position: { x: 99, y: 99 } } }),
+    )
+    expect(getPins().ai.position).toEqual({ x: 1, y: 1 })
+    // Stale v1 blob stays untouched but is never read again for pins.
+    expect(getPins().ai.screen).toBeUndefined()
+  })
+
+  it("drops malformed v1 entries instead of carrying them over", () => {
+    localStorage.setItem(
+      LEGACY_PINS_KEY,
+      JSON.stringify({
+        good: { position: { x: 0, y: 0 } },
+        bad: "nope",
+        alsoBad: { width: 100 },
+      }),
+    )
+    expect(Object.keys(getPins())).toEqual(["good"])
+  })
 })
 
 describe("clearAllPins", () => {
@@ -151,6 +216,24 @@ describe("clearAllPins", () => {
     setPin("case-info", geom())
     clearAllPins()
     expect(getPins()).toEqual({})
+  })
+})
+
+describe("geometryForSave", () => {
+  const current: NodeGeometry = { position: { x: 1, y: 1 }, width: 100, height: 200 }
+  const saved: NodeGeometry = { position: { x: 9, y: 9 }, width: 640, height: 520 }
+
+  it("unpinned node always saves its current geometry", () => {
+    expect(geometryForSave(false, current, saved)).toEqual(current)
+    expect(geometryForSave(false, current, undefined)).toEqual(current)
+  })
+
+  it("pinned node with a prior save keeps the PREVIOUSLY SAVED geometry, not the pin-imposed current one", () => {
+    expect(geometryForSave(true, current, saved)).toEqual(saved)
+  })
+
+  it("pinned node with no prior save falls back to current (e.g. added then pinned same session)", () => {
+    expect(geometryForSave(true, current, undefined)).toEqual(current)
   })
 })
 

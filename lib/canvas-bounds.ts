@@ -33,7 +33,17 @@ export function clipToolBounds(
 
     // Inset past edge-docked chrome the card vertically overlaps — so a card
     // sitting entirely below the (short) toolbox keeps its full width.
-    pane.querySelectorAll("[data-canvas-chrome]").forEach((el) => {
+    // Searched document-wide, not just inside the pane: some chrome (the AI
+    // Assistant panel + its launcher button) is a fixed overlay rendered in
+    // the app layout, outside the pane, and a native view would otherwise
+    // paint straight over it. Chrome in hidden keep-alive panes measures 0×0
+    // and is skipped below. (Pane-scoped fallback exists only for the node
+    // test environment, which has no document.)
+    const chromeEls =
+      typeof document !== "undefined"
+        ? document.querySelectorAll("[data-canvas-chrome]")
+        : pane.querySelectorAll("[data-canvas-chrome]")
+    chromeEls.forEach((el) => {
       const c = el.getBoundingClientRect()
       if (c.width === 0 || c.height === 0) return
       if (bottom <= c.top || top >= c.bottom) return // no vertical overlap

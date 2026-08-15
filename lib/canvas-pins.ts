@@ -14,10 +14,48 @@ export interface PinnedGeometry {
   screen?: { left: number; top: number; width: number; height: number }
 }
 
-const PINS_KEY = "fv-canvas-pins-v1"
+const PINS_KEY = "fv-canvas-pins-v2"
 const PINS_EVENT = "fv-canvas-pins-changed"
 
+// v1 screen rects were captured inside React Flow's zoom transform, i.e.
+// scaled by whatever the canvas zoom happened to be at pin time — many are
+// poisoned (pane-sized or bigger; the "Fadmin covers the whole canvas"
+// incident). Migrate once: keep every pin's world geometry, drop only the
+// screen rect — ToolNode re-captures it with the fixed, zoom-normalized
+// measurement on the next render, so pinned cards heal without user action.
+const LEGACY_PINS_KEY = "fv-canvas-pins-v1"
+
+function migrateLegacyPins(): void {
+  try {
+    if (localStorage.getItem(PINS_KEY) !== null) return
+    const raw = localStorage.getItem(LEGACY_PINS_KEY)
+    if (raw === null) return
+    const pins: Record<string, PinnedGeometry> = {}
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === "object") {
+        for (const [id, pin] of Object.entries(
+          parsed as Record<string, PinnedGeometry>,
+        )) {
+          if (!pin || typeof pin !== "object" || !pin.position) continue
+          const migrated: PinnedGeometry = { position: pin.position }
+          if (pin.width !== undefined) migrated.width = pin.width
+          if (pin.height !== undefined) migrated.height = pin.height
+          pins[id] = migrated
+        }
+      }
+    } catch {
+      // corrupt v1 payload — migrate to an empty registry
+    }
+    localStorage.setItem(PINS_KEY, JSON.stringify(pins))
+    localStorage.removeItem(LEGACY_PINS_KEY)
+  } catch {
+    // no localStorage (SSR) — nothing to migrate
+  }
+}
+
 export function getPins(): Record<string, PinnedGeometry> {
+  migrateLegacyPins()
   try {
     const raw = localStorage.getItem(PINS_KEY)
     const parsed = raw ? JSON.parse(raw) : {}
@@ -64,7 +102,10 @@ const screenCache = new Map<string, { json: string; value: PinnedGeometry["scree
 
 export function getPinScreen(id: string): PinnedGeometry["screen"] | null {
   const screen = getPins()[id]?.screen
-  if (!screen) {
+  // A degenerate rect (zero/negative/NaN — e.g. captured off a hidden pane)
+  // is treated as absent so the card renders in-flow and re-captures a real
+  // one, instead of anchoring to garbage.
+  if (!screen || !(screen.width >= 1) || !(screen.height >= 1)) {
     screenCache.delete(id)
     return null
   }
@@ -89,6 +130,31 @@ export function removePin(id: string) {
 // rendering correctly first.
 export function clearAllPins() {
   write({})
+}
+
+export interface NodeGeometry {
+  position: { x: number; y: number }
+  width?: number
+  height?: number
+}
+
+/**
+ * What to persist for a node when saving a per-case canvas layout. A pinned
+ * node's live position/width/height is the GLOBAL pin geometry (applyPins in
+ * case-canvas.tsx overwrites it at mount) — saving that back verbatim would
+ * permanently destroy this case's own layout the moment ANY pin exists. So:
+ * while a node is pinned, keep whatever this case had saved before instead of
+ * its current (pin-imposed) geometry; fall back to current when there's
+ * nothing saved yet (e.g. a node added and pinned in the same session).
+ * Unpinned nodes always save their current geometry.
+ */
+export function geometryForSave(
+  pinned: boolean,
+  current: NodeGeometry,
+  previouslySaved: NodeGeometry | undefined,
+): NodeGeometry {
+  if (pinned && previouslySaved) return previouslySaved
+  return current
 }
 
 export function subscribePins(cb: () => void) {

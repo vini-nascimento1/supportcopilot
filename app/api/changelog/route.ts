@@ -16,6 +16,62 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-15-h",
+    date: "2026-08-15",
+    title: "Reopened cases refresh their tool links",
+    description:
+      "If a customer's email or name changed since you last had a case open, the Fadmin/ONDATO/MassPay cards on that canvas quietly kept pointing at the old details. Reopening a case now checks every tool card against the current customer info: cards you haven't opened yet just get the right link, and open ones show the usual \"this card is stale\" banner with a one-click Refresh.",
+  },
+  {
+    id: "seed-2026-08-15-g",
+    date: "2026-08-15",
+    title: "Pinning a card no longer scrambles your other cases' layouts",
+    description:
+      "Pinning a tool card quietly overwrote where that card sat on every case you opened afterwards, and unpinning left it stranded at the pinned spot. Each case now remembers its own layout while a card is pinned, and unpinning puts the card back where that case had it.",
+  },
+  {
+    id: "seed-2026-08-15-f",
+    date: "2026-08-15",
+    title: "Minimizing an embedded tool window actually hides it",
+    description:
+      "Minimizing a tool card (Fadmin, ONDATO, MassPay…) collapsed the card but could leave the embedded window itself floating over the canvas, covering whatever was underneath until you restored or closed it. Minimize now hides the window properly and restore brings it back exactly where it was.",
+  },
+  {
+    id: "seed-2026-08-15-e",
+    date: "2026-08-15",
+    title: "Queue rows always show the draft that will actually send",
+    description:
+      "When a draft was regenerated (for example right after \"Assign to me\"), the Queue row could keep showing — and send — the older version of the text, and the send was logged as if you had edited it. Rows now refresh completely when a draft is replaced, so what you read is what goes out.",
+  },
+  {
+    id: "seed-2026-08-15-d",
+    date: "2026-08-15",
+    title: "\"Needs your check\" drafts can't slip out through bulk send",
+    description:
+      "Drafts locked for a fadmin check (payouts, KYC, media) could still go out through the \"On request\" group's select-all and Approve & send, skipping the confirm step entirely. Bulk send now skips locked drafts and tells you how many need their own check, and the server itself refuses to send a locked draft that hasn't been confirmed — whichever screen it comes from.",
+  },
+  {
+    id: "seed-2026-08-15-c",
+    date: "2026-08-15",
+    title: "Opening a 13th canvas tab no longer blanks the workspace",
+    description:
+      "Once you had 12 canvases open, opening one more could leave the whole workspace blank — the new tab became active but had actually been dropped to make room. The tab strip now always drops the oldest tab to make space for a new one, never the one you just opened.",
+  },
+  {
+    id: "seed-2026-08-15-b",
+    date: "2026-08-15",
+    title: "The AI Assistant stays on top of embedded tool windows",
+    description:
+      "Embedded tool windows (Fadmin, ONDATO, MassPay…) are real browser views that draw over everything, and they were covering the AI Assistant panel and its launcher button whenever they overlapped. Tool windows now make room for the assistant, so you can keep Fadmin open and chat side by side. The assistant panel also fits properly on smaller laptop screens instead of running off the edge.",
+  },
+  {
+    id: "seed-2026-08-15-a",
+    date: "2026-08-15",
+    title: "Pinned tool cards no longer balloon to cover the whole canvas",
+    description:
+      "Pinning a tool card (Fadmin, ONDATO, MassPay…) while the canvas was zoomed in froze it at the zoomed-in size — often the entire canvas — and it stayed that way on every case until you unpinned it. Pinning now keeps the card at its real size wherever it sits on screen, and any card already stuck full-screen fixes itself the next time the canvas loads. Resizing is paused while a card is pinned; unpin to resize it.",
+  },
+  {
     id: "seed-2026-08-12-f",
     date: "2026-08-12",
     title: "Drafts hold firm when a customer just repeats the same demand",

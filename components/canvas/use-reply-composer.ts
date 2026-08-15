@@ -210,6 +210,10 @@ export function useReplyComposer(opts: {
         body: JSON.stringify({
           conversationId,
           body: text,
+          // Reaching this point already implies the two-step confirm above
+          // has been satisfied for a locked draft (riskBand !== "needs_check",
+          // or it is and needsCheckConfirming was already true).
+          needsCheckConfirmed: riskBand === "needs_check",
           attachmentFiles: attachments.map((attachment) => ({
             name: attachment.name,
             contentType: attachment.contentType,

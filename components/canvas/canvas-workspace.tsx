@@ -9,6 +9,7 @@ import {
   isAdhoc,
   readTabs,
   readTabsRaw,
+  registerTab,
   subscribeTabs,
   writeTabs,
   type CanvasTab,
@@ -60,11 +61,30 @@ export function CanvasWorkspace({ tools, downloadUrl, initialActiveId }: Props) 
   const [mounted, setMounted] = useState<string[]>([])
   const [ready, setReady] = useState(false)
 
-  const ensureRegistered = useCallback((id: string, title?: string) => {
-    const current = readTabs()
-    if (current.some((t) => t.id === id)) return
-    writeTabs([...current, { id, title: title ?? (isAdhoc(id) ? "Canvas" : `#${id}`) }])
+  // Drops any tab id no longer present in `next` from `mounted` — used after
+  // registerTab() so an evicted tab's hidden pane actually unmounts instead
+  // of leaking forever.
+  const dropEvictedMounts = useCallback((next: CanvasTab[]) => {
+    const survivingIds = new Set(next.map((t) => t.id))
+    setMounted((prev) => prev.filter((m) => survivingIds.has(m)))
   }, [])
+
+  const ensureRegistered = useCallback(
+    (id: string, title?: string) => {
+      const current = readTabs()
+      if (current.some((t) => t.id === id)) return
+      const next = registerTab(current, {
+        id,
+        title: title ?? (isAdhoc(id) ? "Canvas" : `#${id}`),
+      })
+      writeTabs(next)
+      // Registering always grows the list by one unless registerTab evicted
+      // the oldest tab to stay under MAX_TABS — that's the only case where
+      // mounted needs pruning.
+      if (next.length <= current.length) dropEvictedMounts(next)
+    },
+    [dropEvictedMounts],
+  )
 
   const select = useCallback(
     (id: string) => {
@@ -78,9 +98,12 @@ export function CanvasWorkspace({ tools, downloadUrl, initialActiveId }: Props) 
 
   const addAdhoc = useCallback(() => {
     const id = newAdhocId()
-    writeTabs([...readTabs(), { id, title: "Canvas" }])
+    const current = readTabs()
+    const next = registerTab(current, { id, title: "Canvas" })
+    writeTabs(next)
+    if (next.length <= current.length) dropEvictedMounts(next)
     select(id)
-  }, [select])
+  }, [select, dropEvictedMounts])
 
   const close = useCallback(
     (id: string) => {

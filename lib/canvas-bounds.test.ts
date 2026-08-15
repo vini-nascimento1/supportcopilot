@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 
 import { clipToolBounds, clampPinnedScreenRect } from "./canvas-bounds"
 
@@ -88,6 +88,32 @@ describe("clipToolBounds", () => {
     // clips down to 50x50
     const result = clipToolBounds(fakeRect(450, 450, 600, 600), pane)
     expect(result).toBeNull()
+  })
+
+  describe("document-level chrome (fixed overlays outside the pane)", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it("insets past chrome found on document even when the pane has none (AI Assistant panel/FAB)", () => {
+      const chrome = chromeEl("right", fakeRect(350, 50, 500, 450))
+      const pane = fakePane(fakeRect(0, 0, 500, 500), [])
+      vi.stubGlobal("document", {
+        querySelectorAll: () => [chrome] as unknown as NodeListOf<Element>,
+      })
+      const result = clipToolBounds(fakeRect(100, 100, 400, 400), pane)
+      expect(result).toEqual({ x: 100, y: 100, width: 250, height: 300 })
+    })
+
+    it("still ignores document-level chrome without vertical overlap", () => {
+      const chrome = chromeEl("right", fakeRect(350, 450, 500, 500))
+      const pane = fakePane(fakeRect(0, 0, 500, 500), [])
+      vi.stubGlobal("document", {
+        querySelectorAll: () => [chrome] as unknown as NodeListOf<Element>,
+      })
+      const result = clipToolBounds(fakeRect(100, 100, 400, 400), pane)
+      expect(result).toEqual({ x: 100, y: 100, width: 300, height: 300 })
+    })
   })
 })
 
