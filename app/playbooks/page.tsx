@@ -23,7 +23,7 @@ export default async function PlaybooksPage() {
         <Separator orientation="vertical" className="min-h-6" />
         <h1 className="text-base font-medium">Playbooks</h1>
         <span className="text-sm text-muted-foreground">
-          {playbooks.playbookCount} total · {playbooks.reviewedCount} reviewed
+          {playbooks.playbookCount} total
         </span>
       </header>
 

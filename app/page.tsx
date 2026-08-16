@@ -55,7 +55,6 @@ export default async function DashboardPage({
       error: "Couldn't load playbooks.",
       playbookCount: 0,
       responseCount: 0,
-      reviewedCount: 0,
       rows: [],
       allRows: [],
     }),

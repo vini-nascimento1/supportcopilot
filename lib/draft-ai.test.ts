@@ -308,7 +308,6 @@ describe("buildVerifierGroundingContext", () => {
     id: "pb-1",
     caseType: "Payout delayed",
     source: "test",
-    status: "reviewed",
     aliases: [],
     lastValidated: null,
     recognize: "Creator asks why payout is delayed",

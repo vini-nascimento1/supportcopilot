@@ -6,7 +6,6 @@ export type PlaybookListItem = {
   id: string
   caseType: string
   source: string
-  status: string
   aliases: string[]
   lastValidated: string | null
   recognize: string | null
@@ -21,7 +20,6 @@ export type PlaybooksDashboardData = {
   error: string | null
   playbookCount: number
   responseCount: number
-  reviewedCount: number
   rows: PlaybookListItem[]
   allRows: PlaybookListItem[]
 }
@@ -31,7 +29,6 @@ const demoRows: PlaybookListItem[] = [
     id: "demo-kyc-stuck",
     caseType: "KYC stuck / pending / null or technical error",
     source: "KYC & identity",
-    status: "draft",
     aliases: ["verification pending", "KYC stuck", "null KYC"],
     lastValidated: null,
     recognize: "Creator says verification is stuck or pending.",
@@ -44,7 +41,6 @@ const demoRows: PlaybookListItem[] = [
     id: "demo-payout-hold",
     caseType: "Payout on hold / under review (compliance RFI)",
     source: "Payouts & banking",
-    status: "draft",
     aliases: ["payout under review", "compliance hold"],
     lastValidated: null,
     recognize: "Payout is pending with compliance review language.",
@@ -60,7 +56,6 @@ const demoData: PlaybooksDashboardData = {
   error: null,
   playbookCount: 45,
   responseCount: 48,
-  reviewedCount: 0,
   rows: demoRows,
   allRows: demoRows,
 }
@@ -69,7 +64,6 @@ function mapPlaybookRow(row: {
   id: string
   case_type: string
   source: string | null
-  status: string
   aliases: string[] | null
   last_validated: string | null
   recognize: string | null
@@ -82,7 +76,6 @@ function mapPlaybookRow(row: {
     id: row.id,
     caseType: row.case_type,
     source: row.source ?? "No source recorded",
-    status: row.status,
     aliases: row.aliases ?? [],
     lastValidated: row.last_validated,
     recognize: row.recognize,
@@ -128,20 +121,16 @@ export async function getPlaybooksDashboardData(): Promise<PlaybooksDashboardDat
     return demoData
   }
 
-  const [playbooksResult, playbookCountResult, responseCountResult, reviewedResult] =
+  const [playbooksResult, playbookCountResult, responseCountResult] =
     await Promise.all([
       supabase
         .from("playbooks")
         .select(
-          "id, case_type, aliases, status, source, last_validated, recognize, checks, resolution, dos_donts, requires_manual_action"
+          "id, case_type, aliases, source, last_validated, recognize, checks, resolution, dos_donts, requires_manual_action"
         )
         .order("case_type", { ascending: true }),
       supabase.from("playbooks").select("id", { count: "exact", head: true }),
       supabase.from("responses").select("id", { count: "exact", head: true }),
-      supabase
-        .from("playbooks")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "reviewed"),
     ])
 
   if (playbooksResult.error) {
@@ -159,7 +148,6 @@ export async function getPlaybooksDashboardData(): Promise<PlaybooksDashboardDat
     error: null,
     playbookCount: playbookCountResult.count ?? allRows.length,
     responseCount: responseCountResult.count ?? 0,
-    reviewedCount: reviewedResult.count ?? 0,
     rows: allRows.slice(0, 8),
     allRows,
   }

@@ -64,9 +64,6 @@ export function PlaybookRow({ playbook }: { playbook: PlaybookListItem }) {
           <td className="max-w-xl truncate px-3 py-3 align-top text-muted-foreground">
             {playbook.aliases.join(", ") || "No aliases"}
           </td>
-          <td className="py-3 pl-3 pr-4 align-top">
-            <Badge variant="outline">{playbook.status}</Badge>
-          </td>
         </tr>
       </SheetTrigger>
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
@@ -75,9 +72,6 @@ export function PlaybookRow({ playbook }: { playbook: PlaybookListItem }) {
             {playbook.caseType}
           </SheetTitle>
           <SheetDescription className="flex flex-wrap items-center gap-2">
-            <Badge variant={playbook.status === "reviewed" ? "default" : "secondary"}>
-              {playbook.status}
-            </Badge>
             {playbook.source && (
               <span className="text-xs text-muted-foreground">
                 {playbook.source}

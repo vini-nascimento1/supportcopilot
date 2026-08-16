@@ -157,7 +157,6 @@ Support case response templates / decision trees that ground AI drafts and popul
 | id | uuid | PK |
 | case_type | text | unique |
 | aliases | text[] | default `{}` |
-| status | text | default `'draft'`, check `draft \| reviewed` |
 | last_validated | date | nullable |
 | source | text | nullable |
 | recognize | text | nullable |

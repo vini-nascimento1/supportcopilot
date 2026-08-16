@@ -67,7 +67,6 @@ export function PlaybooksClient({ playbooks }: Props) {
           <TableRow>
             <TableHead>Case type</TableHead>
             <TableHead>Aliases</TableHead>
-            <TableHead>Status</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

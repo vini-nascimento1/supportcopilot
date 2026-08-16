@@ -7,7 +7,6 @@ const pb = (over: Partial<PlaybookListItem>): PlaybookListItem => ({
   id: "id-1",
   caseType: "KYC stuck",
   source: "KYC",
-  status: "draft",
   aliases: ["verification pending"],
   lastValidated: null,
   recognize: null,
