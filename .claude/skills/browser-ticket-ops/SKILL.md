@@ -18,6 +18,10 @@ will keep evolving as he tests it more. Current state: one ticket at a time, seq
 stated direction of travel is toward handling several tickets concurrently — nothing special to do
 about that yet, just don't assume the one-at-a-time approach here is the ceiling.
 
+**This file is meant to keep growing.** After finishing any live ticket handled with this skill, run
+**fadmin-ticket-retro** — it's the loop that captures what was slow, wrong, or newly discovered this
+time and folds it back in here so the next ticket is faster. Don't treat this doc as finished.
+
 ## 0. Setup
 
 - Fadmin URL: `https://fadmin.fanvue.com` (found in `lib/canvas-tools.ts`, `FALLBACK_TOOLS`).
@@ -140,6 +144,45 @@ register anything. After clicking a search result, the table below the search bo
 visually refresh even though the URL's `filter` param picked up the right internal id — just
 navigate straight to `#/creatorResource/<id>/show` (or `/show/<tabIndex>` for a specific tab) using
 that id instead of trusting the inline list.
+
+**More UI quirks, confirmed on the @daiafans refund investigation (2026-08-17):**
+- The per-user **Messages** tab's "Text includes..." filter genuinely works, but the same
+  render-delay quirk applies as above — type, wait ~2s, screenshot once, and trust the result instead
+  of retyping/re-verifying it several times.
+- The **sort-by-column buttons** (price, created at, etc.) on that same Messages tab did not visibly
+  reorder rows across many attempts in this session — don't rely on them; use a filter or a different
+  resource instead of debugging the sort.
+- The **"Add filter" checkbox menu** (Sent After / Sent Before / Paid only) on the Messages tab was
+  unreliable across ~6 attempts (menu opens, checkbox click registers no visible field or filter
+  change). Time-box any attempt at this specific control to two tries, then route around it.
+- The Messages tab list is **virtualized with wildly variable row heights** (rows with several media
+  thumbnails are much taller) — large scroll amounts skip past whole days of messages without
+  rendering them. Scroll in small increments (5–8 ticks) near the date you're targeting, not one big
+  jump.
+- **Element refs and fixed pixel coordinates go stale across navigations, filter changes, and even
+  page-height changes between screenshots** (a ~40–50px shift is enough) — this caused a stray tab to
+  open and a pagination click to land on the wrong element in this session. Re-`find` (or `read_page`)
+  for a fresh ref right before each click once the page has changed since the last one; don't reuse a
+  coordinate from an earlier screenshot.
+
+## 9. Refund / content-mismatch dispute investigations
+
+See [[feedback_refund_investigation_fadmin_workflow]] for the full writeup. Short version:
+
+1. **Get the invoice number first** from the fan's **Spending & Payment Methods** tab, then search it
+   directly in the **global Payments resource** (`#/paymentResource` → "Search Invoice number" field).
+   It has real server-side invoice/status/date search and confirms amount, date, creator, and PAID
+   status in one shot — far more reliable than digging through the per-user Messages tab.
+2. Only open the per-user **Messages** tab if you need the actual message text/media (see the UI
+   quirks above for that tab specifically).
+3. To check a specific factual claim in a dispute (e.g. "the description said X"), run one
+   **full-history** text-filter search for that exact word across the fan's entire message log with
+   that creator, unscoped by date — don't scope by date first. If the word only ever appears in the
+   fan's own messages and never the creator's, that answers the claim; stop there rather than also
+   hunting for the literal paid-message row for visual confirmation, unless the search result is
+   ambiguous.
+4. Refund itself is applied per support-response-batch §4k's "Refund mechanics" — this section is
+   about verifying the claim first, not about the leaf-case decision tree (that's §4k's job).
 
 ## 6. Compliance/moderation disputes — check Slack before answering
 
