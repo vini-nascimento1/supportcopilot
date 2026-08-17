@@ -119,6 +119,7 @@ export async function POST(req: Request) {
       try {
         await computeAndPersistSuggestion(id, origin, {
           owner: { id: agentId, email },
+          onRequest: true,
         })
       } catch {
         await settleSuggestionAttempt(id, "skipped", "generation error").catch(() => {})

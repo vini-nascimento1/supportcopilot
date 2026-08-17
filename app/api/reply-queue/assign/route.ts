@@ -84,6 +84,7 @@ export async function POST(req: Request) {
   try {
     outcome = await computeAndPersistSuggestion(conversationId, origin, {
       owner: { id: agentId, email },
+      onRequest: true,
     })
   } catch {
     // The assignment itself stands — it's already written in Intercom. But the
