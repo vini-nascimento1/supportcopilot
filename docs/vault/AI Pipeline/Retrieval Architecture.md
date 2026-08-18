@@ -154,6 +154,22 @@ chunks would remove the extra LLM call; until then correctness beats the saving.
 Reporting is per-stratum. A regression in a small-but-important cell
 (`needs_check/nopb`, n=5) must not be averaged away by the headline.
 
+### Running it (and the credential it needs)
+
+```
+npx tsx scripts/eval-retrieval.mts --arm=v1 --out=baseline.json
+npx tsx scripts/eval-retrieval.mts --arm=v2 --out=candidate.json
+npx tsx scripts/eval-retrieval.mts --compare baseline.json candidate.json
+```
+
+The runner hydrates case bodies from the database at run time and needs
+`SUPABASE_SERVICE_ROLE_KEY`, which ships as a literal `[SENSITIVE]` placeholder
+in `.env.local` (as does `CRON_SECRET`). Restore both with
+`vercel env pull --environment=production` before running. As of 2026-08-18 the
+corpus is ingested and ready, but **the eval has not yet been run**, so
+`RETRIEVAL_V2` stays off: the flag's own doctrine is that v2 does not ship on
+judgement, only on a passing gate.
+
 ## Ingest
 
 `lib/retrieval/ingest.ts`, driven by `app/api/cron/reindex-knowledge`
@@ -164,6 +180,29 @@ retrievable forever, serving dead policy.
 
 Embedding goes through `withAiSlot` so a full re-ingest can't stampede the org
 key alongside live drafting.
+
+**Upserts are batched at 50 rows.** Each row carries a 3072-dim `halfvec`
+serialised as a text literal (~25KB), so upserting a whole source kind in one
+statement is multi-megabyte. The first cold ingest (2026-08-18) hit exactly
+this: playbooks (251 chunks) and responses (73) fit and reported success, while
+macros — 363 sources, the largest corpus — indexed **zero** with `canceling
+statement due to statement timeout`. That failure mode is worse than a plain
+error, because `knowledge_chunks` looked populated and fully embedded while
+silently missing every approved canned reply; an eval run at that moment would
+have scored a corpus with a hole in it. Batching also means a partial failure
+keeps the batches that already landed, and the next run re-embeds only what is
+still missing, since `diffChunks` compares checksums against the DB.
+
+### Corpus status (2026-08-18)
+
+First successful cold ingest: **691 chunks, zero missing embeddings** —
+playbook 251, macro 367, response 73. The nightly `reindex-knowledge-nightly`
+pg_cron job (03:17 UTC) was **missing entirely** until this date, which is why
+the table sat empty and `RETRIEVAL_V2` had never been evaluated. Four other
+cron jobs existed; this one had simply never been registered. Same shape as the
+earlier triage-sweep incident: route correct, code complete, nothing calling it.
+The incremental path is confirmed working — the second run skipped all 324
+existing playbook/response chunks as `unchanged` and embedded only the macros.
 
 **Notion is not ingested yet.** The live path uses a per-agent OAuth token,
 which is wrong for a background job — it would index whatever one arbitrary
