@@ -141,6 +141,59 @@ describe("closing the conversation — a restated demand is not new information"
   })
 })
 
+// A fan asked, for the third time, a plain yes/no confirmation of what two
+// agents had already told them ("so I just wait and the money comes back,
+// right?"). The draft contradicted its own agent's in-thread answer, said the
+// transactions "need to be checked" after all, and asked for the transaction
+// date and last 4 card digits — pushing back instead of closing the loop.
+describe("confirm, don't re-open — an already-answered question just gets agreed with", () => {
+  const builders: Array<[string, string]> = [
+    ["buildSystemPrompt", buildSystemPrompt(undefined, [], "Vini", [])],
+    ["buildNotionAwareSystemPrompt", buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])],
+    ["buildImproveSystemPrompt", buildImproveSystemPrompt("Vini")],
+    ["buildMacroAdaptSystemPrompt", buildMacroAdaptSystemPrompt("Some approved macro text.", "Vini")],
+  ]
+
+  it.each(builders)("%s makes agree-and-close the default for an answered question", (_name, out) => {
+    expect(out).toContain("The default for an already-answered question is to agree and close it")
+    expect(out).toContain("A short reply that closes the loop is a COMPLETE reply")
+  })
+
+  it.each(builders)("%s makes a yes/no question get the direct answer first", (_name, out) => {
+    expect(out).toContain("A yes/no question gets the answer first")
+    expect(out).toContain("Match the reply's length to what was actually asked")
+  })
+
+  it.each(builders)("%s forbids overturning an answer an agent already gave in the thread", (_name, out) => {
+    expect(out).toContain("Never contradict, walk back, or cast doubt on an answer a Fanvue agent already gave")
+    expect(out).toContain("The customer restating their own situation is not new evidence")
+  })
+
+  it.each(builders)("%s forbids inventing a check to justify a longer reply", (_name, out) => {
+    expect(out).toContain("Do not invent a new check, question, or piece of missing information")
+  })
+
+  it("stops the draft asking for card digits once the thread already identifies the payment", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    expect(out).toContain("Only ask for those card digits when the transaction is genuinely unidentified")
+    expect(out).toContain("banking app wording does not overrule what Fanvue's own records show")
+  })
+
+  it("makes the verifier strip a re-opened loop and unnecessary asks", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Use the KB only." },
+      { role: "user", content: "AGENT: the payment never landed on our side. CUSTOMER: so I just wait, right?" },
+    ]
+    const out = buildDraftVerifierMessages(
+      messages,
+      "The transactions need to be checked. Please provide the transaction date and the last four digits of the card."
+    )
+    expect(out[0].content).toContain("Do not let the draft re-open a settled point")
+    expect(out[0].content).toContain("Cut asks for information the reply does not need")
+    expect(out[0].content).toContain("Never lengthen a short, correct confirming draft")
+  })
+})
+
 // Retrieval v2: ranked cited evidence replaces the single-playbook injection.
 // The defect being fixed is measured — playbook-matched drafts were approved
 // 57.6% of the time vs 67.5% when nothing matched (n=1,201) — so "we found

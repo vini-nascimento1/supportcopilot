@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-18-a",
+    date: "2026-08-18",
+    title: "Drafts confirm the answer instead of arguing with it",
+    description:
+      "When a customer asked to confirm something they'd already been told (\"so I just wait and the money comes back, right?\"), the draft would contradict the agent who answered, decide the case needed checking after all, and ask for card digits or dates it didn't need. Drafts now lead with the direct answer, confirm it in a line or two, and close the conversation — and they never overturn an answer you already gave in the thread.",
+  },
+  {
     id: "seed-2026-08-15-r",
     date: "2026-08-15",
     title: "You can see at a glance which drafts are locked",

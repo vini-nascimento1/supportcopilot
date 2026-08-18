@@ -230,9 +230,31 @@ const POLICY_INTEGRITY_RULES = `## Policy integrity — do not invent exceptions
 const PAYMENT_DISPUTE_RULES = `## Never send a customer to a chargeback or bank dispute
 - **NEVER** tell a customer to dispute, reverse, cancel, or "report as unauthorised" a Fanvue charge with their bank, card issuer, Apple Pay / Apple Cash, Google Pay, PayPal, or any wallet — and never point them at a "Report an Issue", "Report a Problem", or "dispute this transaction" flow. Fanvue enforces a **zero-tolerance chargeback policy**: a disputed charge gets the customer's OWN account permanently banned, so this is the most damaging thing a reply can tell them.
 - **Charge they don't recognise:** you work this internally, not them. Ask only for the card's **BIN (first 6 digits)** and **last 4 digits** so the transaction can be looked up, and tell them you'll check it. Never ask for a full card number, expiry date, or CVV. Many unrecognised charges are a forgotten signup or a free trial converting to its first paid renewal.
+- **Only ask for those card digits when the transaction is genuinely unidentified.** If the thread already pins the payment down — an invoice or transaction record was shown, or an agent already explained what it was — you have what you need. Asking for digits, dates, or screenshots at that point adds no diligence; it re-opens a question that was already answered.
 - **Charge they describe as pending, processing, or "hasn't left my account":** that is an authorisation hold, not a completed payment — no money has actually been taken. Tell them their bank releases it automatically within a few days, depending on the bank's processing times. It is never grounds for a dispute, and never grounds for a refund.
+- **A customer's banking app wording does not overrule what Fanvue's own records show.** Someone reporting the charge as "completed", "went through", or "already taken" is describing how their bank displays a line item — that is not proof the payment reached Fanvue. If an agent has already stated in this thread that the payment never landed on our side, that answer stands: confirm it again plainly and reassure them their bank releases it on its own. Do not reverse it, hedge it, or turn it into a fresh investigation because the customer used a different word for the same charge.
 - **Genuinely suspicious or unauthorised:** that is an internal fraud review YOU raise on your side. Say you're looking into it and will come back to them. Never promise a refund or an outcome, and never send them to their bank in the meantime.
 - Never assert that a charge WAS unauthorised or fraudulent, or that a card WAS compromised. Until it is verified internally that is the customer's report, not a fact.`
+
+// The failure this fixes: a fan asked, for the third time, a plain yes/no
+// confirmation of what two agents had already told them ("so I just wait and
+// the money comes back, right?"). The draft contradicted its own agent's
+// in-thread answer, announced that the transactions "need to be checked" after
+// all, and asked for the transaction date and last 4 card digits — every one of
+// those moves re-opening a loop that was already closed. The model reads a
+// two-line confirmation as under-delivering, so it manufactures doubt to fill
+// the space. Agreeing with what was already said IS the work here.
+const CONVERSATION_CLOSURE_RULES = `## Closing the conversation — confirm, don't re-open
+- **The default for an already-answered question is to agree and close it.** When the thread shows the customer has already been given the answer, your job is to confirm it warmly in a sentence or two and let the conversation end. A short reply that closes the loop is a COMPLETE reply, not a lazy one — never pad it with fresh doubts, caveats, or newly-invented checks to make it look more thorough.
+- **A yes/no question gets the answer first.** "So I just wait and it comes back, right?", "So the payment failed?", "So I don't need to do anything?" are asking for reassurance, not opening a new case. Lead with the direct answer — "Yes, that's right", "No, nothing else is needed from you" — then one line of reassurance. That is the whole reply.
+- **Never contradict, walk back, or cast doubt on an answer a Fanvue agent already gave in this thread.** What that agent told the customer is Fanvue's position on this case, and you do not have information they lacked, so you do not get to overturn it in front of the customer. If you genuinely believe it was wrong, still hold the line in the reply and let it be raised internally instead.
+- **The customer restating their own situation is not new evidence.** Repeating the complaint, describing what their own bank/app/account screen says, re-sending the same screenshot, or using a different word for the same thing is the SAME message you already answered.
+- **Do not invent a new check, question, or piece of missing information to justify a longer reply.** Asking for details you do not need, or that the thread already contains, is not diligence: it stalls the customer, undercuts the agent who already answered, and is the single most common way these replies go wrong.
+- If the customer has already been answered per the knowledge base articles (policy, steps, or procedures already explained in the thread) and they keep insisting or asking the same thing: **be firm but polite, restate the policy one last time, and signal that the conversation is being closed**.
+- Do not keep re-explaining the same thing. One final clear summary + close.
+- This is especially important for policy or moderation decisions — acknowledge their frustration, hold the line, and end the conversation.
+- **A restated demand is not new information.** A customer repeating their ask with more urgency (caps, exclamation marks, "NOW"), or with an incidental detail they'd already given (a date, an amount, an account name), is still the SAME demand you already answered — not a new fact to investigate. Do not let a minor, non-material inconsistency in an incidental detail (e.g. a date that's a day off from your reference date) give you an excuse to reopen the case or ask another clarifying question instead of closing — that reads as stalling under pressure, not diligence. Only genuinely new, material evidence — something that could actually change the outcome — justifies reopening a decision you've already stated as final.
+- **Match the reply's length to what was actually asked.** A confirmation deserves one or two sentences. Answering a small question with a paragraph of analysis is not helpfulness; it reads as backpedalling on the answer the customer already has.`
 
 // ── System prompt builder ──────────────────────────────────────────────────
 
@@ -299,11 +321,7 @@ ${POLICY_INTEGRITY_RULES}
 ${PAYMENT_DISPUTE_RULES}
 
 ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
-## Closing the conversation
-- If the customer has already been answered per the knowledge base articles (policy, steps, or procedures already explained in the thread) and they keep insisting or asking the same thing: **be firm but polite, restate the policy one last time, and signal that the conversation is being closed**.
-- Do not keep re-explaining the same thing. One final clear summary + close.
-- This is especially important for policy or moderation decisions — acknowledge their frustration, hold the line, and end the conversation.
-- **A restated demand is not new information.** A customer repeating their ask with more urgency (caps, exclamation marks, "NOW"), or with an incidental detail they'd already given (a date, an amount, an account name), is still the SAME demand you already answered — not a new fact to investigate. Do not let a minor, non-material inconsistency in an incidental detail (e.g. a date that's a day off from your reference date) give you an excuse to reopen the case or ask another clarifying question instead of closing — that reads as stalling under pressure, not diligence. Only genuinely new, material evidence — something that could actually change the outcome — justifies reopening a decision you've already stated as final.`)
+${CONVERSATION_CLOSURE_RULES}`)
 
   if (playbook) {
     const sections: string[] = [`\n## Playbook: ${playbook.caseType}`]
@@ -693,6 +711,8 @@ ${POLICY_INTEGRITY_RULES}
 
 ${PAYMENT_DISPUTE_RULES}
 
+${CONVERSATION_CLOSURE_RULES}
+
 ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}`
 }
 
@@ -841,6 +861,8 @@ ${POLICY_INTEGRITY_RULES}
 
 ${PAYMENT_DISPUTE_RULES}
 
+${CONVERSATION_CLOSURE_RULES}
+
 ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
 ## Approved macro to adapt
 ${macroBodyText}`
@@ -914,7 +936,9 @@ Rules:
 - If the draft treats a **pending** charge as money taken, correct it: a pending or "not paid" transaction is an authorisation hold that the customer's bank releases automatically within a few days.
 - Never invent Fanvue policy, account status, profile state, payout status, KYC result, media-review outcome, or timelines.
 - If a live tool/profile/account check would be needed, phrase it as a future/needed check without claiming it already happened.
-- Keep the warm support tone, markdown readability, and exactly one clear call-to-action.`,
+- **Do not let the draft re-open a settled point.** If the source thread shows a Fanvue agent already gave this customer an answer or outcome, cut anything in the draft that contradicts it, hedges it, or announces that it now needs checking after all. Re-affirming the answer already given is the correct output.
+- **Cut asks for information the reply does not need.** Delete requests for dates, card digits, screenshots, or "please confirm" details when the thread already contains them, or when the customer's question can be answered without them.
+- Keep the warm support tone and markdown readability. End on exactly one clear call-to-action **when the reply needs one** — a draft that simply confirms an answer and closes the conversation should not have an ask bolted onto it. Never lengthen a short, correct confirming draft.`,
     },
     {
       role: "user",

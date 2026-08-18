@@ -68,6 +68,22 @@ The system prompt already told the model to hold the line and close a conversati
 
 **Fix:** the closing-conversation rule now says explicitly that a restated demand — repeated with more urgency, or with an incidental detail (a date, an amount, an account name) the customer already gave — is still the same demand, not new information, and that a minor/non-material inconsistency in that detail is not grounds to reopen a decision already stated as final. Only genuinely new, material evidence justifies reopening. This matters most in exactly the cases where it failed: the model has several independent instructions (compute elapsed time from a date, don't invent exceptions under pressure, close once already answered) that can pull against each other under customer pressure, and the more literal one (verify this date) can quietly override the firmer one (hold the line) unless it's told which one wins.
 
+### `CONVERSATION_CLOSURE_RULES` — confirm, don't re-open
+
+The rule above covered a *hostile* repeat demand. It did not cover the far more common failure: a customer simply asking to **confirm** something they'd already been told. In a live payment case an agent had already stated in-thread that the payment never landed on Fanvue's side and the bank would rescind it. The fan's follow-up was a plain yes/no check — "so I have to wait until I have my money back right, but the payment was completed in my bank account, i think its stuck". The draft answered by contradicting Fanvue's own agent ("it shouldn't be treated as a temporary pending authorisation… the transactions need to be checked rather than assuming the funds will automatically return"), then asked for the transaction date and last 4 card digits. Three separate defects in one reply: it overturned an answer the agent had already given, it re-opened a closed loop, and it asked for details the thread already contained.
+
+The root cause is a length bias, not a knowledge gap — the model reads a two-line confirmation as under-delivering, so it manufactures doubt and a new check to fill the space. So the fix names the correct behavior positively rather than only banning the bad one:
+
+- **Agree and close is the default** for an already-answered question, and a short reply that closes the loop is explicitly labelled a COMPLETE reply, not a lazy one.
+- **A yes/no question gets the answer first** — lead with "Yes, that's right" / "No, nothing else is needed from you", then one line of reassurance.
+- **Never contradict or walk back an answer a Fanvue agent already gave in this thread.** That answer is Fanvue's position on the case; the model has no information the agent lacked, so it does not get to overturn it in front of the customer. If it believes the answer was wrong, it holds the line in the reply and the disagreement gets raised internally.
+- **The customer restating their own situation is not new evidence** — re-describing what their own bank/app/account screen says, or using a different word for the same thing, is the same message already answered.
+- **No inventing a check or a missing detail to justify a longer reply**, and **match the reply's length to what was asked**.
+
+Two supporting changes land the same fix in the layers around it. `PAYMENT_DISPUTE_RULES` now gates its BIN + last 4 lookup on the transaction being *genuinely unidentified* — if the thread already shows an invoice or an agent already explained the charge, asking for digits re-opens an answered question — and adds that a customer's banking-app wording ("completed", "went through") does not overrule what Fanvue's own records show. The **verifier** ([[Draft Verify Pipeline]]) gets the same rule as a last line of defence: it cuts anything that contradicts, hedges, or re-opens an answer the source thread shows an agent already gave, deletes asks for information the thread already contains, and is told never to lengthen a short, correct confirming draft. Its one-call-to-action rule is now conditional — a reply that just confirms and closes should not have an ask bolted onto it.
+
+Unlike the older closing block, this one is a shared constant injected into `buildSystemPrompt()`, `buildImproveSystemPrompt()`, and `buildMacroAdaptSystemPrompt()` — the improve and macro-adapt paths previously had no closing rules at all, so either could re-introduce the pushback the draft path had just been told to avoid.
+
 ## 7. Tone Preference (optional, last)
 
 An agent's personal voice setting — Professional, Warm, Human, or a free-text Custom tone, configured in [[Settings and Profile]] — is injected as its own section, deliberately placed **after** every rule above it.
@@ -91,8 +107,8 @@ Not every drafting path uses the full stack above:
 
 ## Key files
 
-- `lib/draft-ai.ts` — `buildSystemPrompt()`, `AGENT_IDENTITY_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildUserMessage()`
-- `lib/draft-ai.test.ts` — "chargeback / bank-dispute guardrail" and "no keyword-gated confirmations" assert the rules survive prompt refactors
+- `lib/draft-ai.ts` — `buildSystemPrompt()`, `AGENT_IDENTITY_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
+- `lib/draft-ai.test.ts` — "chargeback / bank-dispute guardrail", "no keyword-gated confirmations", and "confirm, don't re-open" assert the rules survive prompt refactors
 - `lib/tone-presets.ts` — `TONE_PRESETS`, `TonePresetId`, `toneInstructionFor()`, `presetStripsEmDashes()`, `stripEmDashes()`, `MAX_CUSTOM_TONE_CHARS`
 
 ## Data flow
@@ -107,6 +123,7 @@ buildSystemPrompt(playbook, examples, agentName, articles, hasAgentReplied, gree
         ├─ 4. Privacy rule                (no real name; email presence only, not value)
         ├─ 5. English-only instruction    (repeated again on the user message footer)
         ├─ 6. Today's date                (explicit, for elapsed-time math)
+        ├─ 6b. CONVERSATION_CLOSURE_RULES (confirm an answered question, don't re-open it)
         └─ 7. toneInstructionSection(toneInstruction)   ← optional, always LAST
                  "shapes voice only — never overrides any rule above"
         │
