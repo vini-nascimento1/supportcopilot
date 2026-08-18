@@ -84,6 +84,23 @@ Two supporting changes land the same fix in the layers around it. `PAYMENT_DISPU
 
 Unlike the older closing block, this one is a shared constant injected into `buildSystemPrompt()`, `buildImproveSystemPrompt()`, and `buildMacroAdaptSystemPrompt()` — the improve and macro-adapt paths previously had no closing rules at all, so either could re-introduce the pushback the draft path had just been told to avoid.
 
+## Rule precedence, and why the stack needed one
+
+Every rule block on this page was added in response to a specific live failure, and until 2026-08-18 none of them said what happens when two of them pull in opposite directions. That gap was not theoretical. The draft that told a fan "the transactions need to be checked" was **obeying** `PAYMENT_DISPUTE_RULES` ("ask for BIN + last 4") over `CONVERSATION_CLOSURE_RULES` ("confirm and close"), because the former is more literal and more actionable and nothing said which one wins.
+
+Reading the *assembled* prompt as one document (see `scripts/dump-assembled-prompt.mts`) surfaced four defects that are invisible when reading the source file block by block:
+
+1. **A blanket instruction to ask.** "If the playbook and articles don't cover the issue, acknowledge warmly and ask one focused clarifying question" sat in **Critical constraints**, which reads as more authoritative than a section called "Closing the conversation." Since most tail cases have no playbook match, *asking* was effectively the documented default. It now requires reading the thread first.
+2. **An unconditional call-to-action.** "End with exactly one clear call-to-action" gave the model no exception for a reply that simply confirms and closes, so it invented an ask to satisfy the rule — while the verifier had just been told to strip exactly that. The two layers were fighting. Both are conditional now.
+3. **The tone block was no longer last** in the draft path. Its disclaimer says it "never overrides any rule above", which is only true if nothing outranking it is printed below it; the closure rules had been appended after it. Order restored, and a test now pins it.
+4. **Duplicated closure bullets** — the new closure rules were appended alongside the older ones they subsumed, so the same instruction appeared twice in slightly different words. Merged.
+
+`RULE_PRECEDENCE` now states the order explicitly: safety and policy first, then "don't re-open what is already settled", then "ask only for what is genuinely missing", and formatting/tone last. Item 4 carries most of the weight: **a rule about shape must never manufacture substance** — never invent a question, caveat, or next step purely to satisfy a rule about form.
+
+## `GOOD_REPLY_SHAPE` — the counterweight to a prohibition-only stack
+
+The rule stack was roughly 90% prohibitions: 55 bullet directives containing 41 instances of "never". Told only what *not* to do, the model falls back on generic assistant instincts — hedge, caveat, ask a clarifying question — and that default **is** the pushback the team kept patching one incident at a time. Naming the target explicitly is cheaper than banning every way of missing it, so the prompt now states the shape it wants: answer in the first sentence, give the one thing that happens next if there is one, then stop. It says outright that a two-or-three-sentence reply is finished work, not a rough draft.
+
 ## 7. Tone Preference (optional, last)
 
 An agent's personal voice setting — Professional, Warm, Human, or a free-text Custom tone, configured in [[Settings and Profile]] — is injected as its own section, deliberately placed **after** every rule above it.
@@ -105,9 +122,35 @@ Not every drafting path uses the full stack above:
 - **`buildNotionAwareSystemPrompt()`** (tail cases with no playbook match) keeps the identity/capability/policy/privacy/language/date layers but grounds the reply only in customer-safe Notion hits instead of a playbook.
 - **`buildImproveSystemPrompt()`** (the "Improve Draft" path) is intentionally much lighter — no playbook injection, no greeting rules — because it's editing text a human already produced or approved, not deriving a reply from scratch. See [[Draft Verify Pipeline]] for where each variant is used.
 
+## Measuring the prompt instead of arguing about it
+
+Two tools exist so prompt changes are evidence-driven rather than intuition-driven, because the string-presence assertions in `lib/draft-ai.test.ts` prove the rule text is *present*, never that the model *obeys* it.
+
+- **`scripts/dump-assembled-prompt.mts`** — writes the fully assembled prompt for all four paths to one file, no API key required. This is how the four defects above were found; block-by-block reading of the source hides them.
+- **`scripts/eval-draft-behavior.mts`** — runs real generations against fixtures shaped like the failures agents actually correct, and scores them. `--dry-run` checks that every load-bearing rule survived a refactor (no key needed). `--self-test` asserts every defect detector still fires on a known-bad draft and that none fire on a known-good one, so the eval cannot quietly degrade into always-passing.
+
+The fixtures are derived from `reply_queue_events` (n=1,731, 2026-07-18 → 2026-08-18), not from intuition:
+
+| Signal | Measured |
+|---|---|
+| Approved unedited / edited / rejected | 61.8% / 25.5% / 12.7% |
+| Edits that **shortened** the draft | **85%** (47% cut more than a quarter) |
+| Mean length, suggested → agent's final | 603 → 433 chars |
+| "please confirm/provide" removed vs added | 58 vs 10 |
+| Screenshot ask removed vs added | 56 vs 19 |
+| "our team" / "get back to you" removed vs added | 10 vs 2 / 6 vs 0 |
+
+The dominant correction agents make is **cutting**, which is why padding is treated here as a first-class defect rather than a style nit.
+
+One finding worth keeping in mind: **rejects are not separable from approves** on these features (22% vs 22% ask rate; confidence 0.82 vs 0.85). Rejections are correctness failures — wrong policy, wrong read of the case — and no amount of prompt-shape work will move them. They need retrieval and playbook work instead. `confidence` is also not a usable quality signal at present.
+
+Before/after on the `confirm-and-close` fixture, which reproduces the live 2026-08-18 failure: the pre-fix prompt scored **0/2** (one reply asked for "BIN and last 4 digits… amount and date", the other ran 570 chars and told the customer to contact their bank); the current prompt scores **2/2** at ~250 chars.
+
 ## Key files
 
-- `lib/draft-ai.ts` — `buildSystemPrompt()`, `AGENT_IDENTITY_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
+- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `AGENT_IDENTITY_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
+- `scripts/dump-assembled-prompt.mts` — assembled-prompt dump for all four paths
+- `scripts/eval-draft-behavior.mts` — behavioural eval, `--dry-run` / `--self-test` / `--runs=N` / `--scenario=<id>`
 - `lib/draft-ai.test.ts` — "chargeback / bank-dispute guardrail", "no keyword-gated confirmations", and "confirm, don't re-open" assert the rules survive prompt refactors
 - `lib/tone-presets.ts` — `TONE_PRESETS`, `TonePresetId`, `toneInstructionFor()`, `presetStripsEmDashes()`, `stripEmDashes()`, `MAX_CUSTOM_TONE_CHARS`
 
@@ -122,6 +165,8 @@ buildSystemPrompt(playbook, examples, agentName, articles, hasAgentReplied, gree
         ├─ 3b. PAYMENT_DISPUTE_RULES      (never send them to a chargeback)
         ├─ 4. Privacy rule                (no real name; email presence only, not value)
         ├─ 5. English-only instruction    (repeated again on the user message footer)
+        ├─ 0a. RULE_PRECEDENCE            (which rule wins when two conflict)
+        ├─ 0b. GOOD_REPLY_SHAPE           (the positive target: answer, next step, stop)
         ├─ 6. Today's date                (explicit, for elapsed-time math)
         ├─ 6b. CONVERSATION_CLOSURE_RULES (confirm an answered question, don't re-open it)
         └─ 7. toneInstructionSection(toneInstruction)   ← optional, always LAST

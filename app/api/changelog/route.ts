@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-18-b",
+    date: "2026-08-18",
+    title: "Drafts are shorter and stop padding",
+    description:
+      "Looking at a month of your edits, 85% of the time you shortened the draft before sending, usually by cutting an unnecessary \"could you confirm...\", a screenshot request, or a hedge. The draft rules now say plainly that a two-line reply is finished work, and that a rule about formatting is never a reason to add an extra question or step. Drafts should arrive closer to what you'd actually send.",
+  },
+  {
     id: "seed-2026-08-18-a",
     date: "2026-08-18",
     title: "Drafts confirm the answer instead of arguing with it",

@@ -166,7 +166,7 @@ describe("confirm, don't re-open — an already-answered question just gets agre
 
   it.each(builders)("%s forbids overturning an answer an agent already gave in the thread", (_name, out) => {
     expect(out).toContain("Never contradict, walk back, or cast doubt on an answer a Fanvue agent already gave")
-    expect(out).toContain("The customer restating their own situation is not new evidence")
+    expect(out).toContain("A restated demand is not new information, and neither is a re-described one")
   })
 
   it.each(builders)("%s forbids inventing a check to justify a longer reply", (_name, out) => {
@@ -177,6 +177,44 @@ describe("confirm, don't re-open — an already-answered question just gets agre
     const out = buildSystemPrompt(undefined, [], "Vini", [])
     expect(out).toContain("Only ask for those card digits when the transaction is genuinely unidentified")
     expect(out).toContain("banking app wording does not overrule what Fanvue's own records show")
+  })
+
+  it.each(builders)("%s states a precedence order so a shape rule can't manufacture substance", (_name, out) => {
+    expect(out).toContain("When two rules in this prompt conflict")
+    expect(out).toContain("Don't re-open what is already settled")
+    expect(out).toContain("A formatting rule is never a reason to add substance")
+  })
+
+  it.each(builders)("%s names the target reply shape, not just the prohibitions", (_name, out) => {
+    expect(out).toContain("What a good reply looks like")
+    expect(out).toContain("Answer the actual question in the first sentence")
+    expect(out).toContain("Length is not care, and a short reply is not a lazy one")
+  })
+
+  // The call-to-action rule is what made a confirm-and-close draft bolt an
+  // invented question onto the end — generation demanded a CTA while the
+  // verifier was told to strip it, so the two layers fought each other.
+  it("makes the call-to-action conditional in generation, not just in the verifier", () => {
+    for (const out of [buildSystemPrompt(undefined, [], "Vini", []), buildMacroAdaptSystemPrompt("Macro.", "Vini")]) {
+      expect(out).toContain("when the reply actually needs one")
+      expect(out).not.toContain("- End with exactly one clear call-to-action.\n")
+    }
+  })
+
+  // A blanket "if the playbook doesn't cover it, ask a clarifying question"
+  // made asking the DEFAULT for every uncovered case — which is most tail
+  // cases — and it sat in "Critical constraints", outranking the closing rules.
+  it("makes the model read the thread before falling back to a clarifying question", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    expect(out).toContain("read the thread before asking anything")
+    expect(out).toContain("Only when the answer genuinely is not available anywhere")
+  })
+
+  // The tone block's disclaimer says it "never overrides any rule above", which
+  // is only true if nothing outranking it is printed below it.
+  it("keeps the tone preference last so the closure rules still outrank it", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [], false, false, "Warm and human.")
+    expect(out.indexOf("## Closing the conversation")).toBeLessThan(out.indexOf("## This agent's personal tone preference"))
   })
 
   it("makes the verifier strip a re-opened loop and unnecessary asks", () => {
