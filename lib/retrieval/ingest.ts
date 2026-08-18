@@ -32,6 +32,11 @@ export type IngestSummary = {
   errors: string[]
 }
 
+// Rows per upsert statement. Each row carries a 3072-dim vector literal, so
+// this is bounded by statement size/timeout, not by row count. 50 keeps a
+// statement around 1-2MB, well inside the default statement_timeout.
+const UPSERT_BATCH_SIZE = 50
+
 type Db = NonNullable<ReturnType<typeof getSupabaseAdminClient>>
 
 function emptyStats() {
@@ -170,14 +175,30 @@ async function ingestKind(
       indexed_at: new Date().toISOString(),
     }))
 
-    const { error } = await db
-      .from("knowledge_chunks")
-      .upsert(rows, { onConflict: "source_kind,source_id,section,chunk_index" })
-    if (error) {
-      errors.push(`${sourceKind} upsert: ${error.message}`)
-      return stats
+    // Batched, not one statement. Every row carries a 3072-dim halfvec
+    // serialised as a text literal (~25KB each), so a single upsert of a whole
+    // source kind is multi-megabyte. Playbooks (251 chunks) and responses (73)
+    // fit; macros (363 sources) did not, and the first cold ingest failed with
+    // "canceling statement due to statement timeout" — 0 macros indexed while
+    // the other two kinds reported success, so the corpus looked populated but
+    // was missing the approved canned replies entirely.
+    //
+    // A partial failure keeps the batches that already landed rather than
+    // discarding them: the next run re-embeds only what's still missing,
+    // because diffChunks compares checksums against what's actually in the DB.
+    for (let i = 0; i < rows.length; i += UPSERT_BATCH_SIZE) {
+      const batch = rows.slice(i, i + UPSERT_BATCH_SIZE)
+      const { error } = await db
+        .from("knowledge_chunks")
+        .upsert(batch, { onConflict: "source_kind,source_id,section,chunk_index" })
+      if (error) {
+        errors.push(
+          `${sourceKind} upsert (batch ${Math.floor(i / UPSERT_BATCH_SIZE) + 1}, rows ${i}-${i + batch.length - 1}): ${error.message}`
+        )
+        return stats
+      }
+      stats.upserted += batch.length
     }
-    stats.upserted = rows.length
   }
 
   for (const d of deletions) {
