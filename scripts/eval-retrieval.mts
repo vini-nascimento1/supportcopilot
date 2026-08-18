@@ -52,6 +52,19 @@ function loadEnv(): Record<string, string> {
 
 const env = loadEnv()
 
+// Push the loaded values back into process.env BEFORE any dynamic import of
+// lib/* below. lib/ai-throttle.ts reads OPENAI_API_KEY into a module-level
+// const at import time, and this script previously kept everything in the local
+// `env` object — passing values explicitly to createClient (which worked) while
+// leaving process.env.OPENAI_API_KEY undefined (which did not). The result was
+// silent: every embed and every judge call 401'd, v2 search abstained on
+// everything, the judge's failure path scored a perfect 1.0, and a full 361x2
+// run reported identical 100.0% grounded support for both arms. Same trap the
+// header of scripts/verify-pushback-fix.mts warns about.
+for (const key of ["OPENAI_API_KEY", "OPENAI_BASE_URL", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) {
+  if (env[key]) process.env[key] = env[key]
+}
+
 function requireEnv(key: string): string {
   const value = env[key]
   if (!value || value === "[SENSITIVE]") {
@@ -214,10 +227,14 @@ const JUDGE_SCHEMA = {
   },
 }
 
+// Judge failures collected across a run. A run with ANY entries here is not a
+// measurement and must not be reported as one.
+const judgeFailures: string[] = []
+
 async function judgeGroundedSupport(
   finalBody: string,
   passages: EvalPassage[]
-): Promise<{ supported: number; total: number; relevantIds: string[] }> {
+): Promise<{ supported: number; total: number; relevantIds: string[] } | null> {
   const { openaiFetch } = await import("../lib/ai-throttle")
   const { getAuxDraftModel } = await import("../lib/draft-ai")
 
@@ -249,17 +266,34 @@ async function judgeGroundedSupport(
     }),
   })
 
-  if (!res.ok) return { supported: 0, total: 0, relevantIds: [] }
+  // A failed judge MUST be distinguishable from a genuine zero-claim reply.
+  // This previously returned {supported: 0, total: 0} on any failure, and
+  // groundedSupport(0, 0) returns 1 by its `total <= 0` guard — so every failed
+  // call scored as PERFECT grounding. The first full run reported 100.0% in
+  // every stratum for both arms, which looked like a result and was actually a
+  // silent outage. Returning null makes the runner count it instead.
+  if (!res.ok) {
+    judgeFailures.push(`http ${res.status}: ${(await res.text()).slice(0, 200)}`)
+    return null
+  }
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> }
+  const content = data.choices?.[0]?.message?.content
   try {
-    const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? "{}")
+    const parsed = JSON.parse(content ?? "")
+    const total = Number(parsed.total_claims)
+    const supported = Number(parsed.supported_claims)
+    if (!Number.isFinite(total) || !Number.isFinite(supported)) {
+      judgeFailures.push(`non-numeric verdict: ${String(content).slice(0, 200)}`)
+      return null
+    }
     return {
-      supported: Number(parsed.supported_claims ?? 0),
-      total: Number(parsed.total_claims ?? 0),
+      supported,
+      total,
       relevantIds: Array.isArray(parsed.supporting_chunk_ids) ? parsed.supporting_chunk_ids.map(String) : [],
     }
   } catch {
-    return { supported: 0, total: 0, relevantIds: [] }
+    judgeFailures.push(`unparseable verdict: ${String(content).slice(0, 200)}`)
+    return null
   }
 }
 
@@ -279,9 +313,14 @@ function guardrailHits(text: string): string[] {
 
 // ── main ────────────────────────────────────────────────────────────────────
 
-async function run(armName: "v1" | "v2", outPath: string | null) {
+async function run(armName: "v1" | "v2", outPath: string | null, limit: number | null) {
   requireEnv("OPENAI_API_KEY")
-  const cases = await hydrateGoldenSet()
+  const all = await hydrateGoldenSet()
+  // --limit is for DIAGNOSING the harness cheaply, never for a ship decision:
+  // it takes a prefix, so the stratum mix is not the frozen one. A limited run
+  // refuses to write an output file for that reason.
+  const cases = limit ? all.slice(0, limit) : all
+  if (limit) console.log(`(--limit=${limit}: diagnostic slice of ${all.length}, NOT a ship-gate run)`)
   const arm = armName === "v2" ? await v2Arm() : await v1Arm()
 
   const results: CaseResult[] = []
@@ -303,8 +342,12 @@ async function run(armName: "v1" | "v2", outPath: string | null) {
       result.abstained = abstained || abstainedCorrectly(passages, DEFAULT_ABSTAIN_THRESHOLD)
     } else if (c.finalBody) {
       const judged = await judgeGroundedSupport(c.finalBody, passages)
-      result.groundedSupport = groundedSupport(judged.supported, judged.total)
-      result.recallAtK = recallAtK(passages, judged.relevantIds, 6)
+      // Leave groundedSupport/recallAtK UNSET when the judge failed, so the
+      // case drops out of the mean instead of silently scoring 1.0.
+      if (judged) {
+        result.groundedSupport = groundedSupport(judged.supported, judged.total)
+        result.recallAtK = recallAtK(passages, judged.relevantIds, 6)
+      }
       result.divergence = divergence(c.suggestedBody, c.finalBody)
     }
 
@@ -315,6 +358,25 @@ async function run(armName: "v1" | "v2", outPath: string | null) {
 
   const report = aggregate(results)
   printReport(armName, report)
+
+  const scored = results.filter((r) => r.groundedSupport !== undefined).length
+  const paired = results.filter((r) => r.action !== "reject").length
+  console.log(`\njudged ${scored}/${paired} paired cases`)
+
+  if (judgeFailures.length > 0) {
+    const sample = [...new Set(judgeFailures)].slice(0, 3)
+    console.log(`\n!! ${judgeFailures.length} JUDGE FAILURES — this run is NOT a measurement.`)
+    for (const s of sample) console.log(`   ${s}`)
+    console.log(`   Refusing to write ${outPath ?? "output"}: a partial judge makes the`)
+    console.log(`   grounded-support mean unusable for a ship decision.`)
+    process.exitCode = 1
+    return
+  }
+
+  if (limit) {
+    console.log(`\nDiagnostic slice — not writing an output file.`)
+    return
+  }
 
   if (outPath) {
     writeFileSync(outPath, JSON.stringify({ arm: armName, report }, null, 2))
@@ -363,7 +425,9 @@ if (args[0] === "--compare") {
 } else {
   const arm = (args.find((a) => a.startsWith("--arm="))?.split("=")[1] ?? "v2") as "v1" | "v2"
   const out = args.find((a) => a.startsWith("--out="))?.split("=")[1] ?? null
-  run(arm, out).catch((e) => {
+  const limitArg = args.find((a) => a.startsWith("--limit="))?.split("=")[1]
+  const limit = limitArg ? Number(limitArg) : null
+  run(arm, out, limit).catch((e) => {
     console.error(e)
     process.exit(1)
   })
