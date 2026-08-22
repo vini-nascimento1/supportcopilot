@@ -130,7 +130,10 @@ In rough order of effort:
    usually has a `User ID` field with the actual account email used internally — use that in the
    Fadmin search instead of the Intercom contact email.
 4. Fall back to the **KYC Records page's `User` search** (§3) — it matches by email substring more
-   reliably than the Creators page search does.
+   reliably than the Creators page search does. Works even for fans with **no KYC record at all**:
+   pick the matching suggestion from the dropdown, and even if the resulting table says "No records
+   returned," the URL updates to `?filter={"user_id":<id>}` — grab that internal id from the URL and
+   jump straight to `#/userResource/<id>/show/<tabIndex>` instead of digging further.
 5. If none of that resolves it: check whether the Intercom contact is a `Lead` (no linked `User`,
    shown in the right-hand Details panel as `Type: Lead`) vs a real identified `User`. Multiple
    `Lead` entries with the same email but different internal user IDs and no linked User at all
@@ -183,6 +186,63 @@ See [[feedback_refund_investigation_fadmin_workflow]] for the full writeup. Shor
    ambiguous.
 4. Refund itself is applied per support-response-batch §4k's "Refund mechanics" — this section is
    about verifying the claim first, not about the leaf-case decision tree (that's §4k's job).
+5. **On the Messages tab, the `Type` column distinguishes genuine creator messages from automated
+   ones** — values like `Direct` (a real message someone typed) vs `Auto First Message Reply` /
+   `Auto Resubscribed` (canned templates the creator configured to fire automatically for every new
+   subscriber). Confirmed on the @delfinaholland dispute (2026-08-17): the creator's promise that
+   "payment unlocks everything, nothing extra to buy" was sent as an `Auto First Message Reply` — i.e.
+   a standing false claim shown to *every* new subscriber, not a one-off human mistake. This
+   distinction matters a lot for a content-mismatch claim: a false promise sent as an auto-template is
+   a systemic misrepresentation (worth flagging to Vincenzo as a creator-conduct issue independent of
+   the individual refund), whereas the same words in a one-off `Direct` message is just this one
+   conversation. The **`Agency user`** column on that same tab names which agency operator actually
+   typed a given `Direct` reply — a creator account replying through rotating agency handles (not the
+   creator personally) is common and explains "this feels like a bot" complaints; it's a different
+   thing from the `Auto...` message types above (agency-typed is still a human, just not the named
+   creator).
+6. **For "content was AI" / "creator lied about being real" disputes, check the creator's own page**
+   (`#/creatorResource/<id>/show`, found via the Creators search box), not just the fan's side. It
+   shows an **"AI Creator" badge right next to the name** if the platform has that flag set, plus the
+   creator's live bio text (which on an AI account typically ends with an explicit disclaimer like
+   "*Ai generated or enhanced*"). Confirmed on the @danaohana dispute (2026-08-17): both were present
+   and had been for ~10 months before the disputed payments, which settled the claim outright as
+   Ground A (AI tag visible = no refund) rather than needing further investigation. **The bio text is
+   truncated behind a real "show more" button whose expansion isn't just a screenshot/CSS thing** — the
+   fuller text genuinely isn't in the DOM until you click it; `get_page_text`/`javascript_tool` will
+   return the same truncated string as the screenshot until you `find` and click the actual "show
+   more" button first.
+   **The "AI Creator" badge alone doesn't tell you which flavor of AI applies** — support-response-batch
+   §4k's Ground K (added 2026-08-22) only refunds a **fully-synthetic** account (no real person behind
+   it) that explicitly claimed to be real; an AI-edited/deepfaked account with a **real** person behind
+   it is telling the truth if it says the same thing, and stays Ground A (no refund). The badge and bio
+   don't distinguish the two — you'll need the actual chat wording (what the creator said when asked)
+   plus, where it matters, Fadmin/Moderation context on whether a real person is behind the account.
+7. **That same creator page's Activity Timeline and Balances panel are worth a look in any refund
+   dispute, not just AI ones** — it surfaces prior admin notes/strikes (e.g. stolen-content or
+   underage-feature flags), `OFF_PLATFORM_ACTIVITY` warnings, and aggregate `Refund Count` / `Refund
+   Amount` / `Chargeback Count` / `Non-paid Rate` for the creator. A creator with a recent refund
+   already paid to a *different* fan for "undelivered content," or an existing off-platform warning,
+   corroborates (or undercuts) the current fan's claim and is worth flagging to compliance
+   independently of this ticket's own outcome, even when it doesn't change today's refund answer.
+8. **When a customer has no Fanvue account under their claimed email but gives you card details (BIN
+   + last 4), don't stop at "no account found."** Search the **global Payments resource's Advanced
+   tab** by BIN/last-4 — it can surface a real charge sitting on a completely different account,
+   which is exactly the shape of a stolen-card / card-testing case (confirmed on the Brandon Walton
+   ticket, 2026-08-17: his real card and billing address were on someone else's account, added
+   alongside a second card under his name a minute apart at signup). Cross-check the match against
+   that account's **Payment Methods** sub-tab (holder name, billing address, BIN, last 4) to confirm
+   it's really the same card, not a coincidence. **The dedicated "Transaction lookup" tool under the
+   Fraud section returned a stale/wrong fuzzy match in this case** (different BIN, different fan,
+   different amount) — don't trust it as the primary path; the Payments Advanced search is more
+   reliable.
+9. **The Subscriptions tab (`show/6`)** shows a fan's live subscription rows: `Status`
+   (ACTIVE/CANCELLED/PENDING_CONFIRMATION), `Expires at`, `Type`, retry info. Useful for confirming
+   whether a subscription a fan asked to cancel is actually still active (it can be, even after
+   they've asked in DM and been ignored — confirmed on the @national-boa-29 9x-renewal ticket,
+   2026-08-17). **Don't trust the column labeled "Original price"** — it reflects the subscription's
+   *current* configured rate, not the price the fan actually first signed up at; to see the real price
+   history, compare invoices on the Spending & Payment Methods tab instead (SUBSCRIPTION vs RENEWAL
+   rows with their own Price column).
 
 ## 6. Compliance/moderation disputes — check Slack before answering
 
