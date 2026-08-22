@@ -9,6 +9,7 @@ import {
   getRecentlyTouchedConversationIds,
 } from "@/lib/reply-queue-store"
 import { computeAndPersistSuggestion } from "@/lib/reply-queue-pipeline"
+import { selectDepartedDrafts } from "@/lib/reply-queue"
 
 export const dynamic = "force-dynamic"
 // The backfill loop below runs inside after(), which is still bound by the
@@ -26,15 +27,14 @@ const BACKFILL_MAX = 8
 // doesn't reach is caught by /api/cron/draft-recovery.
 const BACKFILL_BUDGET_MS = 240_000
 
-// How long a freshly written draft is protected from being marked stale by this
-// reconciler. Membership comes from Intercom's SEARCH index, which is only
-// eventually consistent: right after an assignment the conversation often isn't
-// in the results yet, so a draft generated seconds earlier looked like it
+// STALE_GRACE_MS — how long a freshly written draft is protected from being
+// marked stale by this reconciler — now lives in lib/reply-queue.ts alongside
+// selectDepartedDrafts(), shared with the recovery sweep so the two reconcilers
+// can't drift apart. Membership comes from Intercom's SEARCH index, which is
+// only eventually consistent: right after an assignment the conversation often
+// isn't in the results yet, so a draft generated seconds earlier looked like it
 // belonged to an already-answered ticket and was destroyed — and then the
-// attempt marker blocked regeneration for BACKFILL_WINDOW_MS. A conversation
-// the agent genuinely answered is resolved by the send flow and the webhook, so
-// this grace period costs nothing but stops the race from eating live drafts.
-const STALE_GRACE_MS = 10 * 60 * 1000
+// attempt marker blocked regeneration for BACKFILL_WINDOW_MS.
 
 // The autonomous reply queue for the signed-in agent: their NON-READ conversations
 // (the customer is waiting on us), each with its precomputed AI draft. Membership
@@ -102,18 +102,11 @@ export async function GET(request: Request) {
       }))
 
     // Reconcile in the background — never block the response. Stale ONLY auto
-    // drafts whose conversation left the non-read set; on-request drafts are
+    // drafts whose conversation left the non-read set, and only those old enough
+    // that Intercom's search index has certainly caught up; on-request drafts are
     // durable (the agent asked for them) and keep living in the "On request"
-    // group even once the ticket is read.
-    const staleCutoffMs = Date.now() - STALE_GRACE_MS
-    const noLongerNonRead = pending
-      .filter((p) => !nonReadIds.has(p.intercomConversationId) && !p.onRequest)
-      // Only stale drafts old enough that Intercom's search index has certainly
-      // caught up (see STALE_GRACE_MS). A young draft missing from the index is
-      // left pending: it simply reappears on the next poll instead of being
-      // destroyed and blocked from regenerating.
-      .filter((p) => Date.parse(p.createdAt) < staleCutoffMs)
-      .map((p) => p.intercomConversationId)
+    // group even once the ticket is read. Both guards live in the shared helper.
+    const noLongerNonRead = selectDepartedDrafts(pending, nonReadIds, Date.now())
     const missing = drafting.map((d) => d.conversationId)
     const url = new URL(request.url)
     const origin = url.origin

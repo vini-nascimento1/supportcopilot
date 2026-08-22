@@ -131,6 +131,45 @@ export function hasBodyChanged(suggested: string, final: string): boolean {
   return normalize(suggested) !== normalize(final)
 }
 
+// How long a freshly written draft is protected from being staled by a
+// reconciler. Intercom's SEARCH index is only eventually consistent, so a draft
+// written seconds ago is routinely absent from the non-read results — staling on
+// that destroys a live draft AND blocks its regeneration behind the attempt
+// marker. Shared by the Queue GET route and the recovery sweep so the two can't
+// drift apart.
+export const STALE_GRACE_MS = 10 * 60 * 1000
+
+export type DepartedDraftInput = {
+  intercomConversationId: string
+  onRequest: boolean
+  createdAt: string
+}
+
+// Which pending drafts should be retired because their conversation has left the
+// agent's non-read set (they answered it, or it closed). Pure so the two guards
+// below are actually testable — getting either wrong deletes live drafts:
+//   • on-request drafts are DURABLE. The agent explicitly asked for them, and
+//     the reconcilers only ever redraft NON-READ conversations, so retiring one
+//     removes it with nothing able to recreate it.
+//   • anything younger than STALE_GRACE_MS is left alone (see above).
+export function selectDepartedDrafts(
+  pending: readonly DepartedDraftInput[],
+  nonReadIds: ReadonlySet<string>,
+  nowMs: number
+): string[] {
+  const cutoff = nowMs - STALE_GRACE_MS
+  return pending
+    .filter((p) => !nonReadIds.has(p.intercomConversationId))
+    .filter((p) => !p.onRequest)
+    .filter((p) => {
+      const created = Date.parse(p.createdAt)
+      // An unparseable timestamp must not be treated as "infinitely old" —
+      // NaN comparisons are false, which already keeps it, but be explicit.
+      return Number.isFinite(created) && created < cutoff
+    })
+    .map((p) => p.intercomConversationId)
+}
+
 // Map an Intercom webhook topic to the actor whose action it represents:
 //   conversation.user.created / .user.replied / contact.* / lead.* -> "customer"  (recompute)
 //   conversation.admin.replied (an agent answered)                 -> "agent_reply" (leaves the queue)

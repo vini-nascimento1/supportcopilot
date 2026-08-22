@@ -8,6 +8,8 @@ import {
   isSendLocked,
   classifyWebhookTopic,
   hasBodyChanged,
+  selectDepartedDrafts,
+  STALE_GRACE_MS,
   LOCKED_CATEGORIES,
 } from "./reply-queue"
 
@@ -200,5 +202,63 @@ describe("classifyWebhookTopic", () => {
     expect(classifyWebhookTopic("conversation.rating.added")).toBe("other")
     expect(classifyWebhookTopic(null)).toBe("other")
     expect(classifyWebhookTopic(undefined)).toBe("other")
+  })
+})
+
+describe("selectDepartedDrafts", () => {
+  const NOW = Date.parse("2026-08-22T18:00:00.000Z")
+  // Comfortably outside the grace period.
+  const OLD = new Date(NOW - STALE_GRACE_MS - 60_000).toISOString()
+  const draft = (over: Partial<Parameters<typeof selectDepartedDrafts>[0][number]> = {}) => ({
+    intercomConversationId: "c1",
+    onRequest: false,
+    createdAt: OLD,
+    ...over,
+  })
+
+  it("retires an aged auto draft whose conversation left the non-read set", () => {
+    expect(selectDepartedDrafts([draft()], new Set(), NOW)).toEqual(["c1"])
+  })
+
+  it("keeps a draft whose conversation is still non-read", () => {
+    expect(selectDepartedDrafts([draft()], new Set(["c1"]), NOW)).toEqual([])
+  })
+
+  // On-request drafts are durable: the reconcilers only ever redraft NON-READ
+  // conversations, so retiring one deletes it with nothing able to recreate it.
+  it("never retires an on-request draft, however old", () => {
+    const ancient = new Date(NOW - 90 * 24 * 60 * 60 * 1000).toISOString()
+    const pending = [draft({ onRequest: true, createdAt: ancient })]
+    expect(selectDepartedDrafts(pending, new Set(), NOW)).toEqual([])
+  })
+
+  // Intercom's search index lags, so a just-written draft is routinely absent
+  // from the non-read set. Staling it would destroy a live draft and then block
+  // its regeneration behind the attempt marker.
+  it("spares a draft inside the grace period even though it looks departed", () => {
+    const fresh = new Date(NOW - 60_000).toISOString()
+    expect(selectDepartedDrafts([draft({ createdAt: fresh })], new Set(), NOW)).toEqual([])
+  })
+
+  it("treats the grace boundary as exclusive", () => {
+    const exactly = new Date(NOW - STALE_GRACE_MS).toISOString()
+    expect(selectDepartedDrafts([draft({ createdAt: exactly })], new Set(), NOW)).toEqual([])
+    const justPast = new Date(NOW - STALE_GRACE_MS - 1).toISOString()
+    expect(selectDepartedDrafts([draft({ createdAt: justPast })], new Set(), NOW)).toEqual(["c1"])
+  })
+
+  it("keeps a draft with an unparseable timestamp rather than assuming it is old", () => {
+    expect(selectDepartedDrafts([draft({ createdAt: "not a date" })], new Set(), NOW)).toEqual([])
+  })
+
+  it("partitions a mixed batch, returning only the ids safe to retire", () => {
+    const fresh = new Date(NOW - 60_000).toISOString()
+    const pending = [
+      draft({ intercomConversationId: "departed" }),
+      draft({ intercomConversationId: "still-waiting" }),
+      draft({ intercomConversationId: "on-request", onRequest: true }),
+      draft({ intercomConversationId: "too-fresh", createdAt: fresh }),
+    ]
+    expect(selectDepartedDrafts(pending, new Set(["still-waiting"]), NOW)).toEqual(["departed"])
   })
 })

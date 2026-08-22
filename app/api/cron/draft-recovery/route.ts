@@ -5,8 +5,10 @@ import { getNonReadAssignedConversations } from "@/lib/intercom"
 import {
   getPendingSuggestionsForAgent,
   filterRecoveryCandidates,
+  markSuggestionsStaleByConversations,
 } from "@/lib/reply-queue-store"
 import { computeAndPersistSuggestion } from "@/lib/reply-queue-pipeline"
+import { selectDepartedDrafts } from "@/lib/reply-queue"
 
 // Draft recovery sweep. Invoked on a schedule by Supabase pg_cron via pg_net
 // with the shared CRON_SECRET header — same pattern as the triage sweep.
@@ -38,6 +40,7 @@ const RETRY_AFTER_MS = 15 * 60 * 1000
 // before being retried, so a permanently un-draftable ticket can't burn a
 // generation on every single sweep.
 const FAILURE_COOLOFF_MS = 6 * 60 * 60 * 1000
+
 
 // Hard ceiling on generations per run, independent of the time budget.
 const MAX_DRAFTS_PER_RUN = 12
@@ -76,6 +79,7 @@ export async function POST(req: Request) {
   let candidates = 0
   let drafted = 0
   let failed = 0
+  let retired = 0
   let agentsScanned = 0
   let intercomErrors = 0
   let budgetExhausted = false
@@ -98,6 +102,23 @@ export async function POST(req: Request) {
 
     const pending = await getPendingSuggestionsForAgent(agent.id)
     const haveDraft = new Set(pending.map((p) => p.intercomConversationId))
+
+    // Retire drafts whose conversation has left the non-read set (the agent
+    // answered it, or it closed). Until now this reconciliation ONLY ran while
+    // an agent had the Queue tab open and polling, so an agent who never opens
+    // the tab accumulated pending rows forever — 2,813 rows older than 7 days
+    // across 5 owners when this was added. That is not merely untidy:
+    // getPendingSuggestionsForAgent caps at 200 rows, so a large enough orphan
+    // pile pushes genuinely-live drafts out of the window that builds
+    // `haveDraft` above, and this sweep then redrafts a conversation that
+    // already had a pending draft. The on-request and grace-period guards live
+    // in selectDepartedDrafts(), shared with the queue route's reconciler.
+    const nonReadIds = new Set(nonRead.map((c) => c.id))
+    const departed = selectDepartedDrafts(pending, nonReadIds, Date.now())
+    if (departed.length > 0) {
+      await markSuggestionsStaleByConversations(agent.id, departed).catch(() => {})
+      retired += departed.length
+    }
 
     const missing = nonRead
       .map((c) => c.id)
@@ -138,6 +159,7 @@ export async function POST(req: Request) {
       candidates,
       drafted,
       failed,
+      retired,
       intercomErrors,
       budgetExhausted,
     },

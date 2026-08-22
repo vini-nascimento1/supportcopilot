@@ -1,7 +1,7 @@
 ---
 title: Draft Verify Pipeline
 tags: [ai, drafting, intercom, reply-queue]
-updated: 2026-08-12
+updated: 2026-08-22
 ---
 
 # Draft Verify Pipeline
@@ -88,9 +88,16 @@ A cron endpoint, authenticated the same `x-cron-secret` way as [[Triage System|t
 - `RETRY_AFTER_MS` (15 min) — skip anything attempted more recently than this; it's either still in flight or was just handled by one of the client-driven paths.
 - `FAILURE_COOLOFF_MS` (6 hours) — a conversation whose last attempt ended in a terminal `'skipped'` outcome waits this long before being retried, so a permanently un-draftable ticket can't burn a generation on every single sweep. A killed-mid-flight attempt (`outcome` still `null`) deliberately does **not** get this long cooloff — that's exactly the case recovery exists to rescue.
 
-The run is bounded by `RUN_BUDGET_MS` (240s, under the 300s `maxDuration`) and a hard cap, `MAX_DRAFTS_PER_RUN` (12), and dedupes conversations across agents within the same run (two agents sharing an Intercom admin id, or the env fallback, would otherwise both draft the same conversation). Strictly draft-only, like every other path here: it never sends, assigns, or writes to Intercom. The response is counts only (`agentsScanned`, `candidates`, `drafted`, `failed`, `intercomErrors`, `budgetExhausted`) — no conversation ids or customer data — and returns HTTP 207 when the run was partial (an Intercom error, or the budget/cap ran out with work still queued).
+The run is bounded by `RUN_BUDGET_MS` (240s, under the 300s `maxDuration`) and a hard cap, `MAX_DRAFTS_PER_RUN` (12), and dedupes conversations across agents within the same run (two agents sharing an Intercom admin id, or the env fallback, would otherwise both draft the same conversation). Strictly draft-only, like every other path here: it never sends, assigns, or writes to Intercom. The response is counts only (`agentsScanned`, `candidates`, `drafted`, `failed`, `retired`, `intercomErrors`, `budgetExhausted`) — no conversation ids or customer data — and returns HTTP 207 when the run was partial (an Intercom error, or the budget/cap ran out with work still queued).
 
-**Not yet scheduled.** The route exists but is not yet registered in Supabase `pg_cron` — do that **after** the deploy that ships the route, or it will 404 every 5 minutes. The intended cadence matches the triage sweep. Register it with the snippet below, which lifts `CRON_SECRET` from an existing job rather than having anyone paste the secret into a query:
+**It also retires departed drafts (added 2026-08-22).** The sweep already holds both halves of the comparison — the agent's live non-read set and their pending rows — so it now also flips to `stale` any pending draft whose conversation has left the non-read set, reporting the count as `retired`. Previously that reconciliation lived *only* in the Queue GET route, so it ran only while an agent had the tab open and polling; an agent who never opens the Queue accumulated pending rows indefinitely (2,813 rows older than 7 days across 5 owners when this was found). That is not just untidy: `getPendingSuggestionsForAgent()` caps at **200 rows**, so a large enough orphan pile pushes genuinely-live drafts out of the window that builds the `haveDraft` set above, and the sweep then redrafts a conversation that already had a pending draft. Two rules carry over from the Queue route and must stay in step with it:
+
+- **`STALE_GRACE_MS` (10 min)** — never stale a draft younger than this. Intercom's *search* index is only eventually consistent, so a freshly written draft is routinely missing from the non-read results for a short while; staling on that destroys a live draft **and** blocks its regeneration behind the attempt marker. The constant is duplicated in `app/api/reply-queue/route.ts`; change both together.
+- **On-request drafts are never auto-staled** — the agent deliberately asked for them, and the sweep only redrafts *non-read* conversations, so retiring one would delete it with nothing to recreate it.
+
+This is also the supported way to force regeneration after a prompt or policy change: an existing pending row blocks its own regeneration (it's in `haveDraft`), so stale the pre-deploy rows and let this sweep rebuild only the ones still live. Orphans never come back, and no LLM call is spent on a closed ticket.
+
+**Scheduled** as `draft-recovery-5min` (`pg_cron` jobid 7, `*/5 * * * *`, active). Register a fresh environment with the snippet below, which lifts `CRON_SECRET` from an existing job rather than having anyone paste the secret into a query. Register it **after** the deploy that ships the route, or it will 404 every 5 minutes:
 
 ```sql
 select cron.schedule(
@@ -225,7 +232,7 @@ The actual customer send happens through `/api/draft/send` (the same human-gated
 - `app/api/reply-queue/assign/route.ts` — human-gated Intercom assignment + inline draft generation; returns `{ drafted, suggestionOutcome, draftError }`
 - `app/api/reply-queue/assign-bulk/route.ts` — bulk assignment + background draft generation (`DRAFT_BUDGET_MS`)
 - `app/api/reply-queue/resolve/route.ts` — queue bookkeeping after a send
-- `app/api/cron/draft-recovery/route.ts` — recovery sweep cron; catches drafts the other paths missed (not yet scheduled in `pg_cron`)
+- `app/api/cron/draft-recovery/route.ts` — recovery sweep cron (`draft-recovery-5min`, jobid 7); drafts what the other paths missed and retires drafts whose conversation left the non-read set (`STALE_GRACE_MS`)
 - `app/api/webhooks/intercom/route.ts` — webhook trigger for the autonomous pipeline
 
 See also: [[System Prompt Architecture]], [[Canvas Workflow]], [[Triage System]], [[Intercom Integration]], [[Database Schema Reference]], [[Settings and Profile]], [[Automation Rules Engine]].

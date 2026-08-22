@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-22-c",
+    date: "2026-08-22",
+    title: "The queue clears out drafts for tickets you've already handled",
+    description:
+      "Drafts for conversations you'd already answered or closed were only cleared while you had the Queue tab open, so they piled up in the background — thousands of them. Because the queue only tracks your most recent 200 drafts, a big enough pile could push a real, still-waiting draft out of view and cause the same ticket to be drafted twice. The background sweep now retires those finished drafts on its own, whether or not the tab is open. Drafts you generated yourself from the Inbox stay put, as before.",
+  },
+  {
     id: "seed-2026-08-22-b",
     date: "2026-08-22",
     title: "No more double greeting at the top of a draft",
