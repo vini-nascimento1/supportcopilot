@@ -366,6 +366,82 @@ describe("chargeback / bank-dispute guardrail", () => {
   })
 })
 
+// A $5.46 buyer's-remorse refund request got "I'll review your refund request
+// and provide an update here once the review is complete" — a stall on an answer
+// the playbook already settles as an outright no. Deferring also leaves the
+// outcome looking open, which is one step away from the worse failure: listing
+// the exemption grounds and coaching the customer into manufacturing a claim.
+describe("refund posture — answer up front, never coach the exemptions", () => {
+  const builders: Array<[string, string]> = [
+    ["buildSystemPrompt", buildSystemPrompt(undefined, [], "Vini", [])],
+    ["buildNotionAwareSystemPrompt", buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])],
+    ["buildImproveSystemPrompt", buildImproveSystemPrompt("Vini")],
+    ["buildMacroAdaptSystemPrompt", buildMacroAdaptSystemPrompt("Some approved macro text.", "Vini")],
+  ]
+
+  it.each(builders)("%s states the no-refund default as the answer itself", (_name, out) => {
+    expect(out).toContain("Fanvue runs a no-refund policy, and that IS the answer")
+  })
+
+  it.each(builders)("%s forbids deferring a no-refund answer into a fake review", (_name, out) => {
+    expect(out).toContain("Never defer a no-refund answer into a review that isn't happening")
+  })
+
+  it.each(builders)("%s forbids listing or inviting the exemption grounds", (_name, out) => {
+    expect(out).toContain("Never list, hint at, or invite the exemption grounds")
+  })
+
+  it.each(builders)("%s still handles the cancellation half of the request", (_name, out) => {
+    expect(out).toContain("Manage My Subscriptions")
+  })
+
+  it("keeps AGENT_IDENTITY_RULES from being read as a licence to defer", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    expect(out).toContain(`never use "I'll review this" as a way to avoid giving an answer you already have`)
+  })
+
+  it("makes the verifier cut both the stall and the coaching", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Use the KB only." },
+      { role: "user", content: "Fan wants a refund, changed their mind." },
+    ]
+    const out = buildDraftVerifierMessages(
+      messages,
+      "I'll review your refund request and provide an update here once the review is complete."
+    )
+    expect(out[0].content).toContain("cut the stall and cut the coaching")
+    expect(out[0].content).toContain("coaches them into manufacturing a claim")
+  })
+})
+
+// The mandated greeting is prepended in code, then the model opened its own text
+// with a bare "Hello," — two greetings stacked in one message. The old rule
+// banned a "greeting, thanks line, or your own name", which the model evidently
+// did not read as covering a one-word salutation.
+describe("greeting is injected exactly once", () => {
+  it("bans a second salutation when the greeting is code-injected", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [], false, true)
+    expect(out).toContain("Do not write any opening greeting, salutation, thanks line, or your own name")
+    expect(out).toContain("becomes a SECOND greeting")
+    expect(out).toContain(`do not begin with "Hello"`)
+  })
+
+  it("still asks for a warm greeting when nothing is injected", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [], false, false)
+    expect(out).toContain("Open with a warm greeting")
+  })
+
+  it("makes the verifier delete a doubled greeting", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Use the KB only." },
+      { role: "user", content: "Fan wants a refund." },
+    ]
+    const out = buildDraftVerifierMessages(messages, "Hello,\n\nI have your transaction details on file.")
+    expect(out[0].content).toContain("Delete a second greeting")
+    expect(out[0].content).toContain("Only one greeting per message")
+  })
+})
+
 // A live draft said "I'll ... request a review if needed" for a check the
 // agent performs themselves in Fadmin — "request" implies handing it to a
 // separate reviewing party, which isn't what happens. Same family as the

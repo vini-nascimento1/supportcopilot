@@ -16,6 +16,20 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-22-b",
+    date: "2026-08-22",
+    title: "No more double greeting at the top of a draft",
+    description:
+      "On queued drafts the greeting is added for you, but the draft often opened with its own \"Hello,\" on top of it — two greetings stacked, the clearest sign a reply wasn't written by a person. Drafts now start straight on the answer, and anything that slips through gets the extra greeting stripped before it reaches you.",
+  },
+  {
+    id: "seed-2026-08-22-a",
+    date: "2026-08-22",
+    title: "Refund drafts give the answer instead of promising a review",
+    description:
+      "A fan asking for their money back with no problem attached used to get \"I'll review your refund request and update you here\" — a review nobody was ever going to run, leaving them waiting for a reversal that wasn't coming. Drafts now give the no warmly and up front, add the cancellation steps when that's what they also asked for, and never suggest which reasons might have qualified. If they do arrive with a real problem and evidence for it, the playbook still applies as before.",
+  },
+  {
     id: "seed-2026-08-18-b",
     date: "2026-08-18",
     title: "Drafts are shorter and stop padding",

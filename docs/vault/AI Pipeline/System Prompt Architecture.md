@@ -1,7 +1,7 @@
 ---
 title: System Prompt Architecture
 tags: [ai, prompting, drafting]
-updated: 2026-07-29
+updated: 2026-08-22
 ---
 
 # System Prompt Architecture
@@ -17,6 +17,8 @@ The layers are assembled in a fixed order, and the order matters: later layers (
 **Why it exists:** early drafts read like a bot triaging a ticket — "our team will review this," "I'll escalate to a real agent," "please email support@fanvue.com." Both phrasings are actively harmful here: the agent sending the reply *is* the team, so "I'll escalate to a real agent" is simply false; and an email to support@fanvue.com just creates a new ticket that lands back in the same queue — a dead-end loop for the customer. The rule forces the model to frame internal follow-up as something *this* agent does and reports back on ("I'll raise this with our payments team and update you here"), never as sending the customer elsewhere. One narrow exception is carved out: a playbook can name a specific non-support-queue intake (e.g. a dedicated DMCA address for co-author/model-release documents) — that's a legitimate destination, not the general queue loop the rule bans.
 
 **Added 2026-08-09 — "request a review" vs. doing it yourself:** a live draft said "I'll ... request a review if needed" for a Fadmin check the agent performs directly. Same failure as above in a subtler form: "request"/"submit" implies handing the action to a separate reviewing party, even when the agent IS the one doing it. The rule now tells the model to say "I'll review this now" / "I'm looking into it" for self-performed checks, and reserves "request"/"raise"/"escalate" for the one case where it's literally true — a different internal team is actually being hit.
+
+**Added 2026-08-22 — owning the work is not a licence to defer it:** the rule above turned out to have a blind side. A draft answering a plain buyer's-remorse refund request wrote "I'll review your refund request and provide an update here once the review is complete" — perfectly obedient to the 2026-08-09 bullet (the agent reviews it themselves, no handoff), and still wrong, because there was nothing to review: the answer was already knowable from policy. The rule now adds that "I'll review this" must never be used to avoid giving an answer you already have. It settles who owns the work, not whether the work is needed. See [[#3c. Refund Posture Rules (added 2026-08-22)]] for the substance side of the same fix.
 
 ## 2. Capability Boundary Rules
 
@@ -41,6 +43,20 @@ It lives in the prompt rather than only in a playbook because a playbook only he
 Sources: Notion **Refunds** → Fraudulent Transactions (`ae2883310ab64d219e84cc193ebc1c3b`) and **Payments & Payout Training** → General Payment Queries (`33e0f38712768096a361e41e7d898a31`). The agent-facing side of the same policy lives in the *Chargebacks from the fan's perspective* playbook (`c48fed99-…`), updated the same day.
 
 The [[Draft Verify Pipeline]] verifier carries the rule too, as a second gate: it is instructed to **delete** dispute advice outright and to correct a draft that treats a pending charge as money taken. Locked in by `lib/draft-ai.test.ts` ("chargeback / bank-dispute guardrail"), which asserts the rule reaches all four builders plus the verifier.
+
+## 3c. Refund Posture Rules (added 2026-08-22)
+
+`REFUND_POSTURE_RULES` — sits directly after the payment-dispute block and before the closure rules. It states the default posture on any money-back request: Fanvue is a consumable digital service, access is delivered the moment the payment clears, so **no refund is the answer** and it belongs in *this* reply. The block has three moving parts:
+
+- **Give the answer, don't stall.** A no-refund answer may never be deferred into a review that isn't happening ("I'll review your refund request and update you", "your request is under consideration"). When no qualifying ground is evidenced in the thread there is nothing to review, so the "review" is fiction and the customer is left waiting on a reversal that will never come.
+- **Never list, hint at, or invite the exemption grounds.** The draft must not tell a customer what *would* qualify — not undelivered content, "not as described", unauthorised charges, banned creators, stolen content, or technical faults — and must not fish for one ("was there a problem with the content?"). The burden starts with the customer: the model only moves off the default when they have **already, unprompted**, described a specific problem matching a real exemption **and** backed it with something concrete. "Please make an exception", gratitude, and persistence across several messages are explicitly not evidence and do not earn a review. It also bans asking for transaction details (amount, date, creator) that cannot change a no.
+- **The actionable half still gets handled.** If the customer also wants the subscription stopped, the draft gives the cancellation path plainly (Settings > Payments & Subscriptions > Manage My Subscriptions > Unsubscribe) and states that cancelling stops future renewals without reversing a charge already taken.
+
+**Why it exists:** a fan asked for a refund on a $5.46 subscription — plain buyer's remorse, no complaint attached, an outright NO under the refund playbook's Ground A. The draft answered "I'll review your refund request and provide an update here once the review is complete." Two failures in one sentence. It stalled on an answer that was already knowable, and deferring implies the outcome is still open, which invites the customer to go build a case. The first failure is the interesting one: it was [[#1. Agent Identity Rules]] working exactly as written. That block says to say "I'll review this now" rather than "I'll request a review", so drafts read like the agent rather than a bot routing a ticket — right identity, wrong substance, because nothing in the stack said that a policy answer you already have must be **given** rather than deferred. The gap is closed on both sides: the identity block got the "not a licence to defer" bullet, and this block carries the substance. The coaching half is Vincenzo's rule (2026-08-22): the moment a reply names what *would* qualify, it has coached the customer into manufacturing a qualifying story and turned a closed case into a fabricated dispute.
+
+Like `PAYMENT_DISPUTE_RULES`, it lives in the prompt rather than only in a playbook, and for the same reason: a playbook only fires when its gate matches, and refund asks arrive constantly in tail cases with no match. The underlying refund policy is also a moving target — it was materially updated on 2026-08-22 (a new **Ground K** for 100%-AI creators who lie about being real, and **Ground J** now requiring Moderation sign-off) in the Supabase `playbooks` row `bdb28626-3d70-4e2b-a9b2-142ec5a64f85`. The posture rule is the prompt-level counterpart to that playbook: it does not enumerate the grounds (enumerating them in a customer-facing prompt is precisely the failure it bans), it just holds the default no-refund stance and the evidence-first burden on every draft, playbook match or not. Ground-level detail stays in the playbook, where the agent reads it and the customer never does.
+
+The [[Draft Verify Pipeline]] verifier carries the rule as a second gate: on a refund request with no qualifying ground in the source it deletes the stall ("I'll review your refund request", "I'll look into this and come back to you") and deletes any passage naming or fishing for the exemptions, leaving a plain warm no plus the cancellation step. Locked in by `lib/draft-ai.test.ts` ("refund posture — answer up front, never coach the exemptions").
 
 ## 4. Privacy Rules
 
@@ -83,6 +99,14 @@ The root cause is a length bias, not a knowledge gap — the model reads a two-l
 Two supporting changes land the same fix in the layers around it. `PAYMENT_DISPUTE_RULES` now gates its BIN + last 4 lookup on the transaction being *genuinely unidentified* — if the thread already shows an invoice or an agent already explained the charge, asking for digits re-opens an answered question — and adds that a customer's banking-app wording ("completed", "went through") does not overrule what Fanvue's own records show. The **verifier** ([[Draft Verify Pipeline]]) gets the same rule as a last line of defence: it cuts anything that contradicts, hedges, or re-opens an answer the source thread shows an agent already gave, deletes asks for information the thread already contains, and is told never to lengthen a short, correct confirming draft. Its one-call-to-action rule is now conditional — a reply that just confirms and closes should not have an ask bolted onto it.
 
 Unlike the older closing block, this one is a shared constant injected into `buildSystemPrompt()`, `buildImproveSystemPrompt()`, and `buildMacroAdaptSystemPrompt()` — the improve and macro-adapt paths previously had no closing rules at all, so either could re-introduce the pushback the draft path had just been told to avoid.
+
+## 6c. Greeting rules — exactly one greeting per message (fixed 2026-08-22)
+
+The greeting instruction isn't a constant — `greetingToneRule(hasAgentReplied, greetingInjected)` picks one of three bullets and injects it into the **Tone rules** section: pick up mid-conversation if this agent has already written in the thread; open warmly if they haven't; or write no greeting at all when `greetingInjected` is true, meaning the reply-queue pipeline prepends `buildAgentGreeting()` in code (the manual, macro-adapt and improve paths pass `false`, since nothing is prepended there).
+
+**Why the third branch was rewritten:** it used to say "Do not write any opening greeting, thanks line, or your own name" — and the model still opened its text with a bare "Hello," on its own line. The prepended greeting plus that line produced two stacked greetings, which is the most obvious tell that a reply was machine-written. The model apparently did not read a bare salutation as "a greeting" in the sense the rule meant. The fix is to stop relying on the category and name the strings: the rule now bans a **salutation** explicitly and enumerates the exact openers — "Hello", "Hi", "Hi there", "Hey", "Dear …", "Good morning/afternoon", "Thanks for reaching out", "Thanks for contacting us", "Thank you for your message", "Thanks for your patience" — as a sentence *or* as a short standalone line, and says the first words must be the substance of the answer. Same lesson as elsewhere on this page: a prohibition the model has to interpret is weaker than one it can pattern-match.
+
+The [[Draft Verify Pipeline]] verifier backs it up as a second gate — it deletes a salutation or thanks line stacked on top of a greeting already present in the source context or prepended to the message. Locked in by `lib/draft-ai.test.ts` ("greeting is injected exactly once").
 
 ## Rule precedence, and why the stack needed one
 
@@ -148,10 +172,10 @@ Before/after on the `confirm-and-close` fixture, which reproduces the live 2026-
 
 ## Key files
 
-- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `AGENT_IDENTITY_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
+- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `AGENT_IDENTITY_RULES`, `REFUND_POSTURE_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `greetingToneRule()`, `buildAgentGreeting()`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
 - `scripts/dump-assembled-prompt.mts` — assembled-prompt dump for all four paths
 - `scripts/eval-draft-behavior.mts` — behavioural eval, `--dry-run` / `--self-test` / `--runs=N` / `--scenario=<id>`
-- `lib/draft-ai.test.ts` — "chargeback / bank-dispute guardrail", "no keyword-gated confirmations", and "confirm, don't re-open" assert the rules survive prompt refactors
+- `lib/draft-ai.test.ts` — "chargeback / bank-dispute guardrail", "refund posture — answer up front, never coach the exemptions", "greeting is injected exactly once", "no keyword-gated confirmations", and "confirm, don't re-open" assert the rules survive prompt refactors
 - `lib/tone-presets.ts` — `TONE_PRESETS`, `TonePresetId`, `toneInstructionFor()`, `presetStripsEmDashes()`, `stripEmDashes()`, `MAX_CUSTOM_TONE_CHARS`
 
 ## Data flow
@@ -163,6 +187,7 @@ buildSystemPrompt(playbook, examples, agentName, articles, hasAgentReplied, gree
         ├─ 2. CAPABILITY_BOUNDARY_RULES   (no fake account checks)
         ├─ 3. POLICY_INTEGRITY_RULES      (no invented exceptions)
         ├─ 3b. PAYMENT_DISPUTE_RULES      (never send them to a chargeback)
+        ├─ 3c. REFUND_POSTURE_RULES       (say no now; never name the exemptions)
         ├─ 4. Privacy rule                (no real name; email presence only, not value)
         ├─ 5. English-only instruction    (repeated again on the user message footer)
         ├─ 0a. RULE_PRECEDENCE            (which rule wins when two conflict)
