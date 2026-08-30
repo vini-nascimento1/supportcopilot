@@ -1,7 +1,7 @@
 ---
 title: System Prompt Architecture
 tags: [ai, prompting, drafting]
-updated: 2026-08-22
+updated: 2026-08-30
 ---
 
 # System Prompt Architecture
@@ -24,7 +24,27 @@ The layers are assembled in a fixed order, and the order matters: later layers (
 
 The model is told it only knows what's actually in front of it: the conversation thread, playbook, KB articles, Notion retrieval, and any attached images. It has no live access to Fadmin, KYC systems, payout processors, media review tools, or any other admin system — those are human-only, agent-verified actions.
 
-**Why it exists:** without this boundary, a model asked "did you check my payout status" will happily produce a confident-sounding "I've checked your account and..." even though it never touched any system — because that's the statistically likely completion of a support-reply pattern, not because it's true. The rule bans a specific list of unsupported phrases ("I've checked your account," "I've reviewed your profile," "we've confirmed this on our side") and requires the draft to either ask for the missing detail or say the team will look into it, without pretending the check already happened. This is also exactly the class of error the [[Draft Verify Pipeline]]'s verifier pass exists to catch as a second line of defense — the boundary rule is the first line, upstream in the same prompt.
+**Why it exists:** without this boundary, a model asked "did you check my payout status" will happily produce a confident-sounding "I've checked your account and..." even though it never touched any system — because that's the statistically likely completion of a support-reply pattern, not because it's true. The rule bans a specific list of unsupported phrases ("I've checked your account," "I've reviewed your profile," "we've confirmed this on our side") and requires the draft to either ask for the missing detail or state what *is* knowable, without pretending the check already happened. This is also exactly the class of error the [[Draft Verify Pipeline]]'s verifier pass exists to catch as a second line of defense — the boundary rule is the first line, upstream in the same prompt.
+
+### 2b. …but a blind spot is never the answer (added 2026-08-30)
+
+The block's original closing bullet told the model that when a live check was needed it could "say the team will look into it." That is a direct contradiction of §1, which bans exactly that third-person handoff — and because the capability bullet is the more literal and more actionable of the two, it won. The same collision shape that produced the refund stall (see §3c) produced this one.
+
+**The live failure.** A creator asked why the autonomous AI chatbot's controls (enable toggle, response delay, media packs) were missing on a newly created account, while working fine on her established one. The whole answer was available internally: the chatbot is on a **staged rollout**, it is *not* unlocked by the NSFW-at-signup flag that the public help article names, and recreating the account would not grant it. The draft delivered none of that. It listed what it could not verify ("account classifications, eligibility flags, rollout restrictions"), handed the case to "the technical/account team," and closed by restating the customer's own three questions as the things that team "would need to verify" — the customer's message with the model's uncertainty wrapped around it.
+
+Three bullets now close that gap:
+
+- **Lack of access is never the content of the reply.** Not seeing a system is a fact about tooling, not information the customer asked for. No lists of systems with no visibility, no "I can't make changes from this side."
+- **Answer with what you DO know** — how the feature works, what genuinely gates it, which assumption is wrong, what will *not* fix it. A confirmed explanation of the mechanism is a complete answer even with no account-specific value available.
+- **Never mirror the customer's questions back** as a list of things needing verification.
+
+## 2c. Unbacked commitment rules (added 2026-08-30)
+
+`UNBACKED_COMMITMENT_RULES` — sits directly after the capability block. The other half of the same incident: with the handoff banned, the remaining temptation is to promise a follow-up so the reply doesn't end empty-handed. Support **cannot** enable the AI chatbot at all — that request goes creator → sales rep → product (`#internal-support`, 2026-08-02: *"they will have to speak to their Sales rep to liaise with product. There is nothing we can do"*) — so "I'll put this forward internally" was a commitment the agent could not keep. Vincenzo's rule (2026-08-30): don't promise a customer you'll go look internally when there's no path to look through.
+
+The block is deliberately **narrow**. It preserves §1's prescribed framing for the escalations that really do happen — payments/payout issues, fraud reviews, moderation referrals — and bans invented ones everywhere else, along with any promised date, queue position, or claim that a feature is about to be switched on. A test pins both halves so the fix can't drift into breaking the real paths.
+
+Related: [[feedback_no_unconfirmed_promises]] covers the customer-facing side of the same principle.
 
 ## 3. Policy Integrity Rules
 
@@ -119,7 +139,7 @@ Reading the *assembled* prompt as one document (see `scripts/dump-assembled-prom
 3. **The tone block was no longer last** in the draft path. Its disclaimer says it "never overrides any rule above", which is only true if nothing outranking it is printed below it; the closure rules had been appended after it. Order restored, and a test now pins it.
 4. **Duplicated closure bullets** — the new closure rules were appended alongside the older ones they subsumed, so the same instruction appeared twice in slightly different words. Merged.
 
-`RULE_PRECEDENCE` now states the order explicitly: safety and policy first, then "don't re-open what is already settled", then "ask only for what is genuinely missing", and formatting/tone last. Item 4 carries most of the weight: **a rule about shape must never manufacture substance** — never invent a question, caveat, or next step purely to satisfy a rule about form.
+`RULE_PRECEDENCE` now states the order explicitly: safety and policy first, then "don't re-open what is already settled", then "ask only for what is genuinely missing", and formatting/tone last. Item 4 (added 2026-08-30) says **say what you know before you say what you can't reach** — the no-fake-checks rules limit what may be CLAIMED, and are never a licence to answer with your own limitations, hand the case to another team, or promise a follow-up with no path. Item 5 carries most of the remaining weight: **a rule about shape must never manufacture substance** — never invent a question, caveat, or next step purely to satisfy a rule about form.
 
 ## `GOOD_REPLY_SHAPE` — the counterweight to a prohibition-only stack
 
@@ -172,7 +192,7 @@ Before/after on the `confirm-and-close` fixture, which reproduces the live 2026-
 
 ## Key files
 
-- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `AGENT_IDENTITY_RULES`, `REFUND_POSTURE_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `greetingToneRule()`, `buildAgentGreeting()`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
+- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `AGENT_IDENTITY_RULES`, `UNBACKED_COMMITMENT_RULES`, `REFUND_POSTURE_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `greetingToneRule()`, `buildAgentGreeting()`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
 - `scripts/dump-assembled-prompt.mts` — assembled-prompt dump for all four paths
 - `scripts/eval-draft-behavior.mts` — behavioural eval, `--dry-run` / `--self-test` / `--runs=N` / `--scenario=<id>`
 - `lib/draft-ai.test.ts` — "chargeback / bank-dispute guardrail", "refund posture — answer up front, never coach the exemptions", "greeting is injected exactly once", "no keyword-gated confirmations", and "confirm, don't re-open" assert the rules survive prompt refactors
@@ -185,6 +205,7 @@ buildSystemPrompt(playbook, examples, agentName, articles, hasAgentReplied, gree
         │
         ├─ 1. AGENT_IDENTITY_RULES        (you ARE the agent)
         ├─ 2. CAPABILITY_BOUNDARY_RULES   (no fake account checks)
+        ├─ 2c. UNBACKED_COMMITMENT_RULES  (no promised follow-up without a real path)
         ├─ 3. POLICY_INTEGRITY_RULES      (no invented exceptions)
         ├─ 3b. PAYMENT_DISPUTE_RULES      (never send them to a chargeback)
         ├─ 3c. REFUND_POSTURE_RULES       (say no now; never name the exemptions)

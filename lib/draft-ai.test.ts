@@ -766,3 +766,96 @@ describe("buildAgentGreeting", () => {
     expect(buildAgentGreeting("")).toBe(generic)
   })
 })
+
+// A creator asked why the autonomous AI chatbot's controls were missing on a new
+// account. The full answer existed internally — staged rollout, not the NSFW flag
+// the help article names, and recreating the account would not grant it — but the
+// draft listed what it could not verify, handed the case to "the technical/account
+// team", and restated the customer's own three questions as what that team "would
+// need to verify". CAPABILITY_BOUNDARY_RULES ("says the team will look into it")
+// had out-literalled AGENT_IDENTITY_RULES' ban on third-person handoffs.
+describe("no-access is never the answer", () => {
+  const builders: Array<[string, string]> = [
+    ["buildSystemPrompt", buildSystemPrompt(undefined, [], "Vini", [])],
+    ["buildNotionAwareSystemPrompt", buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])],
+    ["buildImproveSystemPrompt", buildImproveSystemPrompt("Vini")],
+    ["buildMacroAdaptSystemPrompt", buildMacroAdaptSystemPrompt("Some approved macro text.", "Vini")],
+  ]
+
+  it.each(builders)("%s bans building the reply out of blind spots", (_name, out) => {
+    expect(out).toContain("Your lack of access is never the content of the reply")
+    expect(out).toContain("Answer with what you DO know")
+  })
+
+  it.each(builders)("%s bans mirroring the customer's questions back", (_name, out) => {
+    expect(out).toContain("Never mirror the customer's own questions back as the reply")
+  })
+
+  it("no longer tells the model to say the team will look into it", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    expect(out).not.toContain("says the team will look into it")
+  })
+
+  it("ranks substance above the capability hedge in the precedence list", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    expect(out).toContain("Say what you know before you say what you can't reach")
+    expect(out).toContain("never a licence to answer with your own limitations")
+  })
+
+  it("makes the verifier cut a blind-spot reply and a mirrored question list", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Use the KB only." },
+      { role: "user", content: "Creator asks why AI chatbot settings are missing." },
+    ]
+    const out = buildDraftVerifierMessages(
+      messages,
+      "I'm unable to verify account classifications, eligibility flags or rollout restrictions from this side, so this will need a technical/account-team check."
+    )
+    expect(out[0].content).toContain("Cut a reply that is built out of what the agent cannot verify")
+    expect(out[0].content).toContain("Delete a restatement of the customer's own questions")
+  })
+})
+
+// Vincenzo, 2026-08-30: he will not promise a customer he'll go look internally
+// when there is no path to look through. Support cannot enable the AI chatbot at
+// all — that request goes creator -> sales rep -> product — so "I'll put this
+// forward internally" was a commitment the agent could not keep. The real
+// escalation paths (payments, fraud, moderation) must keep working.
+describe("no unbacked promise of internal action", () => {
+  const builders: Array<[string, string]> = [
+    ["buildSystemPrompt", buildSystemPrompt(undefined, [], "Vini", [])],
+    ["buildNotionAwareSystemPrompt", buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])],
+    ["buildImproveSystemPrompt", buildImproveSystemPrompt("Vini")],
+    ["buildMacroAdaptSystemPrompt", buildMacroAdaptSystemPrompt("Some approved macro text.", "Vini")],
+  ]
+
+  it.each(builders)("%s requires a real named path before promising follow-up", (_name, out) => {
+    expect(out).toContain("Never promise an internal action you have no path for")
+    expect(out).toContain("Outside those, do not invent one")
+  })
+
+  it.each(builders)("%s bans promising a date, queue position or feature access", (_name, out) => {
+    expect(out).toContain("Never promise or imply a date, a queue position, or an outcome")
+    expect(out).toContain("never tell a customer a feature will be enabled for them")
+  })
+
+  it("keeps the genuine payments/fraud/moderation escalation framing intact", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    // The narrow fix must not break AGENT_IDENTITY_RULES' prescribed wording for
+    // the escalations that really do happen.
+    expect(out).toContain("I'll raise this with our payments team and follow up here")
+    expect(out).toContain("Payments/payout escalations, fraud reviews and moderation referrals are real workflows")
+  })
+
+  it("makes the verifier delete an unbacked internal promise", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Use the KB only." },
+      { role: "user", content: "Creator wants the AI chatbot enabled." },
+    ]
+    const out = buildDraftVerifierMessages(
+      messages,
+      "I'll put your account forward for chatbot access internally and update you here."
+    )
+    expect(out[0].content).toContain("Delete an unbacked promise of internal action")
+  })
+})

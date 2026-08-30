@@ -16,6 +16,20 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-30-c",
+    date: "2026-08-30",
+    title: "Drafts answer the question instead of listing what they can't check",
+    description:
+      "When a draft couldn't look something up in Fadmin, it would sometimes reply with the lookup it couldn't do — \"I'm unable to verify your account classification, eligibility flags or rollout status\" — and hand the ticket to \"the technical team\", even when the real explanation was sitting in the playbook or knowledge base. That's the most robotic thing a reply can say, and the customer can't act on any of it. Drafts now lead with what we actually know: how the feature works, what really gates it, which assumption is wrong, and what won't fix it. A genuine gap gets one short clause, not the whole message. Drafts also stop repeating a customer's own questions back as a list of things that \"need verifying\".",
+  },
+  {
+    id: "seed-2026-08-30-b",
+    date: "2026-08-30",
+    title: "Drafts no longer promise to chase something up internally when there's no way to",
+    description:
+      "Drafts would offer things like \"I'll put this forward internally\" or \"I'll flag this with the product team\" for cases where no such route exists — so the customer waits, follows up, and whoever picks the ticket up next inherits a promise with nothing behind it. Drafts now only commit to a follow-up where a real path exists (payments and payout escalations, fraud reviews, moderation referrals), and those keep working exactly as before. Everywhere else they give the honest answer and close, with no invented review, no timeframe, and no suggestion that a feature is about to be switched on.",
+  },
+  {
     id: "seed-2026-08-30-a",
     date: "2026-08-30",
     title: "Pages that lean on playbooks open faster",
