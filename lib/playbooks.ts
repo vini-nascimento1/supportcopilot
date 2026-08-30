@@ -1,5 +1,7 @@
 import "server-only"
 
+import { revalidateTag, unstable_cache } from "next/cache"
+
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 
 export type PlaybookListItem = {
@@ -114,7 +116,22 @@ export async function getResponsesForPlaybookIds(
   return result
 }
 
-export async function getPlaybooksDashboardData(): Promise<PlaybooksDashboardData> {
+// Cache tag + TTL for the playbook corpus. Playbooks are ~64 curated rows that
+// change only when someone edits them in the Playbooks page, but the full read
+// carries every long-form column (recognize/checks/resolution/dos_donts) and
+// weighs ~170 kB. It is called from every draft, every canvas match, every page
+// render and all three 5-minute cron sweeps, which was ~2.3k uncached reads a
+// day and the single largest source of Supabase egress on the project. Cache it
+// and invalidate on write via revalidatePlaybooks().
+export const PLAYBOOKS_CACHE_TAG = "playbooks-corpus"
+const PLAYBOOKS_TTL_SECONDS = 300
+
+// Layer 1: per-process memo. Collapses the repeated reads inside a single
+// sweep/lambda invocation and works in any context, including background
+// `after()` work where the Next cache scope may not be available.
+let memo: { data: PlaybooksDashboardData; expires: number } | null = null
+
+async function fetchPlaybooksDashboardData(): Promise<PlaybooksDashboardData> {
   const supabase = getSupabaseAdminClient()
 
   if (!supabase) {
@@ -150,5 +167,58 @@ export async function getPlaybooksDashboardData(): Promise<PlaybooksDashboardDat
     responseCount: responseCountResult.count ?? 0,
     rows: allRows.slice(0, 8),
     allRows,
+  }
+}
+
+// Layer 2: Next's data cache, which on Vercel persists across lambda
+// invocations and deployments — that is where the bulk of the saving comes
+// from, since most callers are separate cron invocations rather than repeat
+// calls inside one request.
+const fetchPlaybooksCached = unstable_cache(
+  async () => {
+    const data = await fetchPlaybooksDashboardData()
+    // Throw rather than return, so a transient Supabase failure is never
+    // written into the data cache and pinned there for the whole TTL. The
+    // caller below catches it and re-reads directly.
+    if (data.mode === "error") throw new Error(data.error ?? "playbooks read failed")
+    return data
+  },
+  ["playbooks-dashboard-data"],
+  { tags: [PLAYBOOKS_CACHE_TAG], revalidate: PLAYBOOKS_TTL_SECONDS }
+)
+
+export async function getPlaybooksDashboardData(): Promise<PlaybooksDashboardData> {
+  const now = Date.now()
+  if (memo && memo.expires > now) return memo.data
+
+  let data: PlaybooksDashboardData
+  try {
+    data = await fetchPlaybooksCached()
+  } catch {
+    // Either the read failed, or we are outside a Next cache scope (which
+    // unstable_cache requires). Read directly so callers never break on a
+    // caching concern, and so the error path still returns its usual shape.
+    data = await fetchPlaybooksDashboardData()
+  }
+
+  // Never memo a failure — one blip would otherwise pin the error for the
+  // whole TTL across every caller in this process.
+  if (data.mode !== "error") {
+    memo = { data, expires: now + PLAYBOOKS_TTL_SECONDS * 1000 }
+  }
+  return data
+}
+
+// Call after any write to playbooks or responses so editors see their change
+// immediately instead of waiting out the TTL.
+export async function revalidatePlaybooks(): Promise<void> {
+  memo = null
+  try {
+    // Two-argument form: the single-argument call is deprecated in Next 16.
+    // "max" marks the entry stale and serves stale-while-revalidate.
+    revalidateTag(PLAYBOOKS_CACHE_TAG, "max")
+  } catch {
+    // Outside a request scope the tag store is unavailable; the TTL still
+    // bounds staleness, and the memo above has already been cleared.
   }
 }

@@ -1,7 +1,7 @@
 ---
 title: Database Schema Reference
 tags: [database, supabase, reference]
-updated: 2026-08-12
+updated: 2026-08-30
 ---
 
 # Database Schema Reference
@@ -170,6 +170,31 @@ Support case response templates / decision trees that ground AI drafts and popul
 
 **Read/write:** `lib/playbooks.ts` (`getPlaybooksDashboardData`); consumed by the draft/verify prompt builders — see [[System Prompt Architecture]].
 
+> [!warning] This read is cached — playbook edits take up to 5 minutes to appear
+> `getPlaybooksDashboardData()` selects all ~64 rows including every long-form
+> column (`recognize`, `checks`, `resolution`, `dos_donts`), which is **~170 kB
+> per call**. It has 17 call sites — every draft, every canvas playbook match,
+> every page render and all three 5-minute cron sweeps — so uncached it ran
+> ~2,300 times a day and was, on its own, roughly 95% of the project's Supabase
+> egress (~11.9 GB/month against a 5 GB allowance, measured 2026-08-30).
+>
+> It is now cached in two layers in `lib/playbooks.ts`:
+> 1. a **per-process memo** (300 s TTL) that collapses repeat calls inside one
+>    sweep or lambda invocation, and works in any context including background
+>    `after()` work;
+> 2. **`unstable_cache`** tagged `playbooks-corpus`, which on Vercel persists
+>    across invocations and deployments — this is where most of the saving is.
+>
+> Consequences to know:
+> - There is **no playbook write path in the app** — playbooks are edited
+>   directly in Supabase, so an edit now takes **up to 5 minutes** to show up.
+>   Call `revalidatePlaybooks()` from any write path added later to make edits
+>   land immediately.
+> - A failed read is never cached (the cached wrapper throws instead of storing
+>   an `error` result), so one Supabase blip cannot pin an error for the TTL.
+> - `use cache` was not used: it requires `cacheComponents: true` in
+>   `next.config.ts`, which this app has not opted into.
+
 ### `responses`
 
 Example response templates per playbook, injected into the draft prompt as style references.
@@ -325,6 +350,36 @@ These exist in the live schema but weren't part of the 14-table survey this page
 - **gmail_templates** — `id, name, recipient, subject, body, created_at, updated_at, cc, access_emails`. See [[Gmail Integration]].
 - **gmail_sent_emails** — `id, template_id (FK), template_name, recipient, user_email, subject, body, gmail_message_id, gmail_thread_id, sent_by, created_at, cc, visibility`. See [[Gmail Integration]].
 - **intercom_macros** — `id, intercom_id (unique), name, body, body_text, visibility, intercom_updated_at, raw (jsonb), created_at, updated_at`. Migration `intercom_macros`; a local cache/mirror of Intercom's macro library. See [[Intercom Integration]].
+
+## Scheduled maintenance / retention
+
+`pg_cron` job history is **not** self-purging. `cron.job_run_details` accumulates
+one row per job run forever, and with three jobs on `*/5 * * * *` that is ~864
+rows a day. By 2026-08-30 it had reached **41,753 rows / 100 MB — the single
+largest table in the database, ~46% of total size** — while carrying no business
+value beyond recent failure diagnosis.
+
+Retention is now enforced by a dedicated job (migration
+`purge_cron_job_run_details_retention`):
+
+```sql
+select cron.schedule(
+  'purge-cron-history-daily',
+  '40 3 * * *',
+  $$delete from cron.job_run_details where start_time < now() - interval '7 days'$$
+);
+```
+
+Seven days is deliberate: enough history to diagnose a failing sweep, bounded in
+size. The initial cleanup (35,691 rows) plus a `VACUUM FULL` took the table from
+100 MB to 6 MB and the whole database from 218 MB to **124 MB** (free-tier limit
+is 500 MB). Note a plain `DELETE` does not return disk to the OS — it needs a
+`VACUUM FULL`, which takes an exclusive lock, so run it deliberately rather than
+on a schedule.
+
+Two other tables grow unboundedly and have **no** retention policy yet, worth
+revisiting if storage becomes tight: `automation_runs` (39 MB, 47.7k rows older
+than 14 days) and `suggested_replies` (38 MB, 18.9k rows older than 30 days).
 
 ## Related pages
 

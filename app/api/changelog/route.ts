@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-08-30-a",
+    date: "2026-08-30",
+    title: "Pages that lean on playbooks open faster",
+    description:
+      "Every draft, every playbook match on the canvas and every page load was re-downloading the whole playbook library from scratch — the same unchanged content, thousands of times a day. It's now held for a few minutes at a time and reused, so those screens open quicker. One thing to know if you edit a playbook directly in the database: your change can take up to five minutes to show up in the app instead of appearing instantly.",
+  },
+  {
     id: "seed-2026-08-22-c",
     date: "2026-08-22",
     title: "The queue clears out drafts for tickets you've already handled",
