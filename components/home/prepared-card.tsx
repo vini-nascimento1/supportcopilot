@@ -82,11 +82,18 @@ function Body({ text }: { text: string }) {
 
 export function PreparedCard({
   item,
-  onResolved,
+  onHandled,
   downloadUrl,
 }: {
   item: AttentionItem
-  onResolved: (id: string) => void
+  /**
+   * The agent acted on this item, so Home should stop showing it: a draft sent
+   * or rejected, an answer sent in Slack, or a deep link opened at the source.
+   * The parent posts the dismissal and offers an Undo. Deliberately NOT called
+   * by the locked "Check in fadmin" / "Check on desktop" links — those are a
+   * step toward sending, not the end of the item.
+   */
+  onHandled: (id: string) => void
   downloadUrl?: string
 }) {
   const prepared = item.prepared
@@ -104,7 +111,12 @@ export function PreparedCard({
           : "Nothing prepared for this one. Open it at the source to handle it."}
         <div className="mt-2.5">
           <Button size="sm" variant="outline" asChild>
-            <a href={item.deepLink} target="_blank" rel="noopener noreferrer">
+            <a
+              href={item.deepLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => onHandled(item.id)}
+            >
               <ExternalLinkIcon />
               Open it
             </a>
@@ -163,7 +175,7 @@ export function PreparedCard({
       } else {
         toast.success("Sent to the customer")
       }
-      onResolved(item.id)
+      onHandled(item.id)
     }
 
     const reject = async () => {
@@ -184,7 +196,7 @@ export function PreparedCard({
         return
       }
       toast.success("Draft dismissed")
-      onResolved(item.id)
+      onHandled(item.id)
     }
 
     return (
@@ -248,7 +260,9 @@ export function PreparedCard({
                 </Button>
               ) : (
                 <Button size="sm" variant="ghost" asChild>
-                  <Link href={caseHref}>{locked ? "Check in fadmin" : "Open case"}</Link>
+                  <Link href={caseHref} onClick={locked ? undefined : () => onHandled(item.id)}>
+                    {locked ? "Check in fadmin" : "Open case"}
+                  </Link>
                 </Button>
               )}
               <Button
@@ -297,7 +311,7 @@ export function PreparedCard({
         return
       }
       toast.success("Sent in Slack")
-      onResolved(item.id)
+      onHandled(item.id)
     }
 
     return (
@@ -339,7 +353,12 @@ export function PreparedCard({
             {editing ? "Done" : "Edit"}
           </Button>
           <Button size="sm" variant="ghost" asChild>
-            <a href={item.deepLink} target="_blank" rel="noopener noreferrer">
+            <a
+              href={item.deepLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => onHandled(item.id)}
+            >
               Open thread
             </a>
           </Button>
@@ -358,7 +377,12 @@ export function PreparedCard({
       <Body text={prepared.body} />
       <div className="mt-3">
         <Button size="sm" asChild>
-          <a href={item.deepLink} target="_blank" rel="noopener noreferrer">
+          <a
+            href={item.deepLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => onHandled(item.id)}
+          >
             <ExternalLinkIcon />
             Reply in Gmail
           </a>

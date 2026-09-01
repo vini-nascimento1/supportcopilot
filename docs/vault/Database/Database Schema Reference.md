@@ -33,7 +33,7 @@ One row per support agent, created on first Supabase Auth login. Holds identity,
 | working_days | integer[] | default `{1,2,3,4,5}` |
 | agent_name | text | nullable — the customer-facing name used in draft greetings and quick-send emails. Separate from `name` (internal Google display name). Read only through `lib/agent-identity.ts`; seeded once from the matched Intercom admin name by `app/api/auth/callback`; edited in Settings > Profile. Added 2026-09-01 |
 | slack_user_id | text | nullable — the agent's own Slack user id (`U…`), stored by `app/api/auth/slack/callback` and lazily backfilled by `lib/briefing/sources/slack.ts`. Lets the briefing tell a mention of the agent from their own messages. Added 2026-09-01 |
-| last_seen_at | timestamptz | nullable — when the agent last opened Home; the briefing's digest window starts here (capped at 24h). Written by `markHomeSeen()` in `lib/briefing/build.ts`. Added 2026-09-01 |
+| last_seen_at | timestamptz | nullable — when the agent last opened Home; the briefing's digest window starts here (floored at 24h, capped at 7 days). Written by `markHomeSeen()` in `lib/briefing/build.ts`. Added 2026-09-01 |
 | briefing_cache | jsonb | nullable — the last built `Briefing` (normalized items only, no provider payloads or tokens). 5-minute TTL. Written by `lib/briefing/build.ts`. Added 2026-09-01 |
 | briefing_cached_at | timestamptz | nullable — when `briefing_cache` was written. Added 2026-09-01 |
 | notion_mcp_access_token | text | nullable — hosted Notion MCP OAuth access token, expires ~1h |
@@ -47,6 +47,22 @@ One row per support agent, created on first Supabase Auth login. Holds identity,
 **Dropped 2026-08-03** (migration `drop_agents_personal_ai_provider`): `personal_ai_key_enc`, `personal_ai_base_url`, `personal_ai_model`, `personal_ai_aux_model`, `personal_ai_enabled`. These backed the per-agent "Personal AI key" feature, removed when Fanvue provisioned a single org OpenAI key for the whole app — the model is now an env var, not a per-agent setting. See [[Draft Verify Pipeline]].
 
 **Read/write:** `lib/auth.ts`, `lib/agent.ts`, `lib/agent-tone.ts`, `lib/drafts.ts`, `lib/automation/*.ts`, `lib/triage/store.ts`, `lib/notion-mcp-auth-server.ts`, `lib/agent-identity.ts`, `lib/briefing/build.ts`, `lib/briefing/sources/slack.ts`; API routes `app/api/agent/tone`, `app/api/agents`, `app/api/auth/callback`, `app/api/auth/slack/callback`, `app/api/auth/notion/callback`, `app/api/settings/update`, `app/api/cases`, `app/api/reply-queue*`, `app/api/playbook-dismissals`, `app/api/automation/alerts`, `app/api/cron/refresh-metrics`, `app/api/metrics`, `app/api/ai/chat`, `app/api/briefing`, `app/api/briefing/refresh`.
+
+### `briefing_dismissals`
+
+One row per Home briefing item an agent has finished with — dismissed with the X, swiped away on a phone, cleared in bulk, or acted on (draft sent or rejected, Slack answer sent, deep link opened). The briefing is rebuilt from live sources every five minutes, so without this table anything the agent already handled would keep reappearing. See [[Home Briefing]].
+
+| Column | Type | Notes |
+|---|---|---|
+| agent_id | uuid | PK (with `item_id`), FK → `agents.id` `on delete cascade` |
+| item_id | text | PK (with `agent_id`) — the `AttentionItem.id`, e.g. `intercom:<conversationId>`, `slack:<channel>:<ts>`, `gmail:<threadId>`, `calendar:<eventId>` |
+| dismissed_at | timestamptz | default `now()` — also the retention clock |
+
+The row holds **no content**: no title, no body, no counterparty, nothing that identifies a customer beyond an id the agent already had on screen. Service-role access only (`getSupabaseAdminClient`), never a browser client.
+
+Retention is 14 days, pruned opportunistically inside `getDismissedIds()` (`delete … where agent_id = $1 and dismissed_at < now() - 14 days`). Item ids stop matching live source data long before that, so an old row can only ever hide something that no longer exists.
+
+**Read/write:** `lib/briefing/dismissals.ts`, applied at read time by `lib/briefing/build.ts::applyDismissals`; API route `app/api/briefing/dismiss` (`POST` to dismiss, `DELETE` to undo).
 
 ## AI reply pipeline
 

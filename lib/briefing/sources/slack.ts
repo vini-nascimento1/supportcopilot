@@ -42,33 +42,113 @@ function fallbackPermalink(message: SlackBriefingMessage): string {
 }
 
 /**
+ * Field labels a Slack workflow post puts after the ticket title. Used only to
+ * find where the title stops — nothing else is read out of the payload.
+ */
+const TICKET_FIELD_LABELS = [
+  "Creator Email Address",
+  "Fan Email Address",
+  "Email Address",
+  "Creator Email",
+  "Ticket Description",
+  "Ticket Link",
+  "Ticket Type",
+  "Description",
+  "Requester",
+  "Assignee",
+  "Priority",
+  "Category",
+  "Created By",
+  "Username",
+  "Status",
+]
+
+/**
+ * Pull the ticket title out of a workflow post ("… assigned to you: *Ticket
+ * Title* Creator cannot withdraw *Creator Email Address* …").
+ *
+ * Deliberately conservative: the title must be bounded by a known field label
+ * or a line break, and be a plausible length. Anything else returns null and
+ * the caller falls back to the sanitized message text, so a workflow we have
+ * never seen degrades to today's behaviour rather than to a wrong headline.
+ */
+export function extractTicketTitle(rawText: string): string | null {
+  const text = rawText ?? ""
+  const marker = /ticket title\s*[*_`:\-–]*\s*/i.exec(text)
+  if (!marker) return null
+
+  const rest = text.slice(marker.index + marker[0].length)
+  const lower = rest.toLowerCase()
+  let cut = -1
+  for (const label of TICKET_FIELD_LABELS) {
+    const at = lower.indexOf(label.toLowerCase())
+    if (at >= 0 && (cut < 0 || at < cut)) cut = at
+  }
+  if (cut < 0) cut = rest.indexOf("\n", 1)
+  if (cut < 0) return null
+
+  const title = rest.slice(0, cut).replace(/[\s*_`>|:-]+$/g, "").trim()
+  if (title.length < 3 || title.length > 160) return null
+  return title
+}
+
+/**
  * One Slack message → one AttentionItem. Pure so the DM/mention split, the
  * urgency rule and the sanitized context line are fixture-testable.
  *
  * A personal mention or a DM is "now" (someone is waiting on this agent
  * specifically); a user-group mention is "today" — anyone on the group can take
  * it, so it must not shout as loudly as a direct ask.
+ *
+ * A workflow/bot post (`message.isBot`) is an EVENT, not a person: "Raise" did
+ * not mention anyone, it raised a ticket. So it gets event wording, only an
+ * "open" action, and research.ts refuses to draft a reply to it — answering a
+ * workflow bot in Slack would be noise at best.
  */
 export function toSlackItem(
   message: SlackBriefingMessage,
   reason: SlackItemContext["reason"],
   nowMs: number
 ): AttentionItem {
-  const sender = firstNameOf(message.userName)
   const isDm = reason === "dm"
   const occurredAt = new Date(message.tsSeconds * 1000).toISOString()
-
-  return {
+  const base = {
     id: `slack:${message.channelId}:${message.ts}`,
-    source: "slack",
-    kind: isDm ? "slack_dm" : "slack_mention",
-    title: isDm ? `${sender} messaged you` : `${sender} mentioned you in #${message.channelName}`,
-    context: sanitizeLine(message.text, MAX_CONTEXT_CHARS),
-    urgency: reason === "group_mention" ? "today" : "now",
+    source: "slack" as const,
     occurredAt,
     whenLabel: agoLabel(occurredAt, nowMs),
     deepLink: fallbackPermalink(message),
     externalId: message.ts,
+  }
+
+  if (message.isBot && !isDm) {
+    const botName = message.botName || message.userName || "A workflow"
+    const text = message.text ?? ""
+    const looksLikeTicket =
+      /raise/i.test(botName) || /ticket has been created|new .{0,40}ticket/i.test(text)
+    const ticketTitle = extractTicketTitle(text)
+
+    return {
+      ...base,
+      kind: "slack_mention",
+      title: looksLikeTicket
+        ? `New ticket raised in #${message.channelName}`
+        : `${botName} posted in #${message.channelName}`,
+      context: sanitizeLine(ticketTitle ?? text, MAX_CONTEXT_CHARS),
+      // "assigned to you" is the one phrase that makes a workflow post personal.
+      urgency: /assigned to you/i.test(text) ? "now" : "today",
+      actions: ["open"],
+    }
+  }
+
+  const sender = firstNameOf(message.userName)
+
+  return {
+    ...base,
+    kind: isDm ? "slack_dm" : "slack_mention",
+    title: isDm ? `${sender} messaged you` : `${sender} mentioned you in #${message.channelName}`,
+    context: sanitizeLine(message.text, MAX_CONTEXT_CHARS),
+    urgency: reason === "group_mention" ? "today" : "now",
     actions: ["reply", "open"],
   }
 }

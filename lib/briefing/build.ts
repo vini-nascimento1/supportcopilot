@@ -8,6 +8,8 @@ import { collectGmailItems } from "@/lib/briefing/sources/gmail"
 import { collectSlackItems, type SlackItemContext } from "@/lib/briefing/sources/slack"
 import { researchSlackItems } from "@/lib/briefing/research"
 import { generateNarrative } from "@/lib/briefing/narrative"
+import { buildFallbackNarrative } from "@/lib/briefing/narrative-fallback"
+import { getDismissedIds } from "@/lib/briefing/dismissals"
 import {
   countBriefing,
   type AttentionItem,
@@ -34,16 +36,26 @@ import {
 /** How long a cached briefing is served before it is rebuilt. */
 export const BRIEFING_TTL_MS = 5 * 60 * 1000
 
-/** Window a briefing covers when the agent has never been seen before. */
-export const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000
+/**
+ * The window never shrinks below a full day, however recently Home was opened,
+ * and a first-ever visit gets exactly this much.
+ *
+ * The floor used to be 8h, purely so that stamping last_seen_at on every visit
+ * could not empty the next window. Dismissals now carry the "already handled"
+ * state (see lib/briefing/dismissals.ts), so re-showing yesterday's mention
+ * costs nothing: if the agent dealt with it, it is dismissed and filtered out.
+ * That frees the floor to be a full day, which is what an agent coming in on a
+ * Monday morning actually wants.
+ */
+export const MIN_LOOKBACK_MS = 24 * 60 * 60 * 1000
 
 /**
- * The window never shrinks below this, however recently Home was opened. A
- * mention from two hours ago that nobody handled is still "missed"; without a
- * floor, every visit would stamp last_seen_at and the very next build would
- * cover an empty window.
+ * The window never stretches past a week. Home is meant to work as a wrap-up
+ * after a weekend or a few days off, so a returning agent gets everything they
+ * missed rather than the last day of it; beyond a week it would be an archive,
+ * not a briefing, and the Slack/Gmail sources would be paging history.
  */
-export const MIN_LOOKBACK_MS = 8 * 60 * 60 * 1000
+export const MAX_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000
 
 type AgentRow = {
   id: string
@@ -57,19 +69,18 @@ type AgentRow = {
 }
 
 /**
- * The digest window: since the agent last opened Home, floored at 8h and
- * capped at 24h. A first-ever visit or a bad timestamp gets the full 24h.
+ * The digest window: since the agent last opened Home, floored at 24h and
+ * capped at 7 days. A first-ever visit or a bad timestamp gets 24h.
  */
 export function computeSince(lastSeenAt: string | null, nowMs: number): string {
   const parsed = lastSeenAt ? Date.parse(lastSeenAt) : NaN
   if (!Number.isFinite(parsed) || parsed > nowMs) {
-    return new Date(nowMs - DEFAULT_LOOKBACK_MS).toISOString()
+    return new Date(nowMs - MIN_LOOKBACK_MS).toISOString()
   }
-  // Never look back further than the default window — an agent returning from
-  // two weeks off should get a briefing, not an archive — and never less than
-  // the floor.
+  // Never less than the floor, and never further back than a week — an agent
+  // returning from a fortnight off should get a briefing, not an archive.
   const floored = Math.min(parsed, nowMs - MIN_LOOKBACK_MS)
-  return new Date(Math.max(floored, nowMs - DEFAULT_LOOKBACK_MS)).toISOString()
+  return new Date(Math.max(floored, nowMs - MAX_LOOKBACK_MS)).toISOString()
 }
 
 const URGENCY_RANK: Record<AttentionItem["urgency"], number> = { now: 0, today: 1, later: 2 }
@@ -95,6 +106,42 @@ export function rankItems(items: AttentionItem[]): AttentionItem[] {
 
 function errorStatus(source: AttentionSource, message: string): SourceStatus {
   return { source, state: "error", message }
+}
+
+/**
+ * Remove everything the agent has already handled, and keep the hero honest
+ * about what is left.
+ *
+ * Applied at READ time — after the cache, on both the cache-hit and the
+ * freshly-built path — so a dismissal takes effect on the very next load
+ * instead of waiting out the 5-minute TTL. The cached copy stays complete,
+ * which is what makes Undo work: restoring a row is a delete in
+ * briefing_dismissals, no rebuild.
+ *
+ * Narrative rule: the model narrative describes a set of items. The moment one
+ * of them is filtered out it can no longer be trusted to agree with the list or
+ * the tiles ("3 replies are drafted" over a list of one), and re-running the
+ * model on every load would defeat the cache. So if anything was removed we
+ * recompute counts AND swap in the deterministic sentence, which is built from
+ * the surviving items alone. If nothing was removed the briefing is returned
+ * untouched, model narrative and all.
+ */
+export function applyDismissals(
+  briefing: Briefing,
+  dismissed: ReadonlySet<string>
+): Briefing {
+  if (dismissed.size === 0) return briefing
+  const items = briefing.items.filter((item) => !dismissed.has(item.id))
+  if (items.length === briefing.items.length) return briefing
+
+  const counts = countBriefing(items)
+  return {
+    ...briefing,
+    items,
+    counts,
+    narrative: buildFallbackNarrative(items, counts),
+    narrativeSource: "fallback",
+  }
 }
 
 async function readAgentRow(email: string): Promise<AgentRow | null> {
@@ -177,11 +224,17 @@ export async function buildBriefing(
     }
   }
 
+  // Read once and apply on both paths below: the cache holds the complete
+  // briefing, the agent sees it minus whatever they already handled.
+  const dismissed = await getDismissedIds(row.id, nowMs).catch(() => new Set<string>())
+
   if (!opts.force) {
     const cached = readCache(row, nowMs)
     if (cached) {
-      console.log(`[briefing] cache hit agent=${row.id} items=${cached.items.length}`)
-      return cached
+      console.log(
+        `[briefing] cache hit agent=${row.id} items=${cached.items.length} dismissed=${dismissed.size}`
+      )
+      return applyDismissals(cached, dismissed)
     }
   }
 
@@ -270,9 +323,10 @@ export async function buildBriefing(
 
   // IDs and counts only — never a title, a body or a customer name.
   console.log(
-    `[briefing] built agent=${row.id} items=${items.length} now=${counts.now} drafted=${counts.drafted} researched=${counts.researched} locked=${counts.locked} narrative=${narrativeSource}`
+    `[briefing] built agent=${row.id} items=${items.length} now=${counts.now} drafted=${counts.drafted} researched=${counts.researched} locked=${counts.locked} dismissed=${dismissed.size} narrative=${narrativeSource}`
   )
 
+  // Cache the complete briefing, hand back the filtered one.
   await writeCache(email, briefing).catch(() => {})
-  return briefing
+  return applyDismissals(briefing, dismissed)
 }

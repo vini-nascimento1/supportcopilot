@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-09-01-h",
+    date: "2026-09-01",
+    title: "Dismiss what you have already handled on Home",
+    description:
+      "Home now remembers what you are done with. Swipe a row left on your phone, or hover it on a laptop and hit the X, and it goes — with an Undo in the corner for a few seconds if you change your mind. Clear all empties the whole \"Needs you now\" list in one go. Acting on something clears it too: send or reject a draft, send a Slack answer, or open the ticket, thread or email at the source, and Home takes it off your list. The counts at the top update as you go. Home also looks back further now — up to a week — so after a weekend or a few days off you get everything you missed in one read instead of just yesterday.",
+  },
+  {
     id: "seed-2026-09-01-g",
     date: "2026-09-01",
     title: "Calmer status labels on Home and in the Queue",

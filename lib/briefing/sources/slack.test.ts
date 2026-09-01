@@ -7,6 +7,15 @@ vi.mock("@/lib/slack", () => ({
   searchMentions: vi.fn(),
 }))
 vi.mock("@/lib/supabase-admin", () => ({ getSupabaseAdminClient: vi.fn() }))
+// research.ts is imported below only for selectResearchTargets, which is pure;
+// its retrieval/model dependencies are stubbed so nothing reaches the network.
+vi.mock("@/lib/retrieval/search", () => ({ searchKnowledge: vi.fn() }))
+vi.mock("@/lib/notion-retrieval-server", () => ({ retrieveNotionSnippets: vi.fn() }))
+vi.mock("@/lib/playbooks", () => ({ getPlaybooksDashboardData: vi.fn() }))
+vi.mock("@/lib/draft-ai", () => ({
+  streamChatCompletion: vi.fn(),
+  getAuxDraftModel: () => "test-model",
+}))
 
 import {
   getAgentUserGroups,
@@ -16,7 +25,14 @@ import {
   type SlackBriefingMessage,
 } from "@/lib/slack"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
-import { collectSlackItems, mentionReason, resolveSlackUserId, toSlackItem } from "./slack"
+import {
+  collectSlackItems,
+  extractTicketTitle,
+  mentionReason,
+  resolveSlackUserId,
+  toSlackItem,
+} from "./slack"
+import { selectResearchTargets } from "../research"
 
 const NOW = Date.parse("2026-09-01T12:00:00.000Z")
 const USER = "U0AGENT"
@@ -90,6 +106,100 @@ describe("toSlackItem", () => {
   it("builds a permalink when Slack did not return one", () => {
     const item = toSlackItem(message({ permalink: "" }), "dm", NOW)
     expect(item.deepLink).toBe("https://slack.com/archives/D123/p1788000000000100")
+  })
+})
+
+describe("toSlackItem — workflow and bot posts", () => {
+  const RAISE = message({
+    channelId: "C77",
+    channelName: "payout-issues",
+    userId: "B0RAISE",
+    userName: "Raise",
+    isBot: true,
+    botName: "Raise",
+    text:
+      "A new Payout Issue ticket has been created and assigned to you: *Ticket Title* Creator cannot withdraw to MassPay *Creator Email Address* someone@example.com *Priority* High",
+  })
+
+  it("words a raised ticket as an event, not as a person mentioning you", () => {
+    const item = toSlackItem(RAISE, "mention", NOW)
+
+    expect(item.title).toBe("New ticket raised in #payout-issues")
+    expect(item.context).toBe("Creator cannot withdraw to MassPay")
+    // "assigned to you" is what makes a workflow post personal.
+    expect(item.urgency).toBe("now")
+    // Replying to a workflow bot is never right, so there is nothing but open.
+    expect(item.actions).toEqual(["open"])
+  })
+
+  it("names any other bot plainly and stays in the calm band", () => {
+    const item = toSlackItem(
+      message({
+        channelId: "C77",
+        channelName: "deploys",
+        isBot: true,
+        botName: "Deploybot",
+        userName: "Deploybot",
+        text: "build 4821 finished",
+      }),
+      "mention",
+      NOW
+    )
+
+    expect(item.title).toBe("Deploybot posted in #deploys")
+    expect(item.context).toBe("build 4821 finished")
+    expect(item.urgency).toBe("today")
+    expect(item.actions).toEqual(["open"])
+  })
+
+  it("falls back to the sanitized text when no ticket title can be read", () => {
+    const item = toSlackItem(
+      message({
+        channelId: "C77",
+        channelName: "payout-issues",
+        isBot: true,
+        botName: "Raise",
+        text: "A new ticket has been created",
+      }),
+      "mention",
+      NOW
+    )
+    expect(item.title).toBe("New ticket raised in #payout-issues")
+    expect(item.context).toBe("A new ticket has been created")
+  })
+
+  it("never sends a workflow post to the research pass", () => {
+    const human = message({ channelId: "C9", ts: "1788000200.000300", text: "can you check this?" })
+    const contexts = new Map([
+      [
+        "bot",
+        { item: toSlackItem(RAISE, "mention", NOW), message: RAISE, reason: "mention" as const },
+      ],
+      [
+        "human",
+        { item: toSlackItem(human, "mention", NOW), message: human, reason: "mention" as const },
+      ],
+    ])
+
+    expect(selectResearchTargets(contexts).map((c) => c.message.userName)).toEqual(["Grace Hopper"])
+  })
+})
+
+describe("extractTicketTitle", () => {
+  it("stops at the next field label", () => {
+    expect(
+      extractTicketTitle("… assigned to you: Ticket Title Payout stuck Creator Email Address a@b.c")
+    ).toBe("Payout stuck")
+  })
+
+  it("stops at a line break when the workflow uses lines", () => {
+    expect(extractTicketTitle("*Ticket Title*\nPayout stuck\n*Priority*\nHigh")).toBe("Payout stuck")
+  })
+
+  it("returns null rather than guessing", () => {
+    expect(extractTicketTitle("a new ticket landed")).toBeNull()
+    expect(extractTicketTitle("Ticket Title")).toBeNull()
+    expect(extractTicketTitle("Ticket Title: ab Priority high")).toBeNull()
   })
 })
 

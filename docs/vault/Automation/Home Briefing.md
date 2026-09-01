@@ -36,9 +36,11 @@ GET /api/briefing  (session required; email comes from the cookie, never the req
         ▼
 buildBriefing(email)
         │
-        ├─ read `agents` row ── fresh briefing_cache (< 5 min)? ──▶ return it
+        ├─ read `agents` row + briefing_dismissals ids
         │
-        ├─ since = agents.last_seen_at, floored at 8h and capped at 24h
+        ├─ fresh briefing_cache (< 5 min)? ──▶ applyDismissals ──▶ return it
+        │
+        ├─ since = agents.last_seen_at, floored at 24h and capped at 7 days
         │
         ├─ 4 sources in parallel, each in its own try/catch ──▶ SourceStatus
         │     ├─ sources/intercom.ts   getNonReadAssignedConversations + getPendingSuggestionsForAgent
@@ -52,7 +54,9 @@ buildBriefing(email)
         │
         ├─ narrative.ts  kinds/titles/whenLabels/counts ONLY ──▶ 1 model call, else deterministic fallback
         │
-        └─ write agents.briefing_cache / briefing_cached_at ──▶ Briefing (JSON)
+        ├─ write agents.briefing_cache / briefing_cached_at (COMPLETE briefing)
+        │
+        └─ applyDismissals ──▶ Briefing (JSON)
 ```
 
 ## Sources
@@ -90,6 +94,32 @@ messages are dropped. Thread replies to the agent's own messages (`slack_thread_
 A personal mention or a DM is urgency `now`; a **user-group** mention is `today` — anyone on the
 group can take it, so it must not shout as loudly as a direct ask.
 
+**Workflow and bot posts are events, not people.** A Slack workflow ("Raise" in `#payout-issues`)
+posts *"A new Payout Issue ticket has been created and assigned to you: Ticket Title …"*. Rendering
+that as "Raise mentioned you" — and then researching an answer to send back to it — was wrong twice
+over. `lib/slack.ts::searchMentions` now flags these on the message (`isBot`, `botName`) from the
+`search.messages` match: a `bot_id`, `subtype === "bot_message"`, or the shape Slack's own docs
+show for an app post (empty `user`, a `username` / `bot_profile.name` carrying the app name). A
+flagged message gets:
+
+- title `New ticket raised in #channel` when the bot name matches `/raise/i` or the text says a
+  ticket was created, otherwise `${botName} posted in #channel`;
+- context = the ticket title, read conservatively out of the text between "Ticket Title" and the
+  next field label ("Creator Email Address", "Priority", …) or the next line break; if neither
+  boundary is there, the sanitized text as before;
+- urgency `now` only when the post says "assigned to you", else `today`;
+- `actions: ["open"]` and **no research pass** — `research.ts::selectResearchTargets` drops bot
+  messages before the question heuristic, so a workflow never gets a "Send in Slack" answer.
+
+`getUnreadDms` cannot produce a bot item: it already drops anything carrying a `subtype` (which
+includes `bot_message`) or lacking a real `user`.
+
+Caps are unchanged by the longer window: `search.messages` is one page of `count=40` per query
+(`<@you>` plus one per user group) and `conversations.history` is `limit=20` per DM channel over at
+most 40 channels, then `MAX_SLACK_ITEMS = 10` overall. A 7-day window therefore costs the same
+number of requests as a 24h one — it just returns older messages inside the same fixed pages, and a
+very busy week can be truncated to the newest 40 matches per query.
+
 Needs `agents.slack_user_id`, written by the OAuth callback from `authed_user.id`. Connections made
 before that column existed resolve it lazily via `auth.test` and persist it. See
 [[Slack Integration]] for the token model; the briefing adds the `usergroups:read` user scope.
@@ -103,6 +133,9 @@ phrase ("please", "confirm", "by EOD") makes it an action; everything else is FY
 **Nothing from email reaches a model in v1.** `prepared` is a deterministic `summary` built from the
 subject and Gmail's own snippet. See [[Gmail Integration]].
 
+The thread list is a single page (`maxResults=20`) sliced to `MAX_EMAIL_ITEMS = 8`, so a 7-day
+window is the same one request as a 24h one.
+
 ### Calendar — `calendar_event`
 
 Today's events from the agent's primary calendar (`lib/gcal.ts::getCalendarEvents("today", …)`).
@@ -115,10 +148,12 @@ Finished events are dropped. An event starting inside the next hour is urgency `
 
 1. the item is a `slack_dm` or `slack_mention` (never a customer ticket — those have their own
    verifier and send lock);
-2. the text reads as a question to the agent (`readsAsQuestion`: a question mark, an interrogative
+2. the message came from a person, not a workflow or app (`!message.isBot`) — a ticket-raising bot
+   trips the question heuristic below but must never be replied to;
+3. the text reads as a question to the agent (`readsAsQuestion`: a question mark, an interrogative
    opener, or an ask phrase like "can you" / "do we" / "should we");
-3. retrieval actually returned something citable — with no sources, the model is never called;
-4. fewer than 3 items have been researched this briefing.
+4. retrieval actually returned something citable — with no sources, the model is never called;
+5. fewer than 3 items have been researched this briefing.
 
 Grounding reuses the same helpers the AI chat's `search_knowledge` / `search_playbooks` tools call
 (`lib/retrieval/search.ts::searchKnowledge`, `lib/notion-retrieval-server.ts`, `lib/playbooks.ts`) —
@@ -145,7 +180,72 @@ from counts alone. `narrativeSource` tells the UI which one it got.
 - `agents.last_seen_at` is **read** by the build for `since` and **written** by the Home page via
   `markHomeSeen(email)`. If the build moved that clock it would consume its own window and every
   later digest would come back empty.
-- `since` is capped at 24 hours, so an agent back from two weeks off gets a briefing, not an archive, and floored at 8 hours (`MIN_LOOKBACK_MS`) so re-opening Home never empties the digests: an unhandled mention from two hours ago is still missed.
+- `since` is floored at **24 hours** (`MIN_LOOKBACK_MS`) and capped at **7 days**
+  (`MAX_LOOKBACK_MS`); a first-ever visit gets 24 hours. Home is meant to work as a wrap-up after a
+  weekend or a few days off, so a Monday morning covers Friday. Beyond a week it would be an
+  archive, not a briefing.
+- The floor used to be 8 hours, purely so that stamping `last_seen_at` on every visit could not
+  empty the next window. Dismissals now carry the "already handled" state, so re-showing yesterday's
+  mention costs nothing — if the agent dealt with it, it is filtered out.
+
+## Dismissals — "I have already handled this"
+
+The briefing is rebuilt from live sources, so without per-item state anything the agent handled
+outside the app would keep coming back. `briefing_dismissals` (see
+[[Database Schema Reference]]) holds one `(agent_id, item_id)` row per finished item and nothing
+else — no title, no body, no counterparty.
+
+**Applied at read time.** `buildBriefing` reads the ids once and calls `applyDismissals` on both the
+cache-hit path and the freshly-built one, *after* `writeCache`. So the cached copy stays complete
+(which is what makes Undo instant) while the agent sees it minus what they finished, and a dismissal
+takes effect on the very next load rather than waiting out the 5-minute TTL. Both callers —
+`components/home/data.ts::getBriefing` and `GET /api/briefing` — go through `buildBriefing`, so
+neither can skip the filter.
+
+**Narrative rule.** The model narrative describes a specific set of items, so the moment one is
+filtered out it can no longer be trusted to agree with the list or the hero tiles ("3 replies are
+drafted" over a list of one), and re-running the model on every load would defeat the cache. If
+anything was removed, `applyDismissals` recomputes `counts` from the survivors AND swaps the
+narrative for `buildFallbackNarrative`, setting `narrativeSource: "fallback"`. If nothing was
+removed the briefing is returned untouched, model narrative and all. `buildFallbackNarrative` lives
+in `lib/briefing/narrative-fallback.ts` (no `server-only` import) precisely so the client can build
+the identical sentence after a client-side dismissal.
+
+### API
+
+`app/api/briefing/dismiss/route.ts`, session-scoped exactly like `GET /api/briefing` — the agent
+comes from the session cookie, never the request, so a caller can only change their own briefing.
+
+| | Request | Success |
+|---|---|---|
+| `POST` | `{ "ids": ["intercom:123", "slack:C0A:1788…"] }` | `200 { "dismissed": 2, "ids": [...] }` |
+| `DELETE` | same body | `200 { "restored": 2, "ids": [...] }` |
+
+Validation (`parseItemIds`, pure and unit-tested): an array of 1–200 entries, each a string of at
+most 200 chars matching `/^(intercom|slack|gmail|calendar):/`, deduplicated. Anything else is
+`400 { error }`; no session is `401`; no agent row is `404`. Rows older than 14 days are pruned
+opportunistically inside `getDismissedIds`, best effort — a failed prune never reaches the caller.
+
+### What counts as a dismissal
+
+- the **X** on a "Needs you now" row (pointer devices, shown on hover and keyboard focus);
+- a **left swipe** on the same row under 768px — pointer events on the row wrapper, committed past
+  35% of the row width or on a fast flick, spring-back otherwise. The horizontal gesture only starts
+  once `|dx| > |dy|` and `dx < -10px`, so vertical scrolling keeps working, and `prefers-reduced-motion`
+  turns the transitions off;
+- **Clear all** in the section header, one POST for every visible row;
+- **acting on the item**: approving/sending or rejecting a draft, sending a Slack answer, or opening
+  a deep link ("Open it", "Open thread", "Reply in Gmail", "Open case"). Opening in a new tab *and*
+  dismissing is intended — acting on something is reading it. The locked "Check in fadmin" /
+  "Check on desktop" links are the exception: they are a step toward sending, not the end of the
+  item, so they leave the row in place.
+
+Every one of these shows a toast with an **Undo** for ~5 seconds, which `DELETE`s the same ids.
+
+`briefing-board.tsx` owns the session's dismissed set, so the hero tiles and the section header
+recount immediately (`countBriefing` is pure and runs on the client). The right-hand digests and the
+day timeline are server-rendered; they pick up a dismissal on the next load, from the same
+server-side filter.
 
 ## Security properties
 
@@ -158,7 +258,9 @@ from counts alone. `narrativeSource` tells the UI which one it got.
   and control characters stripped, length capped.
 - Nothing sends or approves without a click, and a locked (`needs_check`) draft only sends through the locked `SendConfirmDialog`, where the agent asserts the fadmin check (that sets `needsCheckConfirmed`); it otherwise stays locked
   everywhere.
-- Logs carry agent ids and counts only, never message text.
+- `briefing_dismissals` stores an agent id and an item id, nothing else — no title, no body, no
+  customer name or email — and the dismiss route accepts nothing else either. Logs carry agent ids
+  and counts only, never message text.
 - Sign-in is unchanged Google Workspace SSO — see [[Auth and Session]].
 
 ## Database columns
@@ -173,20 +275,37 @@ alter table agents
   add column if not exists briefing_cached_at timestamptz;
 ```
 
+Plus one table, RLS on and service-role only like the rest of `lib/briefing`:
+
+```sql
+create table if not exists public.briefing_dismissals (
+  agent_id uuid references agents(id) on delete cascade,
+  item_id text,
+  dismissed_at timestamptz default now(),
+  primary key (agent_id, item_id)
+);
+```
+
 ## Key files
 
 - `lib/briefing/types.ts` — the shared contract (`AttentionItem`, `Briefing`, `isNeedsYouNow`, `countBriefing`)
-- `lib/briefing/build.ts` — `buildBriefing(email)`, ranking, cache, `markHomeSeen(email)`
+- `lib/briefing/build.ts` — `buildBriefing(email)`, ranking, cache, `computeSince`, `applyDismissals`, `markHomeSeen(email)`
+- `lib/briefing/dismissals.ts` — `getDismissedIds`, `dismissItems`, `undismissItems`, `parseItemIds`, 14-day prune
 - `lib/briefing/format.ts` — `whenLabel` helpers, sanitizers, `deriveLockReason`
 - `lib/briefing/sources/intercom.ts` — ticket items + queue-draft reconciliation
 - `lib/briefing/sources/slack.ts` — DM / mention items, `slack_user_id` resolution
 - `lib/briefing/sources/gmail.ts` — unread-mail classification and summaries
 - `lib/briefing/sources/calendar.ts` — today's events
 - `lib/briefing/research.ts` — the Slack-question research pass
-- `lib/briefing/narrative.ts` — hero line + deterministic fallback
+- `lib/briefing/narrative.ts` — hero line, model call + acceptance check
+- `lib/briefing/narrative-fallback.ts` — `buildFallbackNarrative`, pure, shared by server and client
 - `app/api/briefing/route.ts` — `GET`, session required
 - `app/api/briefing/refresh/route.ts` — `POST`, bypasses the cache
+- `app/api/briefing/dismiss/route.ts` — `POST` dismiss / `DELETE` undo, session required
 - `components/home/*` — the Home UI (hero, attention list, prepared card, Slack/email digests, day timeline)
+- `components/home/briefing-board.tsx` — owns the open row and the session's dismissed set; recounts the hero
+- `components/home/use-dismissals.ts` — optimistic dismiss/undo against the API, with the toast
+- `components/home/attention-row.tsx` — the X button and the mobile swipe gesture
 - `components/ui/status-tag.tsx` — `Tag`, `StatusDot`, `StatusTag`: the neutral tag + small colour dot used for every state label on Home (no tinted text pills)
 - `lib/slack.ts` — `getSlackUserId`, `getAgentUserGroups`, `searchMentions`, `getUnreadDms`
 - `app/api/auth/slack/route.ts` — adds the `usergroups:read` user scope

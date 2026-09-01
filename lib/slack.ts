@@ -164,9 +164,9 @@ function slackUserColor(userId: string): string {
 async function resolveSlackUsers(
   token: string,
   userIds: string[]
-): Promise<Record<string, { name: string; color: string }>> {
+): Promise<Record<string, { name: string; color: string; isBot: boolean }>> {
   const unique = [...new Set(userIds)].slice(0, 30) // cap to avoid rate limits
-  const result: Record<string, { name: string; color: string }> = {}
+  const result: Record<string, { name: string; color: string; isBot: boolean }> = {}
   await Promise.all(
     unique.map(async (uid) => {
       try {
@@ -175,14 +175,25 @@ async function resolveSlackUsers(
         })
         const data = (await res.json()) as {
           ok: boolean
-          user?: { profile?: { display_name?: string; real_name?: string } }
+          user?: {
+            is_bot?: boolean
+            is_app_user?: boolean
+            is_workflow_bot?: boolean
+            profile?: { display_name?: string; real_name?: string }
+          }
         }
         if (data.ok && data.user?.profile) {
           const name =
             data.user.profile.display_name?.trim() ||
             data.user.profile.real_name?.trim() ||
             uid
-          result[uid] = { name, color: slackUserColor(uid) }
+          // Workflow Builder and app posts arrive in search results with a
+          // real-looking bot user id, so users.info is where "this is a bot"
+          // actually shows up (is_bot / is_app_user / is_workflow_bot).
+          const isBot = Boolean(
+            data.user.is_bot || data.user.is_app_user || data.user.is_workflow_bot
+          )
+          result[uid] = { name, color: slackUserColor(uid), isBot }
         }
       } catch {
         /* ignore */
@@ -744,6 +755,16 @@ export type SlackBriefingMessage = {
    * markup is humanized, since the id no longer appears afterwards.
    */
   mentionsSelf?: boolean
+  /**
+   * The post came from an app, a workflow or an incoming webhook, not a
+   * person. search.messages marks these with bot_id / subtype "bot_message",
+   * or (as in Slack's own documented example) an empty `user` plus a
+   * `username`. The briefing words these as events, never as "X mentioned
+   * you", and never drafts a reply to them.
+   */
+  isBot?: boolean
+  /** Display name of that app/workflow ("Raise"), when Slack gave us one. */
+  botName?: string
 }
 
 export type SlackUserGroup = { id: string; handle: string; name: string }
@@ -822,6 +843,7 @@ type SearchMatch = {
   channel?: { id?: string; name?: string }
   bot_id?: string
   subtype?: string
+  bot_profile?: { name?: string }
 }
 
 async function searchOnce(token: string, query: string): Promise<SearchMatch[]> {
@@ -876,16 +898,22 @@ export async function searchMentions(
     const key = `${match.channel.id}:${match.ts}`
     if (seen.has(key)) continue
     seen.add(key)
+    // An app/workflow post: bot_id or subtype "bot_message" where Slack sends
+    // them, and otherwise the documented search-result shape for a bot — no
+    // real `user`, but a username (or bot_profile.name) carrying the app name.
+    const botName = match.bot_profile?.name || match.username || ""
+    const isBot = Boolean(match.bot_id) || match.subtype === "bot_message" || (!match.user && Boolean(botName))
     out.push({
       channelId: match.channel.id,
       channelName: match.channel.name ?? match.channel.id,
       ts: match.ts,
-      userId: match.user ?? match.bot_id ?? "unknown",
-      userName: match.username ?? match.user ?? "Someone",
+      userId: match.user || match.bot_id || "unknown",
+      userName: (isBot ? botName : match.username || match.user) || "Someone",
       text: match.text ?? "",
       tsSeconds,
       permalink: match.permalink ?? "",
       mentionsSelf: (match.text ?? "").includes(`<@${opts.userId}>`),
+      ...(isBot ? { isBot: true, botName: botName || "A workflow" } : {}),
     })
   }
 
@@ -896,7 +924,17 @@ export async function searchMentions(
   const names = await resolveSlackUsers(token, mentioned.filter((id) => id.startsWith("U") || id.startsWith("W")))
   const nameMap = Object.fromEntries(Object.entries(names).map(([id, v]) => [id, v.name]))
   for (const m of out) {
-    m.userName = nameMap[m.userId] ?? m.userName
+    // A bot keeps its app name; only human authors get looked up. A workflow
+    // (e.g. "Raise") posts under a bot *user* id that search.messages reports
+    // like any human, so users.info's is_bot flag is the reliable tell.
+    const resolved = names[m.userId]
+    if (!m.isBot && resolved?.isBot) {
+      m.isBot = true
+      m.botName = resolved.name
+      m.userName = resolved.name
+    } else if (!m.isBot) {
+      m.userName = nameMap[m.userId] ?? m.userName
+    }
     m.text = humanizeSlackText(m.text, { selfId: opts.userId, names: nameMap })
   }
   return out.sort((a, b) => b.tsSeconds - a.tsSeconds)
@@ -979,6 +1017,10 @@ async function fetchHistorySince(
  * `users.conversations` (types im,mpim) for the channel list, then
  * `conversations.history` with `oldest` per channel. Joins/leaves and the
  * agent's own messages are ignored.
+ *
+ * Bot and workflow posts cannot reach the briefing through here: the loop below
+ * drops anything carrying a `subtype` (which includes "bot_message") or lacking
+ * a real `user`, so `isBot` is only ever set by searchMentions above.
  */
 export async function getUnreadDms(
   token: string,

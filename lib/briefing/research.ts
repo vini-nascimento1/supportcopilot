@@ -56,6 +56,11 @@ export function selectResearchTargets(
 ): SlackItemContext[] {
   return [...contexts.values()]
     .filter((c) => c.item.kind === "slack_dm" || c.item.kind === "slack_mention")
+    // A workflow/app post is an event, not a colleague. "A new Payout Issue
+    // ticket has been created…" reads as a question to the heuristic below, but
+    // drafting a Slack reply to a bot is never the right move — the work is in
+    // the ticket it raised.
+    .filter((c) => !c.message.isBot)
     .filter((c) => readsAsQuestion(c.message.text))
     .sort((a, b) => b.message.tsSeconds - a.message.tsSeconds)
     .slice(0, limit)

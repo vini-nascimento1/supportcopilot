@@ -3,6 +3,11 @@ import "server-only"
 import { streamChatCompletion, getAuxDraftModel } from "@/lib/draft-ai"
 import type { AttentionItem, BriefingCounts } from "@/lib/briefing/types"
 import { MAX_TITLE_CHARS, sanitizeLine } from "@/lib/briefing/format"
+import { buildFallbackNarrative } from "@/lib/briefing/narrative-fallback"
+
+// The deterministic sentence lives in narrative-fallback.ts (no server-only
+// import) so the client can build the identical line after a dismissal.
+export { buildFallbackNarrative }
 
 // The hero line: 1-3 sentences in the copilot's voice, over the SHAPE of the
 // briefing only.
@@ -38,72 +43,6 @@ export function buildNarrativeModelInput(items: AttentionItem[]): NarrativeItemV
     title: sanitizeLine(item.title, MAX_TITLE_CHARS),
     whenLabel: sanitizeLine(item.whenLabel, 32),
   }))
-}
-
-const KIND_NOUNS: Record<AttentionItem["kind"], [string, string]> = {
-  ticket_awaiting_reply: ["ticket waiting on a reply", "tickets waiting on a reply"],
-  slack_mention: ["Slack mention", "Slack mentions"],
-  slack_dm: ["Slack DM", "Slack DMs"],
-  slack_thread_reply: ["thread reply", "thread replies"],
-  email_action: ["email that needs you", "emails that need you"],
-  email_fyi: ["email to skim", "emails to skim"],
-  calendar_event: ["thing on your calendar", "things on your calendar"],
-}
-
-function plural(kind: AttentionItem["kind"], n: number): string {
-  const [one, many] = KIND_NOUNS[kind]
-  return `${n} ${n === 1 ? one : many}`
-}
-
-function joinList(parts: string[]): string {
-  if (parts.length === 0) return ""
-  if (parts.length === 1) return parts[0]
-  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`
-}
-
-/**
- * Deterministic narrative from counts alone. This is the fallback AND the
- * safety net: it is what the agent sees whenever the model is unavailable,
- * slow, or returns something we won't accept.
- */
-export function buildFallbackNarrative(
-  items: AttentionItem[],
-  counts: BriefingCounts
-): string {
-  if (items.length === 0) {
-    return "Nothing needs you right now. Your queue, Slack and inbox are all clear."
-  }
-
-  const byKind = new Map<AttentionItem["kind"], number>()
-  for (const item of items) byKind.set(item.kind, (byKind.get(item.kind) ?? 0) + 1)
-
-  const order: AttentionItem["kind"][] = [
-    "ticket_awaiting_reply",
-    "slack_dm",
-    "slack_mention",
-    "email_action",
-    "calendar_event",
-    "email_fyi",
-    "slack_thread_reply",
-  ]
-  const parts = order
-    .filter((kind) => (byKind.get(kind) ?? 0) > 0)
-    .slice(0, 3)
-    .map((kind) => plural(kind, byKind.get(kind) as number))
-
-  const opener = `While you were away, ${joinList(parts)} came in.`
-
-  const prepared: string[] = []
-  if (counts.drafted > 0) prepared.push(`${counts.drafted} repl${counts.drafted === 1 ? "y is" : "ies are"} drafted`)
-  if (counts.researched > 0) prepared.push(`${counts.researched} answer${counts.researched === 1 ? " is" : "s are"} researched`)
-  if (prepared.length === 0) return opener
-
-  const locked =
-    counts.locked > 0
-      ? ` ${counts.locked} need${counts.locked === 1 ? "s" : ""} a fadmin check before it can go out.`
-      : ""
-
-  return `${opener} ${joinList(prepared)} and waiting for your review.${locked}`
 }
 
 const NARRATIVE_SYSTEM_PROMPT = `You write the one-paragraph opening line of a support agent's daily briefing, in the voice of their copilot.
