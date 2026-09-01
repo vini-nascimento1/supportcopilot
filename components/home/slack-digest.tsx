@@ -1,5 +1,5 @@
 import { SourceEmptyState } from "@/components/home/source-empty-state"
-import { Badge } from "@/components/ui/badge"
+import { StatusDot, StatusTag } from "@/components/ui/status-tag"
 import type { AttentionItem, SourceStatus } from "@/lib/briefing/types"
 
 // "Slack you missed": only the things addressed to the agent. Whole channels
@@ -49,13 +49,12 @@ export function SlackDigest({
             </span>
           </span>
           {item.prepared ? (
-            <Badge className="shrink-0 bg-emerald-500/12 text-emerald-700 dark:text-emerald-400">
-              researched
-            </Badge>
+            <StatusTag tone="ok">Researched</StatusTag>
           ) : (
-            <Badge variant="outline" className="shrink-0">
-              new
-            </Badge>
+            <>
+              <StatusDot />
+              <span className="sr-only">New</span>
+            </>
           )}
         </a>
       ))}

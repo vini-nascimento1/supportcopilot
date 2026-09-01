@@ -1,8 +1,15 @@
 "use client"
 
-import { ChevronRightIcon, SparklesIcon } from "lucide-react"
+import {
+  CalendarIcon,
+  ChevronRightIcon,
+  MailIcon,
+  MessageSquareIcon,
+  SparklesIcon,
+  TicketIcon,
+} from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/ui/status-tag"
 import { PreparedCard } from "@/components/home/prepared-card"
 import { cn } from "@/lib/utils"
 import type { AttentionItem, AttentionKind } from "@/lib/briefing/types"
@@ -23,6 +30,16 @@ const KIND_CHIP: Record<AttentionKind, string> = {
 
 export function kindChipLabel(kind: AttentionKind): string {
   return KIND_CHIP[kind] ?? "Item"
+}
+
+const KIND_ICON: Record<AttentionKind, React.ComponentType<{ className?: string }>> = {
+  ticket_awaiting_reply: TicketIcon,
+  slack_mention: MessageSquareIcon,
+  slack_dm: MessageSquareIcon,
+  slack_thread_reply: MessageSquareIcon,
+  email_action: MailIcon,
+  email_fyi: MailIcon,
+  calendar_event: CalendarIcon,
 }
 
 /** The "what I did" line under the context. */
@@ -60,6 +77,7 @@ export function AttentionRow({
 }) {
   const panelId = `home-row-${item.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`
   const urgent = item.urgency === "now"
+  const KindIcon = KIND_ICON[item.kind] ?? SparklesIcon
 
   return (
     <div
@@ -81,20 +99,16 @@ export function AttentionRow({
             aria-hidden
             className={cn(
               "-ml-px w-[3px] shrink-0 self-stretch rounded-r-[3px]",
-              urgent ? "bg-destructive" : item.urgency === "today" ? "bg-amber-500" : "bg-border",
+              urgent ? "bg-destructive" : "bg-border",
             )}
           />
           <span className="min-w-0 flex-1">
             <span className="mb-1 flex items-center gap-2">
-              <Badge variant="outline" className="font-semibold">
+              <Tag>
+                <KindIcon />
                 {kindChipLabel(item.kind)}
-              </Badge>
-              <span
-                className={cn(
-                  "ml-auto shrink-0 font-mono text-[11px] tabular-nums",
-                  urgent ? "text-destructive" : "text-muted-foreground",
-                )}
-              >
+              </Tag>
+              <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">
                 {item.whenLabel}
               </span>
             </span>

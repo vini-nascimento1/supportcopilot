@@ -1,5 +1,5 @@
 import { SourceEmptyState } from "@/components/home/source-empty-state"
-import { Badge } from "@/components/ui/badge"
+import { StatusDot, StatusTag } from "@/components/ui/status-tag"
 import type { AttentionItem, SourceStatus } from "@/lib/briefing/types"
 
 // "Worth your time in email": the unread threads that ask something of the
@@ -52,13 +52,12 @@ export function EmailDigest({
             </span>
           </span>
           {item.kind === "email_action" ? (
-            <Badge className="shrink-0 bg-amber-500/12 text-amber-700 dark:text-amber-400">
-              action
-            </Badge>
+            <StatusTag tone="warn">Decide</StatusTag>
           ) : (
-            <Badge variant="outline" className="shrink-0">
-              fyi
-            </Badge>
+            <>
+              <StatusDot />
+              <span className="sr-only">For your information</span>
+            </>
           )}
         </a>
       ))}

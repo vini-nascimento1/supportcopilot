@@ -186,6 +186,8 @@ alter table agents
 - `lib/briefing/narrative.ts` — hero line + deterministic fallback
 - `app/api/briefing/route.ts` — `GET`, session required
 - `app/api/briefing/refresh/route.ts` — `POST`, bypasses the cache
+- `components/home/*` — the Home UI (hero, attention list, prepared card, Slack/email digests, day timeline)
+- `components/ui/status-tag.tsx` — `Tag`, `StatusDot`, `StatusTag`: the neutral tag + small colour dot used for every state label on Home (no tinted text pills)
 - `lib/slack.ts` — `getSlackUserId`, `getAgentUserGroups`, `searchMentions`, `getUnreadDms`
 - `app/api/auth/slack/route.ts` — adds the `usergroups:read` user scope
 - `app/api/auth/slack/callback/route.ts` — persists `authed_user.id` into `agents.slack_user_id`

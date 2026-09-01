@@ -72,7 +72,7 @@ export function SourceEmptyState({
     return (
       <div className="rounded-lg border border-dashed px-3.5 py-3 text-[12.5px] text-muted-foreground">
         <p className="flex items-center gap-2">
-          <TriangleAlertIcon className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <TriangleAlertIcon className="size-3.5 shrink-0 text-foreground" />
           {status.message}
         </p>
       </div>

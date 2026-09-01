@@ -7,12 +7,12 @@ import {
   ExternalLinkIcon,
   Loader2Icon,
   PencilIcon,
+  LockIcon,
   SendIcon,
-  ShieldAlertIcon,
   SparklesIcon,
 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
+import { StatusTag, Tag } from "@/components/ui/status-tag"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { SendConfirmDialog } from "@/components/send-confirm-dialog"
@@ -195,12 +195,10 @@ export function PreparedCard({
     return (
       <div className="bg-muted px-3.5 py-3">
         {locked && (
-          <div className="mb-2.5 flex items-start gap-2.5 rounded-md bg-amber-500/12 px-3 py-2.5 text-[12.5px] leading-snug">
-            <ShieldAlertIcon className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="mb-2.5 flex items-start gap-2.5 rounded-md border bg-card px-3 py-2.5 text-[12.5px] leading-snug text-muted-foreground">
+            <LockIcon className="mt-0.5 size-3.5 shrink-0 text-foreground" />
             <div>
-              <b className="block font-semibold text-amber-700 dark:text-amber-400">
-                Verify in fadmin before sending
-              </b>
+              <b className="block font-semibold text-foreground">Verify in fadmin before sending</b>
               {prepared.lockReason ??
                 "This one is prepared, but sending stays locked until you check it in fadmin. fadmin only opens in the desktop app."}
             </div>
@@ -209,15 +207,9 @@ export function PreparedCard({
 
         <PreparedLabel>
           Prepared reply
-          {prepared.band === "ready" && (
-            <Badge className="bg-emerald-500/12 text-emerald-700 dark:text-emerald-400">
-              Ready to send
-            </Badge>
-          )}
-          {locked && (
-            <Badge className="bg-amber-500/12 text-amber-700 dark:text-amber-400">Needs check</Badge>
-          )}
-          {prepared.band === "low_confidence" && <Badge variant="outline">Review carefully</Badge>}
+          {prepared.band === "ready" && <StatusTag tone="ok">Ready</StatusTag>}
+          {locked && <StatusTag tone="warn">Locked</StatusTag>}
+          {prepared.band === "low_confidence" && <StatusTag>Review</StatusTag>}
         </PreparedLabel>
 
         {editing && !locked ? (
@@ -333,10 +325,9 @@ export function PreparedCard({
         <PreparedLabel>
           Prepared answer
           {prepared.sources.length > 0 && (
-            <Badge className="bg-emerald-500/12 text-emerald-700 dark:text-emerald-400">
-              Grounded · {prepared.sources.length}{" "}
-              {prepared.sources.length === 1 ? "source" : "sources"}
-            </Badge>
+            <Tag>
+              {prepared.sources.length} {prepared.sources.length === 1 ? "source" : "sources"}
+            </Tag>
           )}
         </PreparedLabel>
 
@@ -380,7 +371,10 @@ export function PreparedCard({
   // ── summary: read-only. Money decisions never get a draft. ───────────────
   return (
     <div className="bg-muted px-3.5 py-3">
-      <PreparedLabel>Summary — nothing drafted, you answer this one</PreparedLabel>
+      <PreparedLabel>
+        Summary
+        <Tag>You answer this one</Tag>
+      </PreparedLabel>
       <Body text={prepared.body} />
       <div className="mt-3">
         <Button size="sm" asChild>

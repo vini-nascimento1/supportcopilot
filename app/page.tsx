@@ -1,9 +1,9 @@
 import { Suspense } from "react"
 import { after } from "next/server"
 
-import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { StatusTag } from "@/components/ui/status-tag"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { WorkspaceLayout } from "@/components/workspace-layout"
 import { AgentNameGate } from "@/components/home/agent-name-gate"
@@ -59,13 +59,15 @@ async function StatusBadge({ briefing }: { briefing: Promise<Briefing> }) {
   const { sources } = await briefing
   const failed = sources.filter((s) => s.state === "error").length
   const live = sources.some((s) => s.state === "ok")
-  const variant = failed === sources.length ? "destructive" : live ? "secondary" : "default"
+  const tone = failed === sources.length ? "critical" : live ? (failed > 0 ? "warn" : "ok") : "neutral"
   const label = failed === sources.length ? "Error" : live ? "Live" : "Setup"
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Badge variant={variant}>{label}</Badge>
+        <StatusTag tone={tone} pulse={tone === "ok"}>
+          {label}
+        </StatusTag>
       </TooltipTrigger>
       <TooltipContent>
         {failed === sources.length
