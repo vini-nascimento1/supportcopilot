@@ -30,7 +30,9 @@
 ### O que existe e funciona
 
 - **`web/desktop/`** — shell Electron fino (sem lógica de negócio):
-  - `src/main.js` — BrowserWindow carrega o app da Vercel (`APP_URL` env override);
+  - `src/main.js` — BrowserWindow carrega o app da Vercel (`APP_URL` env override; default
+    `https://fanvuecopilot.vercel.app`, o alias de produção — o alias de deployment antigo
+    `project-z4cpw-vini-s-projects10` ficou congelado num build velho, v1.1.2 corrige);
     uma `WebContentsView` por tool card; IPC `canvas:*`; partition `persist:tools`
     (sessões de login persistem entre restarts); **UA de Chrome puro** (obrigatório:
     Google bloqueia OAuth com UA de Electron — afeta o login do próprio app E o

@@ -2,6 +2,7 @@ import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 
 import { getSignedInEmail } from "@/lib/auth"
+import { invalidateBriefingCache } from "@/lib/briefing/build"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 
 // Completes the per-agent Slack OAuth flow: exchanges the code and stores
@@ -65,6 +66,10 @@ export async function GET(request: Request) {
         ...(data.authed_user?.id ? { slack_user_id: data.authed_user.id } : {}),
       })
       .eq("email", email)
+
+    // Home caches its briefing for five minutes; without this the page keeps
+    // saying "Connect Slack" after a successful connect.
+    await invalidateBriefingCache(email).catch(() => {})
 
     return settings("slack-connected")
   } catch {

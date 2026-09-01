@@ -19,8 +19,12 @@ const {
 const path = require("node:path")
 const { autoUpdater } = require("electron-updater")
 
-const APP_URL =
-  process.env.APP_URL || "https://project-z4cpw-vini-s-projects10.vercel.app"
+// The production alias. The team-scoped deployment alias this used to point at
+// (project-z4cpw-vini-s-projects10.vercel.app) stopped following new deploys
+// and left the desktop app on a frozen build; only the production domain is
+// guaranteed to serve the latest one. Must also be listed as a redirect URL on
+// the Slack app, since /api/auth/slack builds redirect_uri from this origin.
+const APP_URL = process.env.APP_URL || "https://fanvuecopilot.vercel.app"
 const TOOLS_PARTITION = "persist:tools"
 
 // Google blocks OAuth in webviews that identify as Electron ("This browser or

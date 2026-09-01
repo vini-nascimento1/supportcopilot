@@ -222,6 +222,22 @@ async function writeCache(email: string, briefing: Briefing): Promise<void> {
 }
 
 /**
+ * Drop the cached briefing so the next Home load rebuilds it. Called when an
+ * integration is connected or disconnected: the cached copy still carries the
+ * old SourceStatus ("Connect Slack to see mentions here") for up to
+ * BRIEFING_TTL_MS otherwise, which reads as the connection having failed.
+ */
+export async function invalidateBriefingCache(email: string): Promise<void> {
+  const db = getSupabaseAdminClient()
+  if (!db) return
+  const { error } = await db
+    .from("agents")
+    .update({ briefing_cache: null, briefing_cached_at: null })
+    .eq("email", email)
+  if (error) console.warn(`[briefing] cache invalidate failed: ${error.message}`)
+}
+
+/**
  * Stamp `agents.last_seen_at`. Called by the Home page on load (workstream C),
  * never by buildBriefing — see the note at the top of this file.
  */

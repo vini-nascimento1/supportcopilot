@@ -65,6 +65,8 @@ Sidebar polling (paused when hidden/collapsed/inactive):
 
 ## Standalone /queue
 
+The Electron shell (`desktop/src/main.js`) loads the production alias `https://fanvuecopilot.vercel.app` (env `APP_URL` overrides it for local dev). Desktop builds ship via the `Build desktop shell` workflow on a `v*` tag, as a draft GitHub Release that has to be published by hand; the installed app then picks it up through `electron-updater`. v1.1.2 (2026-09-01) moved the URL off a frozen deployment alias.
+
 The Queue tab is also reachable outside the Canvas, at **`/queue`** — a plain page inside `WorkspaceLayout` so the reply queue works on a phone and on web with no Electron shell. It is the sidebar's "Queue" item and the "Queue" tab of the mobile bottom bar (`components/mobile-nav.tsx`); the Canvas item is unchanged and still desktop-only.
 
 `components/queue/queue-list.tsx` is the standalone client list. It reads the same `GET /api/reply-queue` and splits it into **Ready to send**, **Needs your check** and **On request**, plus a line counting drafts still being written. Deliberately narrower than the Canvas panel: one card at a time, tap to expand, no multi-select, no bulk bar, no stuck-draft retry — that machinery stays in `queue-panel.tsx` where the desktop workflow needs it. Canvas selection hotkeys (`lib/canvas-hotkeys.ts`) are untouched and not used here.

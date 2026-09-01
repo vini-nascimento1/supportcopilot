@@ -207,6 +207,11 @@ from counts alone. `narrativeSource` tells the UI which one it got.
 
 ## Caching and the `since` window
 
+`invalidateBriefingCache(email)` (in `build.ts`) nulls `briefing_cache` / `briefing_cached_at`. It is
+called by the Slack OAuth callback and by the Settings disconnect action, because a cached briefing
+otherwise keeps the old `SourceStatus` ("Connect Slack to see mentions here") for up to the TTL
+after the agent has just connected, which reads as a failed connection.
+
 - `agents.briefing_cache` (jsonb) + `agents.briefing_cached_at`, TTL 5 minutes.
 - Populated **only by a signed-in request**. There is no cron: no server process holds a user
   session outside a request.

@@ -16,6 +16,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { WorkspaceLayout } from "@/components/workspace-layout"
 import { getSignedInEmail } from "@/lib/auth"
+import { invalidateBriefingCache } from "@/lib/briefing/build"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getAllCaseTools } from "@/lib/case-tools-db"
 import { refreshTokenExpired } from "@/lib/notion-mcp-auth"
@@ -66,6 +67,8 @@ async function disconnectIntegration(formData: FormData) {
           : {}
     if (Object.keys(patch).length > 0) {
       await supabase.from("agents").update(patch).eq("email", email)
+      // Home's cached briefing still lists the source as connected otherwise.
+      await invalidateBriefingCache(email).catch(() => {})
     }
   }
   revalidatePath("/settings")
@@ -103,12 +106,19 @@ function IntegrationRow({
   blurb,
   connected,
   action,
+  managed,
 }: {
   icon: React.ReactNode
   name: string
   blurb: string
   connected: boolean
   action?: React.ReactNode
+  /**
+   * Shown in the action slot when there is nothing to click: who owns the
+   * connection ("Via sign-in", "Workspace"). Keeps the four rows aligned and
+   * says why this one has no Disconnect.
+   */
+  managed?: string
 }) {
   return (
     <div className="flex items-center justify-between py-4 first:pt-0 last:pb-0">
@@ -121,9 +131,12 @@ function IntegrationRow({
           <p className="text-xs text-muted-foreground">{blurb}</p>
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-[13.5rem] items-center justify-end gap-2">
         {connected ? <ConnectedBadge /> : <Badge variant="outline">Not connected</Badge>}
-        {action}
+        {action ??
+          (managed ? (
+            <span className="px-3 text-xs text-muted-foreground">{managed}</span>
+          ) : null)}
       </div>
     </div>
   )
@@ -254,6 +267,7 @@ export default async function SettingsPage({
                   name="Google"
                   blurb="Calendar · Gmail — connected automatically with your sign-in"
                   connected={Boolean(email)}
+                  managed="Via sign-in"
                   action={
                     !email ? (
                       <Button size="sm" variant="outline" asChild>
@@ -278,6 +292,7 @@ export default async function SettingsPage({
                       : "Case queue · conversations — ask your workspace admin to connect it"
                   }
                   connected={intercomConnected}
+                  managed="Workspace"
                 />
 
                 <Separator />
