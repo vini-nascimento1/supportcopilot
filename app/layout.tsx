@@ -3,11 +3,8 @@ import "@fontsource-variable/instrument-sans"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
-import { AIChat } from "@/components/ai-chat"
-import { CommandPalette } from "@/components/command-palette"
+import { SignedInOverlays } from "@/components/signed-in-overlays"
 import { UpdateBanner } from "@/components/update-banner"
-import { NotificationBell } from "@/components/notifications/notification-bell"
-import { NotificationToasts } from "@/components/notifications/notification-toasts"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SpeedInsights } from "@vercel/speed-insights/next"
@@ -36,10 +33,7 @@ export default function RootLayout({
             <Toaster />
             <SpeedInsights />
             <UpdateBanner />
-            <AIChat />
-            <CommandPalette />
-            <NotificationBell />
-            <NotificationToasts />
+            <SignedInOverlays />
           </TooltipProvider>
         </ThemeProvider>
       </body>
