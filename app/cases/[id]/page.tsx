@@ -24,6 +24,7 @@ import { PlaybookCard } from "@/components/playbook-card"
 import { getConversationDetail } from "@/lib/intercom"
 import { getTopMatches } from "@/lib/case-intelligence"
 import { getAgentProfile } from "@/lib/agent"
+import { buildAgentGreeting } from "@/lib/draft-ai"
 import {
   getPlaybooksDashboardData,
   getResponsesForPlaybookIds,
@@ -33,8 +34,13 @@ import {
 
 export const dynamic = "force-dynamic"
 
-function buildFallbackDraft(playbook: PlaybookListItem, agentName: string): ResponseItem {
-  const lines = [`Hey! 👋 Thanks for reaching out to Fanvue Support, I'm ${agentName} and I'll do my best to help! 😊`]
+// agentName here is the customer-facing name (agents.agent_name, via
+// getAgentProfile()/lib/agent-identity.ts) — never the internal display
+// name. buildAgentGreeting() already drops the "I'm X" clause when it's
+// null, which is why the generic "the support team" sentinel is passed
+// through unchanged rather than pre-empted here.
+function buildFallbackDraft(playbook: PlaybookListItem, agentName: string | null): ResponseItem {
+  const lines = [buildAgentGreeting(agentName ?? "the support team")]
 
   if (playbook.resolution) {
     const steps = parseSteps(playbook.resolution)
@@ -214,7 +220,7 @@ export default async function CasePage({
                     playbook={playbook}
                     confidence={confidence}
                     trigger={trigger}
-                    responses={responses.length > 0 ? responses : [buildFallbackDraft(playbook, agentProfile.firstName)]}
+                    responses={responses.length > 0 ? responses : [buildFallbackDraft(playbook, agentProfile.agentName ?? null)]}
                     conversationId={id}
                   />
                 )

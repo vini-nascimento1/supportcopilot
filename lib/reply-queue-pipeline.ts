@@ -1,6 +1,7 @@
 import "server-only"
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { getCustomerFacingIdentity } from "@/lib/agent-identity"
 import { getConversationDetail, searchArticles } from "@/lib/intercom"
 import { getPlaybooksDashboardData, getResponsesForPlaybookIds } from "@/lib/playbooks"
 import type { PlaybookListItem } from "@/lib/playbooks"
@@ -78,12 +79,13 @@ async function resolveOwner(adminAssigneeId: string | null): Promise<Owner> {
   return { id: (data?.id as string | undefined) ?? null, email: (data?.email as string | undefined) ?? null }
 }
 
+// Customer-facing greeting name for the draft this pipeline writes. Sourced
+// from lib/agent-identity.ts's resolver (agents.agent_name) — never
+// agents.name, which is the internal display name and must not leak into
+// customer text.
 async function getAgentFirstName(email: string | null): Promise<string> {
-  if (!email) return "the support team"
-  const db = getSupabaseAdminClient()
-  if (!db) return "the support team"
-  const { data } = await db.from("agents").select("name").eq("email", email).maybeSingle()
-  return (data?.name as string | undefined)?.split(" ")[0] ?? "the support team"
+  const { agentName } = await getCustomerFacingIdentity(email)
+  return agentName ?? "the support team"
 }
 
 // Deterministic card tooltip: why this suggestion, what grounded it, what to

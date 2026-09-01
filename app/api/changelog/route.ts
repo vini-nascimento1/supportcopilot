@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-09-01-a",
+    date: "2026-09-01",
+    title: "Your agent name is now separate from your Google name",
+    description:
+      "Replies, greetings, and quick-send emails used to greet customers with your Google account name, even if that's not what you go by, and it would quietly overwrite anything different you'd typed in Settings. There's now a separate \"Agent name (customers see this)\" field on Settings > Profile with a live preview of the greeting, so you control exactly what customers see. Your Google name stays internal, for the sidebar and teammates only. If you haven't set one yet, you'll be asked to pick a name once before your next reply goes out.",
+  },
+  {
     id: "seed-2026-08-30-c",
     date: "2026-08-30",
     title: "Drafts answer the question instead of listing what they can't check",

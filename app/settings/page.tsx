@@ -32,7 +32,7 @@ async function getAgentRow(email: string) {
   const { data } = await supabase
     .from("agents")
     .select(
-      "id, name, email, timezone, intercom_admin_id, slack_token, notion_token, notion_mcp_refresh_token, notion_mcp_refresh_expires_at, working_days"
+      "id, name, agent_name, email, timezone, intercom_admin_id, slack_token, notion_token, notion_mcp_refresh_token, notion_mcp_refresh_expires_at, working_days"
     )
     .eq("email", email)
     .maybeSingle()
@@ -41,7 +41,11 @@ async function getAgentRow(email: string) {
 
 async function disconnectIntegration(formData: FormData) {
   "use server"
-  const email = formData.get("email") as string
+  // Session-scoped: which agent's row gets modified is decided by the
+  // signed-in session, never by a value the form could be made to carry —
+  // a foreign email in the form must never be able to touch another agent's
+  // integration tokens.
+  const email = await getSignedInEmail()
   const integration = formData.get("integration") as string
 
   const supabase = getSupabaseAdminClient()
@@ -191,7 +195,19 @@ export default async function SettingsPage({
 
           {/* Profile — who you are, when you work, session control */}
           <TabsContent value="profile" className="flex flex-col gap-6 pt-6">
-            <SettingsForm email={email ?? ""} agent={agent ? { name: agent.name, timezone: agent.timezone, working_days: agent.working_days } : null} />
+            <SettingsForm
+              email={email ?? ""}
+              agent={
+                agent
+                  ? {
+                      name: agent.name,
+                      agent_name: agent.agent_name,
+                      timezone: agent.timezone,
+                      working_days: agent.working_days,
+                    }
+                  : null
+              }
+            />
 
             <Card className="border-destructive/20">
               <CardHeader>
@@ -281,7 +297,6 @@ export default async function SettingsPage({
                   action={
                     agent?.slack_token ? (
                       <form action={disconnectIntegration}>
-                        <input type="hidden" name="email" value={email ?? ""} />
                         <input type="hidden" name="integration" value="slack" />
                         <Button size="sm" variant="ghost" type="submit">
                           Disconnect
@@ -316,7 +331,6 @@ export default async function SettingsPage({
                     <div className="flex items-center gap-2">
                       {notionConnected ? (
                         <form action={disconnectIntegration}>
-                          <input type="hidden" name="email" value={email ?? ""} />
                           <input type="hidden" name="integration" value="notion" />
                           <Button size="sm" variant="ghost" type="submit">
                             Disconnect

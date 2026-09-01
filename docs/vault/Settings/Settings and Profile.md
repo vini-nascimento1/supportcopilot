@@ -1,7 +1,7 @@
 ---
 title: Settings and Profile
 tags: [settings, profile, integrations, ai]
-updated: 2026-07-29
+updated: 2026-09-01
 ---
 
 # Settings and Profile
@@ -15,7 +15,7 @@ The Settings page is where an individual agent customizes their own experience: 
 `app/settings/page.tsx` is a server component. On each request it loads:
 
 - The signed-in agent's email via `getSignedInEmail()` (see [[Auth and Session]]).
-- The agent's row from Supabase, selecting exactly: `id, name, email, timezone, intercom_admin_id, slack_token, notion_token, notion_mcp_refresh_token, notion_mcp_refresh_expires_at, working_days`. This is a subset of the full `agents` table — see [[Database Schema Reference]] for every column.
+- The agent's row from Supabase, selecting exactly: `id, name, agent_name, email, timezone, intercom_admin_id, slack_token, notion_token, notion_mcp_refresh_token, notion_mcp_refresh_expires_at, working_days`. This is a subset of the full `agents` table — see [[Database Schema Reference]] for every column.
 - All Canvas tool card definitions via `getAllCaseTools()` (`lib/case-tools-db.ts`).
 
 `export const dynamic = "force-dynamic"` keeps the page from being statically cached, since it reflects live per-agent state (OAuth connection status, notices from query params after an OAuth redirect).
@@ -24,7 +24,7 @@ The Settings page is where an individual agent customizes their own experience: 
 
 | Card | Component | Purpose |
 |---|---|---|
-| Profile | `./settings-form.tsx` (`SettingsForm`) | Name, timezone, working days |
+| Profile | `./settings-form.tsx` (`SettingsForm`) | Display name (internal), agent name (customer-facing, with live greeting preview), timezone, working days |
 | Canvas tools | `components/case-tools-settings.tsx` | CRUD for the tool cards available on the Canvas — see [[Tool Cards and Fadmin]] |
 | Canvas display | `components/canvas-mode-settings.tsx` | Canvas display preferences (single toggle-row card) |
 | Reply tone | `components/reply-tone-settings.tsx` | Pick a tone preset (Professional / Warm / Human) or write custom tone text — consumed by draft generation, see [[System Prompt Architecture]] |
@@ -32,6 +32,42 @@ The Settings page is where an individual agent customizes their own experience: 
 | Sign out | inline in `page.tsx` | Posts to `/api/auth/logout` |
 
 **Removed 2026-08-03:** the "Personal AI key" card (bring-your-own OpenAI key, base URL, model, aux model). Fanvue now provides one org key for the whole app, so the model is configured server-side by env var and there is nothing per-agent to set — see [[Draft Verify Pipeline]]. The AI & Drafting tab now holds Reply tone only.
+
+## Two separate names: "Display name (internal)" and "Agent name (customers see this)"
+
+The Profile card has two distinct name fields, backed by two distinct
+`agents` columns — see [[Auth and Session]] for the full column-level
+writeup:
+
+- **Display name (internal)** — `agents.name`. Upserted from the agent's
+  Google profile at every sign-in. Teammate-facing only (sidebar, greetings
+  within the app).
+- **Agent name (customers see this)** — `agents.agent_name`, nullable. The
+  only name that appears in a reply greeting, quick-send email, or anywhere
+  else a customer reads it. Saving it shows a live preview line using the
+  same wording as the reply-queue pipeline's opening greeting
+  (`buildAgentGreeting()` in `lib/draft-ai.ts` server-side; duplicated as a
+  small pure function client-side in `settings-form.tsx` and
+  `components/home/agent-name-gate.tsx` since that module can't be imported
+  into a client component — see the comment at each call site).
+
+`agents.agent_name` starts null for a new agent. `GET /api/auth/callback`
+backfills it once from the agent's matched Intercom admin display name (never
+from the Google profile), and never touches it again. Until it is set, Home
+shows a blocking "Set your agent name" card (`components/home/agent-name-gate.tsx`)
+ahead of the briefing — same one-field form, posting to the same
+`/api/settings/update` endpoint with just `{ agentName }`.
+
+## Session-scoped writes
+
+`POST /api/settings/update` and the `disconnectIntegration` server action
+both resolve the row to modify via `getSignedInEmail()` — never from an
+`email` value in the request body/formData. A client-supplied email there
+would let one agent's request silently modify a different agent's profile or
+integration tokens. `/api/settings/update` also patches only the fields
+present in the request body (rather than always overwriting all four), so
+`agent-name-gate.tsx` can save just `agentName` without wiping the agent's
+timezone/working_days/display name back to null.
 
 ## Integrations
 
@@ -44,7 +80,7 @@ Four integrations are surfaced as rows in a single "Connected integrations" card
 
 ### Disconnecting
 
-The `disconnectIntegration` server action (defined inline in `page.tsx`) handles both Slack and Notion:
+The `disconnectIntegration` server action (defined inline in `page.tsx`) handles both Slack and Notion. It resolves the target row via `getSignedInEmail()` (not a hidden form field — see Session-scoped writes above):
 
 - Slack: sets `slack_token` to `null`.
 - Notion: nulls `notion_token` **and** all `notion_mcp_*` columns (`notion_mcp_access_token`, `notion_mcp_refresh_token`, `notion_mcp_token_expires_at`, `notion_mcp_refresh_expires_at`) so the local connection is fully revoked, not just partially cleared.
@@ -58,7 +94,10 @@ After an OAuth redirect completes, the page can render a banner keyed by a `?not
 ## Key files
 
 - `app/settings/page.tsx` — the page itself: data loading, integration rows, disconnect action, OAuth notices
-- `app/settings/settings-form.tsx` — profile form (name, timezone, working days)
+- `app/settings/settings-form.tsx` — profile form (display name, agent name + preview, timezone, working days)
+- `app/api/settings/update/route.ts` — session-scoped partial-patch endpoint backing both the Profile form and the Home agent-name gate
+- `lib/agent-identity.ts` — `getCustomerFacingIdentity(email)`, the resolver `agent_name` reads go through (see [[Auth and Session]])
+- `components/home/agent-name-gate.tsx` — blocking Home card shown while `agent_name` is null
 - `components/case-tools-settings.tsx` — Canvas tool card CRUD
 - `components/canvas-mode-settings.tsx` — Canvas display toggle
 - `components/reply-tone-settings.tsx` — tone preset picker / custom tone text
@@ -79,9 +118,12 @@ Connect Slack:  card → /api/auth/slack → Slack OAuth consent → callback ro
 Connect Notion: card → /api/auth/notion → hosted-MCP OAuth → callback route → agents.notion_mcp_*
 Connect Google: handled entirely by Supabase auth at sign-in, not from this page
 
-Disconnect:     card form → disconnectIntegration() server action → null out token column(s) → revalidatePath("/settings")
+Disconnect:     card form → disconnectIntegration() server action → getSignedInEmail() → null out token column(s) → revalidatePath("/settings")
+
+Save agent name (Settings or Home gate):
+                form → POST /api/settings/update { agentName } → getSignedInEmail() → partial patch agents.agent_name → revalidatePath("/settings", "/")
 ```
 
 ## Related pages
 
-[[Tech Stack]] · [[Auth and Session]] · [[Database Schema Reference]] · [[Tool Cards and Fadmin]] · [[System Prompt Architecture]] · [[Draft Verify Pipeline]] · [[Slack Integration]] · [[Notion MCP Integration]]
+[[Tech Stack]] · [[Auth and Session]] · [[Database Schema Reference]] · [[Tool Cards and Fadmin]] · [[System Prompt Architecture]] · [[Draft Verify Pipeline]] · [[Slack Integration]] · [[Notion MCP Integration]] · [[Home Briefing]]

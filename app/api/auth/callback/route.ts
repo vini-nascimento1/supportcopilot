@@ -85,6 +85,24 @@ export async function GET(request: Request) {
         .from("agents")
         .update({ intercom_admin_id: matchedAdmin.id })
         .eq("email", email)
+
+      // Backfill the customer-facing agent_name (Settings > Profile, "Agent
+      // name (customers see this)") only when it's still unset — this is
+      // never touched on later logins, and never sourced from the Google
+      // profile `name`. The matched Intercom admin's display name is what
+      // customers already see in Intercom, so it's a sane one-time default
+      // until the agent picks their own in Settings.
+      const { data: agentRow } = await adminClient
+        .from("agents")
+        .select("agent_name")
+        .eq("email", email)
+        .maybeSingle()
+      if (agentRow && !agentRow.agent_name && matchedAdmin.name) {
+        await adminClient
+          .from("agents")
+          .update({ agent_name: matchedAdmin.name })
+          .eq("email", email)
+      }
     }
   }
 

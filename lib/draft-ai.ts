@@ -143,18 +143,10 @@ export function hasAgentPersonallyReplied(
   return messages.some((m) => m.role === "admin" && m.authorId === agentAdminId)
 }
 
-// The mandatory opening line for a reply where THIS agent has not spoken in the
-// thread yet (feedback: Vincenzo greeting rule). The reply-queue pipeline injects
-// this deterministically AFTER generation rather than trusting the model to
-// reproduce it, so the exact wording AND the agent's name are guaranteed on every
-// draft. When there is no real agent name (generic fallback), the "I'm X" clause
-// is dropped rather than reading "I'm the support team".
-export function buildAgentGreeting(agentName: string): string {
-  const name = agentName && agentName !== "the support team" ? agentName.trim() : ""
-  return name
-    ? `Hey! 👋 Thanks for reaching out to Fanvue Support, I'm ${name}. I'll do my best to assist you today! 😊`
-    : `Hey! 👋 Thanks for reaching out to Fanvue Support. I'll do my best to assist you today! 😊`
-}
+// Greeting wording lives in lib/agent-greeting.ts (dependency-free so client
+// previews can import it). Re-exported here so existing server callers keep
+// their import path.
+export { buildAgentGreeting } from "@/lib/agent-greeting"
 
 // greetingInjected = the caller (the reply-queue pipeline) will prepend
 // buildAgentGreeting() itself, so the model must NOT write its own greeting or it

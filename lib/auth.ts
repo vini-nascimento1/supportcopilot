@@ -4,6 +4,7 @@ import { cache } from "react"
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { getCustomerFacingIdentity } from "@/lib/agent-identity"
 
 async function createClient() {
   const cookieStore = await cookies()
@@ -86,20 +87,16 @@ export async function resolveIntercomAdminId(email: string): Promise<string | nu
   return data?.intercom_admin_id ?? process.env.INTERCOM_ADMIN_ID ?? null
 }
 
-// One-stop lookup for both the agent's given name and Intercom admin id. Used
-// by the draft routes that need the "written by X" label alongside the admin id.
+// One-stop lookup for both the agent's CUSTOMER-FACING name and Intercom
+// admin id, used by the draft routes that inject the "I'm X" greeting and the
+// "written by X" label alongside the admin id. Thin wrapper over
+// lib/agent-identity.ts's resolver — must not read `agents.name` (that's the
+// internal display name; see Auth and Session.md). `name` here defaults to
+// the generic "the support team" fallback until the agent sets
+// `agent_name` in Settings > Profile.
 export async function getAgentNameAndAdminId(email: string): Promise<{ name: string; intercomAdminId: string | null }> {
-  const adminClient = getSupabaseAdminClient()
-  if (!adminClient) return { name: "the support team", intercomAdminId: null }
-  const { data } = await adminClient
-    .from("agents")
-    .select("name, intercom_admin_id")
-    .eq("email", email)
-    .maybeSingle()
-  return {
-    name: data?.name?.split(" ")[0] ?? "the support team",
-    intercomAdminId: (data?.intercom_admin_id as string | undefined) ?? null,
-  }
+  const { agentName, intercomAdminId } = await getCustomerFacingIdentity(email)
+  return { name: agentName ?? "the support team", intercomAdminId }
 }
 
 export type AgentTokens = {

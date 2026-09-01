@@ -1,0 +1,562 @@
+<title>Copilot Home Briefing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:oklch(1 0 0);
+    --fg:oklch(0.145 0 0);
+    --card:oklch(1 0 0);
+    --muted:oklch(0.97 0 0);
+    --muted-fg:oklch(0.48 0 0);
+    --border:oklch(0.922 0 0);
+    --primary:oklch(0.205 0 0);
+    --primary-fg:oklch(0.985 0 0);
+    --hero:oklch(0.205 0 0);
+    --hero-fg:oklch(0.985 0 0);
+    --hero-muted:oklch(0.985 0 0 / 62%);
+    --hero-line:oklch(1 0 0 / 12%);
+    --sidebar:oklch(0.985 0 0);
+    --sidebar-accent:oklch(0.94 0 0);
+    --ring:oklch(0.708 0 0);
+
+    --critical:oklch(0.577 0.245 27.325);
+    --critical-bg:oklch(0.975 0.018 27);
+    --warn:oklch(0.60 0.13 72);
+    --warn-bg:oklch(0.975 0.03 82);
+    --ok:oklch(0.56 0.14 152);
+    --ok-bg:oklch(0.97 0.03 152);
+
+    --page:oklch(0.955 0.004 255);
+    --page-fg:oklch(0.35 0.01 255);
+    --frame-shadow:0 1px 2px oklch(0 0 0 / 8%), 0 24px 60px oklch(0.2 0.02 255 / 18%);
+
+    --radius:0.625rem;
+    --font:"Instrument Sans",ui-sans-serif,system-ui,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:oklch(0.145 0 0);
+      --fg:oklch(0.985 0 0);
+      --card:oklch(0.205 0 0);
+      --muted:oklch(0.269 0 0);
+      --muted-fg:oklch(0.708 0 0);
+      --border:oklch(1 0 0 / 10%);
+      --primary:oklch(0.922 0 0);
+      --primary-fg:oklch(0.205 0 0);
+      --hero:oklch(0.26 0 0);
+      --hero-fg:oklch(0.985 0 0);
+      --hero-muted:oklch(0.985 0 0 / 60%);
+      --hero-line:oklch(1 0 0 / 12%);
+      --sidebar:oklch(0.205 0 0);
+      --sidebar-accent:oklch(0.269 0 0);
+      --ring:oklch(0.556 0 0);
+      --critical:oklch(0.704 0.191 22.216);
+      --critical-bg:oklch(0.704 0.191 22.216 / 14%);
+      --warn:oklch(0.78 0.13 78);
+      --warn-bg:oklch(0.78 0.13 78 / 14%);
+      --ok:oklch(0.74 0.14 152);
+      --ok-bg:oklch(0.74 0.14 152 / 14%);
+      --page:oklch(0.11 0.006 255);
+      --page-fg:oklch(0.75 0.01 255);
+      --frame-shadow:0 1px 2px oklch(0 0 0 / 40%), 0 24px 60px oklch(0 0 0 / 55%);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:oklch(0.145 0 0);
+    --fg:oklch(0.985 0 0);
+    --card:oklch(0.205 0 0);
+    --muted:oklch(0.269 0 0);
+    --muted-fg:oklch(0.708 0 0);
+    --border:oklch(1 0 0 / 10%);
+    --primary:oklch(0.922 0 0);
+    --primary-fg:oklch(0.205 0 0);
+    --hero:oklch(0.26 0 0);
+    --hero-fg:oklch(0.985 0 0);
+    --hero-muted:oklch(0.985 0 0 / 60%);
+    --hero-line:oklch(1 0 0 / 12%);
+    --sidebar:oklch(0.205 0 0);
+    --sidebar-accent:oklch(0.269 0 0);
+    --ring:oklch(0.556 0 0);
+    --critical:oklch(0.704 0.191 22.216);
+    --critical-bg:oklch(0.704 0.191 22.216 / 14%);
+    --warn:oklch(0.78 0.13 78);
+    --warn-bg:oklch(0.78 0.13 78 / 14%);
+    --ok:oklch(0.74 0.14 152);
+    --ok-bg:oklch(0.74 0.14 152 / 14%);
+    --page:oklch(0.11 0.006 255);
+    --page-fg:oklch(0.75 0.01 255);
+    --frame-shadow:0 1px 2px oklch(0 0 0 / 40%), 0 24px 60px oklch(0 0 0 / 55%);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--page);color:var(--fg);
+    font-family:var(--font);font-size:14px;line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font-family:inherit}
+  button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+  svg{display:block}
+
+  /* ── page around the frames ─────────────────────────────── */
+  .page{max-width:1440px;margin:0 auto;padding:28px 24px 72px}
+  .intro{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px;margin-bottom:28px;color:var(--page-fg)}
+  .intro h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.02em;color:var(--fg)}
+  .intro p{margin:4px 0 0;font-size:13px;max-width:62ch}
+  .legend{display:flex;gap:14px;font-size:12px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .view{margin-bottom:56px}
+  .view-h{display:flex;align-items:baseline;gap:12px;margin:0 0 12px;color:var(--page-fg)}
+  .view-h h2{margin:0;font-size:14px;font-weight:600;color:var(--fg)}
+  .view-h span{font-family:var(--mono);font-size:12px}
+  .fit{position:relative;width:100%;overflow:hidden}
+  .fit>.frame{transform-origin:top left}
+
+  /* ── shared app pieces ──────────────────────────────────── */
+  .frame{background:var(--bg);color:var(--fg);box-shadow:var(--frame-shadow);border:1px solid var(--border)}
+  .h-sec{display:flex;align-items:baseline;justify-content:space-between;margin:0 0 10px}
+  .h-sec h3{margin:0;font-size:13px;font-weight:600;letter-spacing:-.01em}
+  .h-sec .n{font-family:var(--mono);font-size:11.5px;color:var(--muted-fg)}
+  .h-sec .n b{color:var(--fg);font-weight:600}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius)}
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px;border:1px solid var(--border);background:var(--muted);color:var(--fg);white-space:nowrap}
+  .chip.ok{background:var(--ok-bg);border-color:transparent;color:var(--ok)}
+  .chip.warn{background:var(--warn-bg);border-color:transparent;color:var(--warn)}
+  .chip.critical{background:var(--critical-bg);border-color:transparent;color:var(--critical)}
+  .chip.live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:calc(var(--radius) * .8);border:1px solid var(--border);background:var(--card);color:var(--fg);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .btn.primary{background:var(--primary);color:var(--primary-fg);border-color:transparent}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--muted-fg)}
+  .btn.sm{height:28px;padding:0 10px;font-size:12px}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* greeting */
+  .greet .date{font-size:12px;color:var(--muted-fg);font-weight:500}
+  .greet h2{margin:2px 0 0;font-size:24px;font-weight:600;letter-spacing:-.025em;text-wrap:balance}
+  .greet .times{font-family:var(--mono);font-size:11.5px;color:var(--muted-fg);margin-top:2px}
+
+  /* hero */
+  .hero{position:relative;background:var(--hero);color:var(--hero-fg);border:1px solid var(--hero-line);border-radius:calc(var(--radius) * 1.4);padding:18px 20px 16px;overflow:hidden}
+  .hero .eyebrow{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;color:var(--hero-muted);margin-bottom:10px}
+  .hero .eyebrow .pulse{width:7px;height:7px;border-radius:50%;background:currentColor;position:relative}
+  .hero .eyebrow .pulse::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.4s ease-out infinite}
+  @keyframes ring{0%{transform:scale(.5);opacity:.7}100%{transform:scale(1.5);opacity:0}}
+  .hero p.say{margin:0 0 14px;font-size:18px;line-height:1.42;font-weight:450;letter-spacing:-.012em;max-width:56ch;text-wrap:pretty}
+  .hero p.say b{font-weight:650}
+  .hero .acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+  .hero .hact{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;background:oklch(from var(--hero-fg) l c h / 8%);border:1px solid var(--hero-line);color:var(--hero-fg);border-radius:calc(var(--radius) * .9);padding:10px 12px;cursor:pointer;min-width:0}
+  .hero .hact:hover{background:oklch(from var(--hero-fg) l c h / 14%)}
+  .hero .hact .k{font-size:12.5px;font-weight:650;line-height:1.3}
+  .hero .hact .v{font-size:11px;color:var(--hero-muted);line-height:1.3}
+  .srcs{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+  .srcs .s{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted-fg)}
+  .srcs .ic{width:18px;height:18px;border-radius:5px;background:var(--card);border:1px solid var(--border);display:grid;place-items:center;font-size:10px;font-weight:700;color:var(--fg);flex:0 0 auto}
+  .hero .sync{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;margin-top:14px;font-size:11px;color:var(--hero-muted)}
+  .hero .sync b{font-weight:600;color:var(--hero-fg)}
+
+  /* attention list */
+  .act{display:flex;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 12px 12px 0;margin-bottom:8px;cursor:pointer;position:relative;text-align:left;width:100%;color:inherit}
+  .act:hover{background:var(--muted)}
+  .act .bar{width:3px;border-radius:0 3px 3px 0;flex:0 0 auto;margin-left:-1px}
+  .act.critical .bar{background:var(--critical)}
+  .act.warn .bar{background:var(--warn)}
+  .act .body{flex:1;min-width:0}
+  .act .src{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+  .act .when{font-family:var(--mono);font-size:11px;color:var(--muted-fg);margin-left:auto;white-space:nowrap}
+  .act.critical .when{color:var(--critical)}
+  .act .title{font-size:13.5px;font-weight:600;letter-spacing:-.01em}
+  .act .ctx{font-size:12.5px;color:var(--muted-fg);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .act.open .ctx{white-space:normal}
+  .act .ai{display:flex;align-items:center;gap:5px;margin-top:6px;font-size:11.5px;color:var(--muted-fg)}
+  .act .ai svg{width:11px;height:11px}
+  .act .chev{color:var(--muted-fg);align-self:center;margin-right:10px;transition:transform .18s}
+  .act.open .chev{transform:rotate(90deg)}
+
+  .resolve{display:none;margin:-4px 0 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);overflow:hidden}
+  .resolve.show{display:block;animation:drop .2s ease}
+  @keyframes drop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .msg{padding:12px 14px;border-bottom:1px solid var(--border)}
+  .msg .lbl{font-size:11px;font-weight:600;color:var(--muted-fg);margin-bottom:4px}
+  .msg .txt{font-size:13px;line-height:1.5}
+  .draft{padding:12px 14px;background:var(--muted)}
+  .draft .lbl{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;margin-bottom:8px}
+  .draft .lbl svg{width:12px;height:12px}
+  .draft .txt{font-size:13px;line-height:1.55;white-space:pre-line}
+  .draft .basis{font-size:11px;color:var(--muted-fg);margin-top:8px}
+  .draft .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  .lock{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:calc(var(--radius) * .8);background:var(--warn-bg);color:var(--fg);margin-bottom:10px;font-size:12.5px;line-height:1.45}
+  .lock svg{width:14px;height:14px;flex:0 0 auto;margin-top:2px;color:var(--warn)}
+  .lock b{display:block;font-weight:600;color:var(--warn)}
+  .draft.locked .txt{opacity:.55}
+
+  /* timeline */
+  .tl{padding:2px 14px}
+  .ev{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
+  .ev:last-child{border-bottom:none}
+  .ev .t{font-family:var(--mono);font-size:12px;font-weight:500;width:42px;flex:0 0 auto;padding-top:1px}
+  .ev .dot{width:8px;height:8px;border-radius:50%;background:var(--muted-fg);flex:0 0 auto;margin-top:5px}
+  .ev.soon .dot{background:var(--critical);box-shadow:0 0 0 3px var(--critical-bg)}
+  .ev .nm{font-size:13px;font-weight:600}
+  .ev .sub{font-size:11.5px;color:var(--muted-fg);margin-top:1px}
+
+  /* compact stacks */
+  .row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border)}
+  .row:last-child{border-bottom:none}
+  .row .ic{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;font-size:12px;font-weight:600;flex:0 0 auto;background:var(--muted);color:var(--fg)}
+  .row .rb{flex:1;min-width:0}
+  .row .a{font-size:12.5px;font-weight:600}
+  .row .b{font-size:11.5px;color:var(--muted-fg);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .note{font-size:11px;color:var(--muted-fg);margin:8px 2px 0;line-height:1.45}
+
+  /* ── desktop frame ──────────────────────────────────────── */
+  .desk{width:1366px;height:768px;display:flex;overflow:hidden;border-radius:12px}
+  .side{width:256px;flex:0 0 auto;background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:8px}
+  .side .brand{display:flex;align-items:center;gap:10px;padding:8px}
+  .side .logo{width:36px;height:36px;border-radius:6px;border:1px solid var(--border);background:var(--primary);color:var(--primary-fg);display:grid;place-items:center;font-weight:700;font-size:14px}
+  .side .brand b{display:block;font-size:13px;font-weight:600}
+  .side .brand small{display:block;font-size:11.5px;color:var(--muted-fg)}
+  .side .grp{padding:8px 0 0}
+  .side .grp .lbl{font-size:11px;color:var(--muted-fg);font-weight:500;padding:6px 8px}
+  .side .item{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;border-radius:6px;font-size:13px;color:var(--fg)}
+  .side .item svg{width:16px;height:16px;color:var(--muted-fg)}
+  .side .item.on{background:var(--sidebar-accent);font-weight:600}
+  .side .item.on svg{color:var(--fg)}
+  .side .item.dl{height:auto;padding:6px 8px;align-items:flex-start}
+  .side .item.dl span{display:block;line-height:1.2}
+  .side .item.dl small{display:block;font-size:10px;color:var(--muted-fg)}
+  .side .foot{margin-top:auto;display:flex;align-items:center;gap:10px;padding:8px}
+  .side .foot .av{width:32px;height:32px;border-radius:50%;background:var(--muted);display:grid;place-items:center;font-size:12px;font-weight:600}
+  .side .foot .who{min-width:0;flex:1}
+  .side .foot .who span{display:block;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .side .foot .who small{display:block;font-size:11.5px;color:var(--muted-fg)}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .topbar{height:56px;display:flex;align-items:center;gap:12px;padding:0 24px;border-bottom:1px solid var(--border);flex:0 0 auto}
+  .topbar .sep{width:1px;height:20px;background:var(--border)}
+  .topbar h1{margin:0;font-size:15px;font-weight:500}
+  .topbar .right{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-fg)}
+  .content{flex:1;overflow:auto;padding:24px 24px 32px}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:20px 24px;align-items:start}
+  .col-l{grid-column:span 7;display:flex;flex-direction:column;gap:20px}
+  .col-r{grid-column:span 5;display:flex;flex-direction:column;gap:20px}
+  .desk .hero p.say{font-size:19px}
+
+  /* ── phone frame ────────────────────────────────────────── */
+  .phone{width:390px;max-width:100%;border-radius:40px;padding:10px;position:relative}
+  .screen{border-radius:31px;overflow:hidden;position:relative;background:var(--bg)}
+  .statusbar{display:flex;justify-content:space-between;align-items:center;padding:12px 22px 4px;font-size:12.5px;font-weight:600;font-family:var(--mono)}
+  .scroll{height:760px;overflow-y:auto;padding:6px 16px 92px;scrollbar-width:none}
+  .scroll::-webkit-scrollbar{display:none}
+  .scroll>*+*{margin-top:20px}
+  .nav{position:absolute;left:0;right:0;bottom:0;background:oklch(from var(--bg) l c h / 88%);backdrop-filter:blur(12px);border-top:1px solid var(--border);display:flex;justify-content:space-around;padding:8px 6px 16px}
+  .nav .item{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:600;color:var(--muted-fg);flex:1;position:relative}
+  .nav .item svg{width:20px;height:20px}
+  .nav .item.on{color:var(--fg)}
+  .nav .item .badge{position:absolute;top:-4px;right:calc(50% - 18px);background:var(--critical);color:#fff;font-family:var(--mono);font-size:9.5px;font-weight:600;border-radius:999px;padding:1px 5px;line-height:1.3}
+
+  .caption{font-size:12px;color:var(--page-fg);margin:14px 0 0;max-width:62ch;line-height:1.5}
+
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation:none!important;transition:none!important}
+  }
+</style>
+
+<div class="page">
+  <div class="intro">
+    <div>
+      <h1>Copilot Home Briefing</h1>
+      <p>Home replaces the Dashboard: the copilot opens with what needs you, each item already carries its prepared reply, and nothing leaves without your tap. Same shell, same tokens, same bands as the Queue.</p>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--critical)"></i>Needs you now</span>
+      <span><i style="background:var(--warn)"></i>Today</span>
+      <span><i style="background:var(--ok)"></i>Ready to send</span>
+    </div>
+  </div>
+
+  <!-- ── DESKTOP ─────────────────────────────────────────── -->
+  <section class="view">
+    <div class="view-h"><h2>Desktop</h2><span>1366 × 768 · inside the existing sidebar shell · 7 / 5 grid</span></div>
+    <div class="fit" id="fitDesk">
+      <div class="frame desk">
+        <aside class="side">
+          <div class="brand"><div class="logo">F</div><div><b>Fanvue Support</b><small>Copilot</small></div></div>
+          <div class="grp"><div class="lbl">Workspace</div>
+            <div class="item on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V21H3z"/></svg>Home</div>
+            <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6M9 11h6M9 15h4"/></svg>Cases</div>
+            <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>Gmail</div>
+            <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Slack</div>
+            <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/></svg>Playbooks</div>
+            <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg>Automation</div>
+            <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>Canvas</div>
+          </div>
+          <div class="grp"><div class="lbl">Support</div>
+            <div class="item dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg><span>Download the app<small>Get the full experience</small></span></div>
+            <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Settings</div>
+            <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3zM11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>New Features</div>
+          </div>
+          <div class="foot"><div class="av">V</div><div class="who"><span>you@fanvue.com</span><small>Fanvue Support</small></div></div>
+        </aside>
+
+        <div class="main">
+          <div class="topbar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+            <div class="sep"></div>
+            <h1>Home</h1>
+            <span class="chip live">Live</span>
+            <div class="right"><span class="mono">Synced 2 min ago</span></div>
+          </div>
+          <div class="content">
+            <div class="grid">
+              <div class="col-l">
+                <div class="greet">
+                  <div class="date">Tuesday, 1 September</div>
+                  <h2>Morning, Vinicius.</h2>
+                  <div class="times">8:42 AM local · 12:42 PM UK</div>
+                </div>
+                <div id="heroDesk"></div>
+                <div>
+                  <div class="h-sec"><h3>Needs you now</h3><span class="n"><b>5</b> · 3 drafted · 1 researched · 1 locked</span></div>
+                  <div id="listDesk"></div>
+                </div>
+              </div>
+              <div class="col-r">
+                <div>
+                  <div class="h-sec"><h3>Today</h3><span class="n"><b>3</b> events</span></div>
+                  <div class="card tl" id="tlDesk"></div>
+                </div>
+                <div>
+                  <div class="h-sec"><h3>Slack you missed</h3><span class="n"><b>6</b> new</span></div>
+                  <div class="card" id="slackDesk"></div>
+                  <p class="note">Only mentions, DMs and threads you're in. Channels stay in Slack.</p>
+                </div>
+                <div>
+                  <div class="h-sec"><h3>Worth your time in email</h3><span class="n"><b>3</b> of 21</span></div>
+                  <div class="card" id="mailDesk"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Click a row to expand its prepared reply. The first ticket opens by default so the band chips are visible: Ready to send comes from the Queue as-is; the locked one shows the fadmin reason and sends only from the desktop app.</p>
+  </section>
+
+  <!-- ── MOBILE ──────────────────────────────────────────── -->
+  <section class="view">
+    <div class="view-h"><h2>Mobile</h2><span>390 wide · stacked · bottom nav replaces the sidebar below 768px</span></div>
+    <div class="frame phone">
+      <div class="screen">
+        <div class="statusbar"><span>8:42</span><span>●●● · 82%</span></div>
+        <div class="scroll" id="phoneScroll">
+          <div class="greet" style="padding:6px 2px 0">
+            <div class="date">Tuesday, 1 September</div>
+            <h2>Morning, Vinicius.</h2>
+            <div class="times">8:42 AM local · 12:42 PM UK</div>
+          </div>
+          <div id="heroPhone"></div>
+          <div>
+            <div class="h-sec"><h3>Needs you now</h3><span class="n"><b>5</b> · 3 drafted · 1 researched · 1 locked</span></div>
+            <div id="listPhone"></div>
+          </div>
+          <div>
+            <div class="h-sec"><h3>Today</h3><span class="n"><b>3</b> events</span></div>
+            <div class="card tl" id="tlPhone"></div>
+          </div>
+          <div>
+            <div class="h-sec"><h3>Slack you missed</h3><span class="n"><b>6</b> new</span></div>
+            <div class="card" id="slackPhone"></div>
+            <p class="note">Only mentions, DMs and threads you're in. Channels stay in Slack.</p>
+          </div>
+          <div>
+            <div class="h-sec"><h3>Worth your time in email</h3><span class="n"><b>3</b> of 21</span></div>
+            <div class="card" id="mailPhone"></div>
+          </div>
+        </div>
+        <div class="nav">
+          <div class="item on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V21H3z"/></svg>Home</div>
+          <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6M9 11h6M9 15h4"/></svg>Cases</div>
+          <div class="item"><span class="badge">2</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 4h16v10H4zM4 18h16"/><path d="m9 9 2 2 4-4"/></svg>Queue</div>
+          <div class="item"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>More</div>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Tap "Needs you now" rows to see the mobile resolve flow. The locked ticket cannot be sent from a phone: fadmin only exists in the desktop app, and the lock is the control, not a layout choice.</p>
+  </section>
+</div>
+
+<script>
+  const SPARK = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z"/></svg>';
+  const LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+  const CHEV = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+  const GREETING = "Hey! 👋 Thanks for reaching out to Fanvue Support, I'm Vincenzo. I'll do my best to assist you today! 😊";
+
+  const HERO = `
+    <div class="hero">
+      <div class="eyebrow"><span class="pulse"></span>Your day, in one read</div>
+      <p class="say">While you were away, <b>five things</b> started needing you. Two tickets are past the 15-minute first-reply target, Ollie asked you a payout policy question, you were mentioned in #security, and MassPay wants a yes or no by end of day. I drafted the three replies and looked up the policy answer. One ticket is locked until you check fadmin.</p>
+      <div class="acts">
+        <button class="hact" data-jump="0"><span class="k">Review 2 ticket replies</span><span class="v">1 ready to send · 1 locked</span></button>
+        <button class="hact" data-jump="2"><span class="k">Check the payout answer for Ollie</span><span class="v">Researched in Notion and Slack · 3 sources</span></button>
+        <button class="hact" data-jump="4"><span class="k">Decide on MassPay</span><span class="v">Yes or no · by end of day</span></button>
+      </div>
+      <div class="sync"><span>Intercom · Slack · Calendar · Gmail · Notion</span><span><b>Nothing is sent without your tap.</b></span></div>
+    </div>`;
+
+  const ITEMS = [
+    {
+      sev:'critical', tag:'Ticket', when:'Waiting 26 min', title:'Verified badge request',
+      ctx:'A creator asks how to get the blue tick and whether their account qualifies.',
+      ai:'Reply drafted · Ready to send',
+      detail:`
+        <div class="msg"><div class="lbl">Creator · @lumen.rae · 26 min ago</div><div class="txt">Hi! How do I get the verified badge on my profile? I've been posting daily for 3 months.</div></div>
+        <div class="draft">
+          <div class="lbl">${SPARK}Prepared reply <span class="chip ok">Ready to send</span></div>
+          <div class="txt">${GREETING}
+
+The verified badge is for creators with a fully verified account, a complete profile, a steady posting history and no open warnings. From what I can see, you're in good shape. You can request it from Settings, then Profile, then Request verification, and the team reviews requests within a few days.
+
+Let me know if anything in the form gives you trouble.</div>
+          <div class="basis">Grounded in the Verified Badge macro and the "Getting verified" help article. Language matched to the customer.</div>
+          <div class="btns"><button class="btn primary sm">Approve &amp; send as Vincenzo</button><button class="btn sm">Edit</button><button class="btn ghost sm">Why</button><button class="btn ghost sm">Open case</button></div>
+        </div>`
+    },
+    {
+      sev:'critical', tag:'Ticket', when:'Waiting 41 min', title:'Charged twice for one subscription',
+      ctx:'Jordan sees two identical charges on the same day and asks for the duplicate back.',
+      ai:'Reply drafted · Locked: verify in fadmin',
+      detail:`
+        <div class="msg"><div class="lbl">Fan · Jordan · 41 min ago</div><div class="txt">Hey, I got charged twice for my monthly sub this month. Can you refund the duplicate one? Thanks.</div></div>
+        <div class="draft locked">
+          <div class="lock">${LOCK}<div><b>Verify the charge in fadmin before sending</b>Tagged "payment". The reply is prepared, but sending stays locked until you confirm both invoices in fadmin. fadmin only opens in the desktop app.</div></div>
+          <div class="lbl">${SPARK}Prepared reply <span class="chip warn">Needs check</span></div>
+          <div class="txt">${GREETING}
+
+I can see two charges for the same subscription on the same day, so one of them shouldn't be there. I've refunded the duplicate, and it will show back on your card within 5 to 10 business days.</div>
+          <div class="btns"><button class="btn primary sm">Open on desktop</button><button class="btn sm">Open in Intercom</button></div>
+        </div>`
+    },
+    {
+      sev:'warn', tag:'DM', when:'52 min ago', title:'Ollie asked about a payout name mismatch',
+      ctx:'"Creator\'s bank shows a personal name on a business account. Do we hold the payout?"',
+      ai:'Researched · answer drafted from Notion and Slack · 3 sources',
+      detail:`
+        <div class="msg"><div class="lbl">Ollie B · direct message · 52 min ago</div><div class="txt">Hey, quick one. Creator's MassPay payout shows a personal name but the Fanvue account is a business. Do we hold it until the names match?</div></div>
+        <div class="draft">
+          <div class="lbl">${SPARK}Prepared answer <span class="chip ok">Grounded · 3 sources</span></div>
+          <div class="txt">No hold needed. For business accounts the personal name MassPay shows is expected: the payout lands in the business account, so it doesn't have to match the Fanvue name. For personal accounts the name only has to match the KYC document. If they've been paid before under the same name it's fine as-is. If the status is NOT_PAID, send the payout name update macro and ask them to retry.</div>
+          <div class="srcs">
+            <div class="s"><span class="ic">N</span><span>Notion · Payouts &amp; KYC playbook › Name mismatch</span></div>
+            <div class="s"><span class="ic">#</span><span>Slack · #payouts thread, 12 Aug · Payments team confirmation</span></div>
+            <div class="s"><span class="ic">I</span><span>Intercom macro · Payout name update</span></div>
+          </div>
+          <div class="btns"><button class="btn primary sm">Send in Slack</button><button class="btn sm">Edit</button><button class="btn ghost sm">Open sources</button></div>
+        </div>`
+    },
+    {
+      sev:'warn', tag:'#security', when:'1h ago', title:'Ollie mentioned you',
+      ctx:'"Vini, does the OAuth flow still show the agent’s real name to customers?"',
+      ai:'Reply suggested · you edit, you send',
+      detail:`
+        <div class="msg"><div class="lbl">Ollie · #security · 1h ago</div><div class="txt">Vini, when an agent signs in with Google the app switches to their real name and it leaks into replies. Is that still happening? Can you confirm?</div></div>
+        <div class="draft">
+          <div class="lbl">${SPARK}Suggested reply</div>
+          <div class="txt">Confirmed. The fix ships with the home redesign: customer replies always use the agent name, whatever the login says.</div>
+          <div class="btns"><button class="btn primary sm">Reply in Slack</button><button class="btn sm">Open thread</button></div>
+        </div>`
+    },
+    {
+      sev:'warn', tag:'Email', when:'3h ago', title:'MassPay follow-up on 3 flagged payouts',
+      ctx:'They ask for a yes or no by end of day on freezing the payouts while they review.',
+      ai:'Summarized · no attachments · needs a decision from you',
+      detail:`
+        <div class="msg"><div class="lbl">Summary, not the full email</div><div class="txt">MassPay confirmed they received the evidence and ask whether you want the three payouts frozen while they review. No new attachments. Needs a yes or no from you today.</div></div>
+        <div class="draft">
+          <div class="lbl">${SPARK}Nothing drafted for money decisions. You answer this one.</div>
+          <div class="btns"><button class="btn primary sm">Reply in Gmail</button><button class="btn sm">Open thread</button></div>
+        </div>`
+    },
+  ];
+
+  const TIMELINE = `
+    <div class="ev soon"><div class="t">09:30</div><div class="dot"></div><div><div class="nm">Support standup</div><div class="sub">in 48 min · 15 min · Google Meet</div></div></div>
+    <div class="ev"><div class="t">11:00</div><div class="dot"></div><div><div class="nm">Content warning appeals review</div><div class="sub">with Trust &amp; Safety</div></div></div>
+    <div class="ev"><div class="t">15:30</div><div class="dot"></div><div><div class="nm">1:1 with Saadia</div><div class="sub">Payouts &amp; KYC article rewrite</div></div></div>`;
+
+  const SLACK = `
+    <div class="row"><div class="ic">#</div><div class="rb"><div class="a">#trust-and-safety</div><div class="b">4 replies in a thread you started</div></div><span class="chip critical mono">4</span></div>
+    <div class="row"><div class="ic">SA</div><div class="rb"><div class="a">Saadia</div><div class="b">"can we sync on the KYC article before 3:30?"</div></div><span class="chip mono">1</span></div>
+    <div class="row"><div class="ic">OB</div><div class="rb"><div class="a">Ollie B</div><div class="b">Payout question · answer prepared above</div></div><span class="chip ok">drafted</span></div>`;
+
+  const MAIL = `
+    <div class="row"><div class="ic">MP</div><div class="rb"><div class="a">MassPay</div><div class="b">Yes or no on freezing 3 payouts</div></div><span class="chip warn">action</span></div>
+    <div class="row"><div class="ic">On</div><div class="rb"><div class="a">Ondato</div><div class="b">KYC link reactivated · nothing to do</div></div><span class="chip">fyi</span></div>
+    <div class="row"><div class="ic">JL</div><div class="rb"><div class="a">Juan de Luca</div><div class="b">Reply on token scoping (ENG-11310)</div></div><span class="chip">read</span></div>`;
+
+  function renderList(id, openIndex){
+    const root = document.getElementById(id);
+    root.innerHTML = ITEMS.map((it, i) => `
+      <button class="act ${it.sev} ${i===openIndex?'open':''}" data-i="${i}" aria-expanded="${i===openIndex}" aria-controls="${id}-r${i}">
+        <div class="bar"></div>
+        <div class="body">
+          <div class="src"><span class="chip">${it.tag}</span><span class="when">${it.when}</span></div>
+          <div class="title">${it.title}</div>
+          <div class="ctx">${it.ctx}</div>
+          <div class="ai">${SPARK}${it.ai}</div>
+        </div>
+        <div class="chev">${CHEV}</div>
+      </button>
+      <div class="resolve ${i===openIndex?'show':''}" id="${id}-r${i}">${it.detail}</div>`).join('');
+    root.addEventListener('click', (e) => {
+      const btn = e.target.closest('.act');
+      if(!btn || e.target.closest('.resolve')) return;
+      const wasOpen = btn.classList.contains('open');
+      root.querySelectorAll('.act.open').forEach(a => { a.classList.remove('open'); a.setAttribute('aria-expanded','false'); });
+      root.querySelectorAll('.resolve.show').forEach(r => r.classList.remove('show'));
+      if(!wasOpen){
+        btn.classList.add('open'); btn.setAttribute('aria-expanded','true');
+        document.getElementById(btn.getAttribute('aria-controls')).classList.add('show');
+      }
+    });
+  }
+
+  function openItem(listId, i){
+    const root = document.getElementById(listId);
+    const btn = root.querySelector(`.act[data-i="${i}"]`);
+    if(!btn) return;
+    root.querySelectorAll('.act.open').forEach(a => { a.classList.remove('open'); a.setAttribute('aria-expanded','false'); });
+    root.querySelectorAll('.resolve.show').forEach(r => r.classList.remove('show'));
+    btn.classList.add('open'); btn.setAttribute('aria-expanded','true');
+    document.getElementById(btn.getAttribute('aria-controls')).classList.add('show');
+    btn.scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  function renderHero(heroId, listId){
+    const el = document.getElementById(heroId);
+    el.innerHTML = HERO;
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('.hact');
+      if(b) openItem(listId, Number(b.dataset.jump));
+    });
+  }
+  renderHero('heroDesk', 'listDesk');
+  renderHero('heroPhone', 'listPhone');
+  renderList('listDesk', 0);
+  renderList('listPhone', -1);
+  for (const [id, html] of [['tlDesk',TIMELINE],['tlPhone',TIMELINE],['slackDesk',SLACK],['slackPhone',SLACK],['mailDesk',MAIL],['mailPhone',MAIL]]){
+    document.getElementById(id).innerHTML = html;
+  }
+
+  // Scale the 1366px desktop frame to the available width.
+  function fit(){
+    const wrap = document.getElementById('fitDesk');
+    const frame = wrap.firstElementChild;
+    const s = Math.min(1, wrap.clientWidth / 1366);
+    frame.style.transform = `scale(${s})`;
+    wrap.style.height = Math.round(768 * s) + 'px';
+  }
+  fit();
+  window.addEventListener('resize', fit);
+</script>
