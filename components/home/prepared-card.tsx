@@ -18,14 +18,14 @@ import { Textarea } from "@/components/ui/textarea"
 import { SendConfirmDialog } from "@/components/send-confirm-dialog"
 import { usePlatform } from "@/hooks/use-platform"
 import { readApiError } from "@/lib/api-error"
-import { cn } from "@/lib/utils"
 import type { AttentionItem, PreparedSource } from "@/lib/briefing/types"
 
 // The prepared work under an expanded row: the customer draft from the reply
 // queue, a researched answer for a colleague, or a read-only summary. Every
-// outbound action is a single explicit click; a needs_check draft never sends
-// from here, on web or on the desktop app (locked means locked — the desktop
-// just has fadmin to do the checking in).
+// outbound action is a single explicit click. A needs_check draft sends only
+// through the locked variant of SendConfirmDialog, where the agent asserts the
+// fadmin check; fadmin itself opens in the desktop app, so a locked draft also
+// offers a way there.
 
 const SOURCE_INITIAL: Record<PreparedSource["kind"], string> = {
   notion: "N",
@@ -72,14 +72,9 @@ function PreparedLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Body({ text, dimmed }: { text: string; dimmed?: boolean }) {
+function Body({ text }: { text: string }) {
   return (
-    <p
-      className={cn(
-        "text-[13px] leading-relaxed break-words whitespace-pre-line text-foreground/90",
-        dimmed && "opacity-55",
-      )}
-    >
+    <p className="text-[13px] leading-relaxed break-words whitespace-pre-line text-foreground/90">
       {text}
     </p>
   )
@@ -127,7 +122,7 @@ export function PreparedCard({
     const caseHref = `/cases/${item.externalId}/canvas`
 
     const send = async () => {
-      if (busy || locked) return
+      if (busy) return
       setBusy("send")
       try {
         const res = await fetch("/api/draft/send", {
@@ -136,8 +131,8 @@ export function PreparedCard({
           body: JSON.stringify({
             conversationId: item.externalId,
             body,
-            // Home never sends a locked draft, so this is always false here.
-            needsCheckConfirmed: false,
+            // True only after the locked confirm dialog (see SendConfirmDialog).
+            needsCheckConfirmed: locked,
           }),
         })
         if (!res.ok) {
@@ -200,7 +195,8 @@ export function PreparedCard({
             <div>
               <b className="block font-semibold text-foreground">Verify in fadmin before sending</b>
               {prepared.lockReason ??
-                "This one is prepared, but sending stays locked until you check it in fadmin. fadmin only opens in the desktop app."}
+                "This one is prepared, but sending stays locked until you check it in fadmin."}{" "}
+              fadmin opens in the desktop app; once you have checked, you can send from here.
             </div>
           </div>
         )}
@@ -212,7 +208,7 @@ export function PreparedCard({
           {prepared.band === "low_confidence" && <StatusTag>Review</StatusTag>}
         </PreparedLabel>
 
-        {editing && !locked ? (
+        {editing ? (
           <Textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
@@ -220,41 +216,13 @@ export function PreparedCard({
             autoFocus
           />
         ) : (
-          <Body text={body} dimmed={locked} />
+          <Body text={body} />
         )}
 
         <SourceList sources={prepared.sources} />
 
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {locked ? (
-            <>
-              {isDesktopApp ? (
-                <Button size="sm" asChild>
-                  <Link href={caseHref}>
-                    <ExternalLinkIcon />
-                    Open the case
-                  </Link>
-                </Button>
-              ) : (
-                <Button size="sm" asChild>
-                  <a
-                    href={downloadUrl ?? caseHref}
-                    target={downloadUrl ? "_blank" : undefined}
-                    rel={downloadUrl ? "noopener noreferrer" : undefined}
-                  >
-                    <ExternalLinkIcon />
-                    Open on desktop
-                  </a>
-                </Button>
-              )}
-              <Button size="sm" variant="outline" asChild>
-                <a href={item.deepLink} target="_blank" rel="noopener noreferrer">
-                  Open in Intercom
-                </a>
-              </Button>
-            </>
-          ) : (
-            <>
+          <>
               <Button size="sm" onClick={() => setConfirmOpen(true)} disabled={busy !== null}>
                 {busy === "send" ? <Loader2Icon className="animate-spin" /> : <SendIcon />}
                 Approve &amp; send
@@ -268,9 +236,21 @@ export function PreparedCard({
                 <PencilIcon />
                 {editing ? "Done" : "Edit"}
               </Button>
-              <Button size="sm" variant="ghost" asChild>
-                <Link href={caseHref}>Open case</Link>
-              </Button>
+              {locked && !isDesktopApp ? (
+                <Button size="sm" variant="ghost" asChild>
+                  <a
+                    href={downloadUrl ?? caseHref}
+                    target={downloadUrl ? "_blank" : undefined}
+                    rel={downloadUrl ? "noopener noreferrer" : undefined}
+                  >
+                    Check on desktop
+                  </a>
+                </Button>
+              ) : (
+                <Button size="sm" variant="ghost" asChild>
+                  <Link href={caseHref}>{locked ? "Check in fadmin" : "Open case"}</Link>
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
@@ -282,11 +262,11 @@ export function PreparedCard({
                 Reject
               </Button>
             </>
-          )}
         </div>
 
         <SendConfirmDialog
           open={confirmOpen}
+          locked={locked}
           onOpenChange={setConfirmOpen}
           onConfirm={() => {
             setConfirmOpen(false)

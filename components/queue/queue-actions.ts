@@ -9,8 +9,9 @@
 // that never clears.
 //
 // Nothing here decides *whether* to send. Callers gate that: a needs_check
-// (locked) draft is never sendable from /queue at all, and in Canvas it only
-// gets here after the row's own two-step confirm.
+// (locked) draft only gets here after the agent confirmed the fadmin check
+// (Canvas: the row's two-step confirm; /queue and Home: the locked variant of
+// SendConfirmDialog).
 
 import { readApiError } from "@/lib/api-error"
 
@@ -83,7 +84,7 @@ export type SendResult = { ok: boolean; resolvedOk: boolean; error?: string }
  * `needsCheckConfirmed` is passed explicitly by the caller rather than derived
  * from the band: the server refuses a locked draft without it (409), and only
  * a UI that actually ran a fadmin-check confirm is entitled to assert it.
- * /queue always passes false and never calls this for a locked row.
+ * /queue and Home pass true only after the locked confirm dialog.
  */
 export async function postSendAndResolve(
   item: QueueItem,

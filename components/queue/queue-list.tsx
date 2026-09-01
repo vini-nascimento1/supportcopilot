@@ -22,7 +22,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { SendConfirmDialog } from "@/components/send-confirm-dialog"
 import { usePlatform } from "@/hooks/use-platform"
 import { LOCK_REASON_GENERIC } from "@/lib/briefing/format"
-import { cn, relativeTime } from "@/lib/utils"
+import { relativeTime } from "@/lib/utils"
 import {
   byOldest,
   fetchQueue,
@@ -44,11 +44,11 @@ import {
 // to expand, one tap plus a confirmation dialog to send. The outbound calls come
 // from the shared module so the payloads can never drift from Canvas.
 //
-// Lock rule, identical on every surface: a needs_check draft is never sendable
-// here. The server enforces it too (POST /api/draft/send answers 409 without a
-// confirmation), but this UI simply doesn't offer the button — it offers the
-// desktop app and Intercom instead, because the fadmin check has to happen
-// somewhere the agent can actually see fadmin.
+// Lock rule, identical on every surface: a needs_check draft only sends after
+// the agent confirms the fadmin check in a stricter dialog, and that confirm is
+// what sets needsCheckConfirmed (the server answers 409 without it). Sending
+// itself works from anywhere; only fadmin and the Canvas need the desktop app,
+// so a locked row also offers a way to open the case there.
 
 const POLL_MS = 15_000
 
@@ -153,7 +153,7 @@ export function QueueList({
           {needsCheck.length > 0 && (
             <Section
               title="Needs your check"
-              hint="Sending is locked until someone verifies these in fadmin."
+              hint="Check these in fadmin first, then confirm to send."
               count={needsCheck.length}
             >
               {needsCheck.map((item) => (
@@ -236,12 +236,11 @@ function QueueCard({
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const send = async () => {
-    // Belt and braces: this button is never rendered for a locked draft, and
-    // the server would refuse it anyway. Keep the guard so a future edit to the
-    // markup can't quietly make a locked row sendable.
-    if (locked || unassigned || busy) return
+    if (unassigned || busy) return
     setBusy("send")
-    const result = await postSendAndResolve(item, body, { needsCheckConfirmed: false })
+    // Only reachable through SendConfirmDialog, which for a locked draft asks
+    // the agent to assert the fadmin check before this flag is ever true.
+    const result = await postSendAndResolve(item, body, { needsCheckConfirmed: locked })
     if (!result.ok) {
       toast.error(result.error ?? "Couldn't send. Open the case and try there.")
       setBusy(null)
@@ -323,12 +322,13 @@ function QueueCard({
               <LockIcon className="mt-0.5 size-3.5 shrink-0 text-foreground" />
               <div className="min-w-0">
                 <b className="block font-semibold text-foreground">Verify in fadmin before sending</b>
-                {LOCK_REASON_GENERIC} fadmin only opens in the desktop app.
+                {LOCK_REASON_GENERIC} fadmin opens in the desktop app; once you have checked, you can
+                send from here.
               </div>
             </div>
           )}
 
-          {editing && !locked ? (
+          {editing ? (
             <Textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
@@ -337,10 +337,7 @@ function QueueCard({
             />
           ) : (
             <p
-              className={cn(
-                "text-[13px] leading-relaxed break-words whitespace-pre-wrap text-foreground/90",
-                locked && "opacity-60"
-              )}
+              className="text-[13px] leading-relaxed break-words whitespace-pre-wrap text-foreground/90"
             >
               {body}
             </p>
@@ -372,36 +369,7 @@ function QueueCard({
           )}
 
           <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5">
-            {locked ? (
-              <>
-                {isDesktopApp ? (
-                  <Button size="sm" asChild>
-                    <Link href={caseHref}>
-                      <ExternalLinkIcon />
-                      Open the case
-                    </Link>
-                  </Button>
-                ) : (
-                  <Button size="sm" asChild>
-                    <a
-                      href={downloadUrl ?? caseHref}
-                      target={downloadUrl ? "_blank" : undefined}
-                      rel={downloadUrl ? "noopener noreferrer" : undefined}
-                    >
-                      <ExternalLinkIcon />
-                      Open on desktop
-                    </a>
-                  </Button>
-                )}
-                {intercomHref && (
-                  <Button size="sm" variant="outline" asChild>
-                    <a href={intercomHref} target="_blank" rel="noopener noreferrer">
-                      Open in Intercom
-                    </a>
-                  </Button>
-                )}
-              </>
-            ) : unassigned ? (
+            {unassigned ? (
               <>
                 <Button size="sm" onClick={() => void assign()} disabled={busy !== null}>
                   {busy === "assign" ? (
@@ -439,6 +407,22 @@ function QueueCard({
                   <PencilIcon />
                   {editing ? "Done" : "Edit"}
                 </Button>
+                {locked &&
+                  (isDesktopApp ? (
+                    <Button size="sm" variant="ghost" asChild>
+                      <Link href={caseHref}>Check in fadmin</Link>
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" asChild>
+                      <a
+                        href={downloadUrl ?? caseHref}
+                        target={downloadUrl ? "_blank" : undefined}
+                        rel={downloadUrl ? "noopener noreferrer" : undefined}
+                      >
+                        Check on desktop
+                      </a>
+                    </Button>
+                  ))}
                 {intercomHref && (
                   <Button size="sm" variant="ghost" asChild>
                     <a href={intercomHref} target="_blank" rel="noopener noreferrer">
@@ -470,6 +454,7 @@ function QueueCard({
 
           <SendConfirmDialog
             open={confirmOpen}
+            locked={locked}
             onOpenChange={setConfirmOpen}
             onConfirm={() => {
               setConfirmOpen(false)

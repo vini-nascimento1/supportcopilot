@@ -156,7 +156,7 @@ from counts alone. `narrativeSource` tells the UI which one it got.
   an "ignore previous instructions" Slack message reaches neither the narrative input nor its output.
 - Titles and contexts are sanitized once at the source boundary: email addresses replaced, newlines
   and control characters stripped, length capped.
-- Nothing sends or approves without a click, and a locked (`needs_check`) draft stays locked
+- Nothing sends or approves without a click, and a locked (`needs_check`) draft only sends through the locked `SendConfirmDialog`, where the agent asserts the fadmin check (that sets `needsCheckConfirmed`); it otherwise stays locked
   everywhere.
 - Logs carry agent ids and counts only, never message text.
 - Sign-in is unchanged Google Workspace SSO — see [[Auth and Session]].

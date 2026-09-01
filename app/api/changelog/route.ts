@@ -27,7 +27,7 @@ const SEED_ENTRIES: ChangelogEntry[] = [
     date: "2026-09-01",
     title: "The reply queue works on your phone",
     description:
-      "Reviewing drafts used to mean opening Canvas on a desktop. There is now a Queue page in the sidebar and in the bottom bar on a phone, with the same drafts split into Ready to send, Needs your check and On request. Tap one to read it, edit it if you want, and approve it with a confirmation step before anything reaches the customer. Drafts that need a fadmin check stay locked here too: instead of a send button you get the reason and a way to open the case on desktop or in Intercom. Unassigned tickets show an Assign to me button first, same as in Canvas.",
+      "Reviewing drafts used to mean opening Canvas on a desktop. There is now a Queue page in the sidebar and in the bottom bar on a phone, with the same drafts split into Ready to send, Needs your check and On request. Tap one to read it, edit it if you want, and approve it with a confirmation step before anything reaches the customer. Drafts that need a fadmin check are marked Locked and explain why; you can still send them from your phone once you have done the check, through a stricter confirmation that asks you to say so. fadmin and the Canvas are the only parts that still need the desktop app. Unassigned tickets show an Assign to me button first, same as in Canvas.",
   },
   {
     id: "seed-2026-09-01-d",
