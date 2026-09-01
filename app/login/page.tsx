@@ -1,4 +1,5 @@
 import Image from "next/image"
+import { redirect } from "next/navigation"
 import { Button } from "@/components/ui/button"
 
 export const dynamic = "force-dynamic"
@@ -12,9 +13,17 @@ const errorMessages: Record<string, string> = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>
+  searchParams: Promise<{ error?: string; code?: string }>
 }) {
-  const { error } = await searchParams
+  const { error, code } = await searchParams
+
+  // Supabase falls back to the project's Site URL when the requested
+  // `redirectTo` is not on its allowlist, which drops the PKCE code here
+  // instead of on the callback route. Forward it rather than dead-ending
+  // on the sign-in screen.
+  if (code) {
+    redirect(`/api/auth/callback?code=${encodeURIComponent(code)}`)
+  }
   const errorMessage = error ? (errorMessages[error] ?? "Sign-in failed. Please try again.") : null
 
   return (
