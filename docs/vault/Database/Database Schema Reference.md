@@ -1,12 +1,12 @@
 ---
 title: Database Schema Reference
 tags: [database, supabase, reference]
-updated: 2026-08-30
+updated: 2026-09-01
 ---
 
 # Database Schema Reference
 
-Supabase Postgres schema for the Fanvue Support Copilot app (project `fanvue-support-copilot`, ref `sarbmqumaadpozmpenyr`). There is no `supabase/migrations/` folder checked into this repo — the schema lives only in the remote Supabase project, applied through 26 migrations (`init` → `drop_agents_personal_ai_provider`, 2026-06-06 to 2026-08-03). This page was verified directly against the live schema (`list_tables`, `pg_indexes`) and the applied migration history, not against local SQL files, since none exist in-tree.
+Supabase Postgres schema for the Fanvue Support Copilot app (project `fanvue-support-copilot`, ref `sarbmqumaadpozmpenyr`). There is no `supabase/migrations/` folder checked into this repo — the schema lives only in the remote Supabase project, applied through 27 migrations (`init` → `agents_home_briefing_columns`, 2026-06-06 to 2026-09-01). This page was verified directly against the live schema (`list_tables`, `pg_indexes`) and the applied migration history, not against local SQL files, since none exist in-tree.
 
 All tables below have Row Level Security enabled (`rls_enabled: true`). See [[Auth and Session]] for how agent identity maps into RLS policies.
 
@@ -31,6 +31,11 @@ One row per support agent, created on first Supabase Auth login. Holds identity,
 | user_id | uuid | nullable, unique, FK → `auth.users.id` |
 | avatar_url | text | nullable |
 | working_days | integer[] | default `{1,2,3,4,5}` |
+| agent_name | text | nullable — the customer-facing name used in draft greetings and quick-send emails. Separate from `name` (internal Google display name). Read only through `lib/agent-identity.ts`; seeded once from the matched Intercom admin name by `app/api/auth/callback`; edited in Settings > Profile. Added 2026-09-01 |
+| slack_user_id | text | nullable — the agent's own Slack user id (`U…`), stored by `app/api/auth/slack/callback` and lazily backfilled by `lib/briefing/sources/slack.ts`. Lets the briefing tell a mention of the agent from their own messages. Added 2026-09-01 |
+| last_seen_at | timestamptz | nullable — when the agent last opened Home; the briefing's digest window starts here (capped at 24h). Written by `markHomeSeen()` in `lib/briefing/build.ts`. Added 2026-09-01 |
+| briefing_cache | jsonb | nullable — the last built `Briefing` (normalized items only, no provider payloads or tokens). 5-minute TTL. Written by `lib/briefing/build.ts`. Added 2026-09-01 |
+| briefing_cached_at | timestamptz | nullable — when `briefing_cache` was written. Added 2026-09-01 |
 | notion_mcp_access_token | text | nullable — hosted Notion MCP OAuth access token, expires ~1h |
 | notion_mcp_refresh_token | text | nullable — rotating refresh token, persist atomically on refresh |
 | notion_mcp_token_expires_at | timestamptz | nullable — access token expiry (UTC) |
@@ -41,7 +46,7 @@ One row per support agent, created on first Supabase Auth login. Holds identity,
 
 **Dropped 2026-08-03** (migration `drop_agents_personal_ai_provider`): `personal_ai_key_enc`, `personal_ai_base_url`, `personal_ai_model`, `personal_ai_aux_model`, `personal_ai_enabled`. These backed the per-agent "Personal AI key" feature, removed when Fanvue provisioned a single org OpenAI key for the whole app — the model is now an env var, not a per-agent setting. See [[Draft Verify Pipeline]].
 
-**Read/write:** `lib/auth.ts`, `lib/agent.ts`, `lib/agent-tone.ts`, `lib/drafts.ts`, `lib/automation/*.ts`, `lib/triage/store.ts`, `lib/notion-mcp-auth-server.ts`; API routes `app/api/agent/tone`, `app/api/agents`, `app/api/auth/callback`, `app/api/auth/slack/callback`, `app/api/auth/notion/callback`, `app/api/settings/update`, `app/api/cases`, `app/api/reply-queue*`, `app/api/playbook-dismissals`, `app/api/automation/alerts`, `app/api/cron/refresh-metrics`, `app/api/metrics`, `app/api/ai/chat`.
+**Read/write:** `lib/auth.ts`, `lib/agent.ts`, `lib/agent-tone.ts`, `lib/drafts.ts`, `lib/automation/*.ts`, `lib/triage/store.ts`, `lib/notion-mcp-auth-server.ts`, `lib/agent-identity.ts`, `lib/briefing/build.ts`, `lib/briefing/sources/slack.ts`; API routes `app/api/agent/tone`, `app/api/agents`, `app/api/auth/callback`, `app/api/auth/slack/callback`, `app/api/auth/notion/callback`, `app/api/settings/update`, `app/api/cases`, `app/api/reply-queue*`, `app/api/playbook-dismissals`, `app/api/automation/alerts`, `app/api/cron/refresh-metrics`, `app/api/metrics`, `app/api/ai/chat`, `app/api/briefing`, `app/api/briefing/refresh`.
 
 ## AI reply pipeline
 

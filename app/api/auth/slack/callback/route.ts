@@ -46,7 +46,7 @@ export async function GET(request: Request) {
     })
     const data = (await res.json()) as {
       ok: boolean
-      authed_user?: { access_token?: string }
+      authed_user?: { access_token?: string; id?: string }
     }
 
     const token = data.ok ? data.authed_user?.access_token : null
@@ -54,9 +54,16 @@ export async function GET(request: Request) {
       return settings("slack-failed")
     }
 
+    // Persist the agent's own Slack user id alongside the token: the Home
+    // briefing needs it to tell "someone mentioned me" from "I said something"
+    // without an extra auth.test round trip on every load. Older connections
+    // resolve it lazily (lib/slack.ts::getSlackUserId) and are backfilled there.
     await adminClient
       .from("agents")
-      .update({ slack_token: token })
+      .update({
+        slack_token: token,
+        ...(data.authed_user?.id ? { slack_user_id: data.authed_user.id } : {}),
+      })
       .eq("email", email)
 
     return settings("slack-connected")

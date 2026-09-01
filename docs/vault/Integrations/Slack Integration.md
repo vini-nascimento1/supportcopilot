@@ -1,7 +1,7 @@
 ---
 title: Slack Integration
 tags: [integrations, slack, notifications]
-updated: 2026-07-29
+updated: 2026-09-01
 ---
 
 # Slack Integration
@@ -15,7 +15,7 @@ Two token sources, tried in order at call time:
 1. A per-agent OAuth user token, `agents.slack_token`, connected from the Settings page (see [[Settings and Profile]]) via `/api/auth/slack` → Slack OAuth consent → `/api/auth/slack/callback`.
 2. `SLACK_BOT_TOKEN` env var — a shared dev/workspace bot token used as a fallback when an agent hasn't connected their own token.
 
-The OAuth consent screen (`app/api/auth/slack/route.ts`) requests user-token scopes: `channels:read`, `channels:history`, `groups:read`, `groups:history`, `im:read`, `im:history`, `im:write`, `mpim:read`, `mpim:history`, `chat:write`, `reactions:read`, `reactions:write`, `users:read`, `users:read.email`, `search:read`. The minimum set actually exercised by the core read/write paths is `channels:history`, `channels:read`, `users:read`, and `chat:write`.
+The OAuth consent screen (`app/api/auth/slack/route.ts`) requests user-token scopes: `channels:read`, `channels:history`, `groups:read`, `groups:history`, `im:read`, `im:history`, `im:write`, `mpim:read`, `mpim:history`, `chat:write`, `reactions:read`, `reactions:write`, `users:read`, `users:read.email`, `search:read`, `usergroups:read` (added 2026-09-01 for the [[Home Briefing]]: resolves which user groups the agent belongs to so an `@support-team` mention counts as a mention of them). The minimum set actually exercised by the core read/write paths is `channels:history`, `channels:read`, `users:read`, and `chat:write`.
 
 ## Config
 

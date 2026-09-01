@@ -41,6 +41,10 @@ export async function GET(request: Request) {
     "reactions:read", "reactions:write",
     "users:read", "users:read.email",
     "search:read",
+    // Home briefing: resolve which @user-groups the agent belongs to so a
+    // "@support-team" mention counts as a mention of them (lib/slack.ts
+    // getAgentUserGroups). Read-only; no group membership is ever changed.
+    "usergroups:read",
   ].join(",")
   url.searchParams.set("user_scope", userScopes)
   url.searchParams.set("redirect_uri", `${origin}/api/auth/slack/callback`)

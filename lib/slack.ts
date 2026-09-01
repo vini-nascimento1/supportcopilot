@@ -713,3 +713,293 @@ export async function sendSlackMessage(
 export function countUnreadConversations(conversations: SlackConversation[]): number {
   return conversations.filter((c) => c.unreadCount > 0).length
 }
+
+// ── Home briefing helpers (see docs/vault/Automation/Home Briefing.md) ──────
+//
+// Everything below exists for lib/briefing/sources/slack.ts and is deliberately
+// narrow: the briefing only ever reads DMs/group-DMs addressed to the agent and
+// channel messages that mention the agent personally or a user group they
+// belong to. Whole channels and other people's threads are never fetched.
+// Requires the user scopes already requested in app/api/auth/slack/route.ts
+// plus `usergroups:read`.
+
+export type SlackBriefingMessage = {
+  /** Channel/conversation the message lives in (C…, D…, G…). */
+  channelId: string
+  /** Human channel name where known ("payments"), else the id. */
+  channelName: string
+  /** Slack message ts — the stable per-message id. */
+  ts: string
+  /** Parent thread ts when the message is a threaded reply. */
+  threadTs?: string
+  userId: string
+  userName: string
+  text: string
+  /** Unix seconds (float ts truncated) for ordering/filters. */
+  tsSeconds: number
+  permalink: string
+}
+
+export type SlackUserGroup = { id: string; handle: string; name: string }
+
+type AuthTest = { userId: string; workspaceUrl: string } | null
+
+/** auth.test — the agent's own Slack user id plus the workspace base URL. */
+async function slackAuthTest(token: string): Promise<AuthTest> {
+  try {
+    const res = await fetch("https://slack.com/api/auth.test", {
+      headers: { Authorization: `Bearer ${token}` },
+      next: { revalidate: 0 },
+    })
+    const data = (await res.json()) as { ok: boolean; user_id?: string; url?: string }
+    if (!data.ok || !data.user_id) return null
+    return {
+      userId: data.user_id,
+      workspaceUrl: (data.url ?? "https://slack.com").replace(/\/$/, ""),
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The signed-in agent's own Slack user id (`U…`). Cached in `agents.slack_user_id`
+ * by the OAuth callback; this is the lazy resolver for connections made before
+ * that column existed.
+ */
+export async function getSlackUserId(token: string): Promise<string | null> {
+  const auth = await slackAuthTest(token)
+  return auth?.userId ?? null
+}
+
+/**
+ * The user groups (`@support-team`…) the agent belongs to. `usergroups.list`
+ * with `include_users` returns the membership inline, so this is one call
+ * rather than one per group. Needs the `usergroups:read` user scope; on a
+ * missing scope it returns [] and the briefing simply shows no group mentions.
+ */
+export async function getAgentUserGroups(
+  token: string,
+  userId: string
+): Promise<SlackUserGroup[]> {
+  try {
+    const url = new URL("https://slack.com/api/usergroups.list")
+    url.searchParams.set("include_users", "true")
+    url.searchParams.set("include_disabled", "false")
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+      next: { revalidate: 0 },
+    })
+    const data = (await res.json()) as {
+      ok: boolean
+      error?: string
+      usergroups?: Array<{ id: string; handle?: string; name?: string; users?: string[] }>
+    }
+    if (!data.ok) {
+      console.warn(`[slack] usergroups.list failed: ${data.error ?? "unknown"}`)
+      return []
+    }
+    return (data.usergroups ?? [])
+      .filter((g) => (g.users ?? []).includes(userId))
+      .map((g) => ({ id: g.id, handle: g.handle ?? g.id, name: g.name ?? g.handle ?? g.id }))
+  } catch {
+    return []
+  }
+}
+
+type SearchMatch = {
+  ts?: string
+  text?: string
+  permalink?: string
+  user?: string
+  username?: string
+  channel?: { id?: string; name?: string }
+  bot_id?: string
+  subtype?: string
+}
+
+async function searchOnce(token: string, query: string): Promise<SearchMatch[]> {
+  try {
+    const url = new URL("https://slack.com/api/search.messages")
+    url.searchParams.set("query", query)
+    url.searchParams.set("count", "40")
+    url.searchParams.set("sort", "timestamp")
+    url.searchParams.set("sort_dir", "desc")
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+      next: { revalidate: 0 },
+    })
+    const data = (await res.json()) as {
+      ok: boolean
+      error?: string
+      messages?: { matches?: SearchMatch[] }
+    }
+    if (!data.ok) {
+      console.warn(`[slack] search.messages failed: ${data.error ?? "unknown"}`)
+      return []
+    }
+    return data.messages?.matches ?? []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Channel messages mentioning the agent personally (`<@U…>`) or one of the user
+ * groups they belong to (`<!subteam^S…>`), newer than `sinceUnix`. The agent's
+ * own messages are dropped — the briefing is about what needs them, not what
+ * they wrote. Never fetches a channel wholesale.
+ */
+export async function searchMentions(
+  token: string,
+  opts: { userId: string; groupIds: string[]; sinceUnix: number }
+): Promise<SlackBriefingMessage[]> {
+  const queries = [`<@${opts.userId}>`, ...opts.groupIds.map((id) => `<!subteam^${id}>`)]
+  const batches = await Promise.all(queries.map((q) => searchOnce(token, q)))
+
+  const seen = new Set<string>()
+  const out: SlackBriefingMessage[] = []
+  for (const match of batches.flat()) {
+    if (!match.ts || !match.channel?.id) continue
+    if (match.user === opts.userId) continue // the agent's own message
+    const tsSeconds = Math.floor(parseFloat(match.ts))
+    if (!Number.isFinite(tsSeconds) || tsSeconds < opts.sinceUnix) continue
+    const key = `${match.channel.id}:${match.ts}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      channelId: match.channel.id,
+      channelName: match.channel.name ?? match.channel.id,
+      ts: match.ts,
+      userId: match.user ?? match.bot_id ?? "unknown",
+      userName: match.username ?? match.user ?? "Someone",
+      text: match.text ?? "",
+      tsSeconds,
+      permalink: match.permalink ?? "",
+    })
+  }
+  return out.sort((a, b) => b.tsSeconds - a.tsSeconds)
+}
+
+type DmChannel = { id: string; name: string; userId?: string; isMpim: boolean }
+
+async function listDmChannels(token: string): Promise<DmChannel[]> {
+  const out: DmChannel[] = []
+  let cursor: string | undefined
+  try {
+    do {
+      const url = new URL("https://slack.com/api/users.conversations")
+      url.searchParams.set("types", "im,mpim")
+      url.searchParams.set("limit", "200")
+      url.searchParams.set("exclude_archived", "true")
+      if (cursor) url.searchParams.set("cursor", cursor)
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+        next: { revalidate: 0 },
+      })
+      const data = (await res.json()) as {
+        ok: boolean
+        error?: string
+        channels?: Array<{ id: string; name?: string; user?: string; is_mpim?: boolean }>
+        response_metadata?: { next_cursor?: string }
+      }
+      if (!data.ok) {
+        console.warn(`[slack] users.conversations (im,mpim) failed: ${data.error ?? "unknown"}`)
+        return out
+      }
+      for (const c of data.channels ?? []) {
+        out.push({
+          id: c.id,
+          name: c.name ?? "Group DM",
+          userId: c.user,
+          isMpim: Boolean(c.is_mpim),
+        })
+      }
+      cursor = data.response_metadata?.next_cursor || undefined
+    } while (cursor)
+  } catch {
+    return out
+  }
+  return out
+}
+
+async function fetchHistorySince(
+  token: string,
+  channelId: string,
+  sinceUnix: number
+): Promise<Array<{ ts?: string; user?: string; text?: string; subtype?: string; thread_ts?: string }>> {
+  try {
+    const url = new URL("https://slack.com/api/conversations.history")
+    url.searchParams.set("channel", channelId)
+    url.searchParams.set("oldest", String(sinceUnix))
+    url.searchParams.set("limit", "20")
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+      next: { revalidate: 0 },
+    })
+    const data = (await res.json()) as {
+      ok: boolean
+      messages?: Array<{ ts?: string; user?: string; text?: string; subtype?: string; thread_ts?: string }>
+    }
+    if (!data.ok) return []
+    return data.messages ?? []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Messages other people sent the agent in DMs and group DMs since `sinceUnix`:
+ * `users.conversations` (types im,mpim) for the channel list, then
+ * `conversations.history` with `oldest` per channel. Joins/leaves and the
+ * agent's own messages are ignored.
+ */
+export async function getUnreadDms(
+  token: string,
+  sinceUnix: number
+): Promise<SlackBriefingMessage[]> {
+  const auth = await slackAuthTest(token)
+  if (!auth) return []
+
+  const channels = await listDmChannels(token)
+  if (channels.length === 0) return []
+
+  const nameByUser = await resolveSlackUsers(
+    token,
+    channels.map((c) => c.userId).filter((u): u is string => Boolean(u))
+  )
+
+  const out: SlackBriefingMessage[] = []
+  // Capped and batched: a briefing must not turn into 200 sequential calls.
+  const BATCH = 8
+  const targets = channels.slice(0, 40)
+  for (let i = 0; i < targets.length; i += BATCH) {
+    await Promise.allSettled(
+      targets.slice(i, i + BATCH).map(async (channel) => {
+        const history = await fetchHistorySince(token, channel.id, sinceUnix)
+        for (const m of history) {
+          if (!m.ts) continue
+          if (m.subtype) continue // joins, leaves, channel meta
+          if (!m.user || m.user === auth.userId) continue
+          const tsSeconds = Math.floor(parseFloat(m.ts))
+          if (!Number.isFinite(tsSeconds) || tsSeconds < sinceUnix) continue
+          const tsClean = m.ts.replace(".", "")
+          out.push({
+            channelId: channel.id,
+            channelName: channel.isMpim
+              ? channel.name
+              : (nameByUser[m.user]?.name ?? "Direct message"),
+            ts: m.ts,
+            threadTs: m.thread_ts,
+            userId: m.user,
+            userName: nameByUser[m.user]?.name ?? m.user,
+            text: m.text ?? "",
+            tsSeconds,
+            permalink: `${auth.workspaceUrl}/archives/${channel.id}/p${tsClean}`,
+          })
+        }
+      })
+    )
+  }
+  return out.sort((a, b) => b.tsSeconds - a.tsSeconds)
+}

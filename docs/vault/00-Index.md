@@ -41,6 +41,7 @@ This vault documents **how the app works**, not what to do on any given ticket �
 ## Settings & Automation
 
 - [[Settings and Profile]] — the agent-facing settings page (Profile / Canvas / AI & Drafting columns)
+- [[Home Briefing]] — the briefing data layer behind Home: sources, research, narrative, caching
 - [[Automation Rules Engine]] — user-defined trigger/monitor rules, condition trees, actions
 - [[Notifications]] — the global notification bell (now the single home for automation alerts too) vs. sonner toasts
 
