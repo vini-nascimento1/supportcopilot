@@ -8,7 +8,6 @@ import {
   BookOpenIcon,
   GlobeIcon,
   RefreshCcwIcon,
-  LayoutPanelTopIcon,
   CommandIcon,
   ArrowUpDownIcon,
 } from "lucide-react"
@@ -64,13 +63,6 @@ const ITEMS: CommandItem[] = [
       window.dispatchEvent(new CustomEvent("refresh-intercom"))
       window.dispatchEvent(new CustomEvent("refresh-gmail"))
     },
-  },
-  {
-    id: "reset-layout",
-    label: "Reset dashboard layout",
-    icon: LayoutPanelTopIcon,
-    keywords: ["reset", "layout", "grid", "arrange", "default"],
-    action: () => window.dispatchEvent(new CustomEvent("reset-dashboard-layout")),
   },
   {
     id: "jump-cases",

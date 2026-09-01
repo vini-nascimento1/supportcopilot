@@ -130,7 +130,7 @@ export default function SentPage({ currentEmail }: { currentEmail: string | null
   return (
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <HistoryIcon className="size-5 text-muted-foreground" />
           <h2 className="text-lg font-semibold">Sent Tracker</h2>

@@ -164,7 +164,7 @@ export default async function SettingsPage({
         <SidebarTrigger />
         <Separator orientation="vertical" className="min-h-6" />
         <h1 className="text-base font-medium">Settings</h1>
-        <span className="text-sm text-muted-foreground">
+        <span className="hidden truncate text-sm text-muted-foreground sm:inline">
           Profile, canvas behavior, AI drafting voice, and connected integrations
         </span>
       </header>
@@ -186,7 +186,7 @@ export default async function SettingsPage({
         )}
 
         <Tabs defaultValue="profile">
-          <TabsList variant="line" className="mb-2 h-auto w-full justify-start gap-6 border-b pb-0">
+          <TabsList variant="line" className="mb-2 h-auto w-full justify-start gap-6 overflow-x-auto border-b pb-0">
             <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="canvas">Canvas</TabsTrigger>
             <TabsTrigger value="ai">AI &amp; Drafting</TabsTrigger>

@@ -9,7 +9,7 @@ import {
   ClipboardListIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  LifeBuoyIcon,
+  HomeIcon,
   LogOutIcon,
   MailIcon,
   MessageSquareIcon,
@@ -37,10 +37,12 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChangelogDialog } from "@/components/changelog-dialog"
+import { usePlatform } from "@/hooks/use-platform"
 
 const workspaceItems = [
-  { label: "Dashboard", icon: LifeBuoyIcon, href: "/" },
+  { label: "Home", icon: HomeIcon, href: "/" },
   { label: "Cases", icon: ClipboardListIcon, href: "/cases" },
   { label: "Gmail", icon: MailIcon, href: "/gmail" },
   { label: "Slack", icon: MessageSquareIcon, href: "/slack" },
@@ -63,10 +65,16 @@ export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser, is
   const initial = userEmail ? userEmail[0]?.toUpperCase() : "?"
   const [changelogOpen, setChangelogOpen] = useState(false)
   const [gmailExpanded, setGmailExpanded] = useState(false)
+  const { isDesktopApp, isMobileViewport } = usePlatform()
 
-  const visibleItems = workspaceItems.filter(
-    (item) => item.label !== "Metrics" || isManager
-  )
+  const visibleItems = workspaceItems.filter((item) => {
+    if (item.label === "Metrics") return isManager
+    // Canvas needs real screen space and (for the full experience) the
+    // desktop shell's embedded tool views — drop it entirely on mobile
+    // viewports rather than link to a page that can't do much there.
+    if (item.label === "Canvas") return !isMobileViewport
+    return true
+  })
 
   return (
     <Sidebar collapsible="icon">
@@ -100,14 +108,30 @@ export function WorkspaceSidebar({ userEmail, avatarUrl, isGmailTemplateUser, is
                     ? pathname === "/"
                     : pathname === item.href || pathname.startsWith(item.href + "/")
                 const isGmail = item.label === "Gmail"
+                // Canvas needs the desktop shell for the full embedded-tool
+                // experience; on plain web it still works (CaseCanvas has its
+                // own download gate) but is worth a hint.
+                const isCanvasOnWeb = item.label === "Canvas" && !isDesktopApp
+                const menuButton = (
+                  <SidebarMenuButton asChild isActive={isActive}>
+                    <Link href={item.href}>
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                )
                 return (
                   <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton asChild isActive={isActive}>
-                      <Link href={item.href}>
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
+                    {isCanvasOnWeb ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>{menuButton}</TooltipTrigger>
+                        <TooltipContent side="right" align="center">
+                          Full experience in the desktop app
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      menuButton
+                    )}
                     {isGmail && isGmailTemplateUser && (
                       <SidebarMenuAction
                         onClick={() => setGmailExpanded(!gmailExpanded)}

@@ -1,5 +1,6 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { WorkspaceSidebar } from "@/components/workspace-sidebar"
+import { MobileNav } from "@/components/mobile-nav"
 import { getSignedInUser } from "@/lib/auth"
 import { getDesktopDownloadUrl } from "@/lib/desktop-download"
 import { isGmailTemplateUser } from "@/lib/gmail-templates-auth"
@@ -22,7 +23,10 @@ export async function WorkspaceLayout({ children }: { children: React.ReactNode 
         isManager={isManager}
         downloadUrl={downloadUrl}
       />
-      <SidebarInset>{children}</SidebarInset>
+      {/* pb-14 (+ safe-area) below md so the fixed mobile nav never covers
+          page content; no-op above md where the nav is hidden. */}
+      <SidebarInset className="pb-14 md:pb-0">{children}</SidebarInset>
+      <MobileNav isManager={isManager} />
     </SidebarProvider>
   )
 }

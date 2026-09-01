@@ -187,7 +187,7 @@ export function GmailThreadList({
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="fixed inset-x-0 bottom-14 z-40 border-t bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80 md:bottom-0">
           <div className="flex items-center gap-3 px-4 py-3 lg:px-6">
             <span className="text-sm font-medium">
               {selected.size} selected

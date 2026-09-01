@@ -223,7 +223,7 @@ export function AIChat() {
       <button
         onClick={() => setOpen(!open)}
         data-canvas-chrome="right"
-        className="fixed bottom-6 right-6 z-50 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-all hover:scale-105 hover:shadow-xl active:scale-95"
+        className="fixed bottom-20 right-4 z-50 flex size-12 md:bottom-6 md:right-6 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-all hover:scale-105 hover:shadow-xl active:scale-95"
         aria-label={open ? "Close AI chat" : "Open AI chat"}
       >
         {open ? <XIcon className="size-5" /> : <BotIcon className="size-5" />}
@@ -235,7 +235,7 @@ export function AIChat() {
       {open && (
         <div
           data-canvas-chrome="right"
-          className="fixed bottom-22 right-6 z-50 flex w-[440px] max-w-[calc(100vw-3rem)] flex-col rounded-xl border bg-card shadow-2xl transition-all duration-200 animate-in slide-in-from-bottom-4"
+          className="fixed bottom-36 right-4 z-50 flex w-[440px] max-w-[calc(100vw-2rem)] md:bottom-22 md:right-6 md:max-w-[calc(100vw-3rem)] flex-col rounded-xl border bg-card shadow-2xl transition-all duration-200 animate-in slide-in-from-bottom-4"
         >
           {/* Header */}
           <div className="flex items-center gap-2 border-b px-4 py-3">

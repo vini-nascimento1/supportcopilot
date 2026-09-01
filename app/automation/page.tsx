@@ -8,10 +8,12 @@ export const dynamic = "force-dynamic"
 export default function AutomationPage() {
   return (
     <WorkspaceLayout>
-      <header className="flex min-h-14 items-center gap-3 border-b px-4 lg:px-6">
-        <SidebarTrigger />
-        <Separator orientation="vertical" className="min-h-6" />
-        <h1 className="text-base font-medium">Automation</h1>
+      <header className="flex min-h-14 flex-wrap items-center gap-3 border-b px-4 py-2 lg:px-6">
+        <div className="flex items-center gap-3">
+          <SidebarTrigger />
+          <Separator orientation="vertical" className="min-h-6" />
+          <h1 className="text-base font-medium">Automation</h1>
+        </div>
         <span className="text-sm text-muted-foreground">
           Triggers &amp; monitors — draft-only alerts and internal flags
         </span>

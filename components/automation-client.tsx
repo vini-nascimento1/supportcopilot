@@ -189,7 +189,7 @@ export function AutomationClient() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm font-medium">
           <ZapIcon className="size-4 text-muted-foreground" /> Rules
         </div>
@@ -745,7 +745,7 @@ function ConditionsStep({
 }) {
   return (
     <div className="grid gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Label className="text-sm font-medium">Conditions</Label>
         <Select
           value={tree.match}
