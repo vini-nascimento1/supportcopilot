@@ -21,13 +21,6 @@ const SEED_ENTRIES: ChangelogEntry[] = [
     title: "The sign-in page no longer shows the AI chat",
     description:
       "The AI chat bubble, command palette and notification bell used to float over the sign-in page before you had logged in. They now only appear once you're signed in.",
-  },
-  {
-    id: "seed-2026-09-01-d",
-    date: "2026-09-01",
-    title: "Bottom navigation on phones",
-    description:
-      "On a phone the sidebar is replaced by a bottom bar with Home, Cases, Queue and More. Canvas is desktop-only, so it stays out of the way on small screens, and page headers no longer overflow sideways.",
   },
   {
     id: "seed-2026-09-01-d",
