@@ -137,50 +137,6 @@
     }
 }
 
-/* ── react-grid-layout ─────────────────────────────────────── */
-.react-resizable-handle {
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  bottom: 4px;
-  right: 4px;
-  cursor: se-resize;
-  z-index: 10;
-}
-
-.react-resizable-handle::after {
-  content: "";
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid oklch(0.556 0 0 / 40%);
-  border-bottom: 2px solid oklch(0.556 0 0 / 40%);
-  border-radius: 1px;
-}
-
-.react-grid-item.react-grid-placeholder {
-  background: oklch(0.205 0 0 / 8%);
-  border-radius: 12px;
-  border: 2px dashed oklch(0.556 0 0 / 30%);
-  opacity: 1;
-  transition: all 200ms ease;
-}
-
-.react-grid-item > .react-resizable-handle {
-  opacity: 0;
-  transition: opacity 150ms ease;
-}
-
-.react-grid-item:hover > .react-resizable-handle {
-  opacity: 1;
-}
-
-.drag-handle {
-  user-select: none;
-}
-
 /* ── canvas link-wires toggle ──────────────────────────────────
    The toolbox NetworkIcon hides/shows React Flow edges. This can't be a
    Tailwind arbitrary variant (`[&_.react-flow__edges]:hidden`) — v4 rewrites

@@ -30,6 +30,13 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "On a phone the sidebar is replaced by a bottom bar with Home, Cases, Queue and More. Canvas is desktop-only, so it stays out of the way on small screens, and page headers no longer overflow sideways.",
   },
   {
+    id: "seed-2026-09-01-c",
+    date: "2026-09-01",
+    title: "Home replaces the Dashboard",
+    description:
+      "The dashboard showed you five cards of counts and left the reading to you. Home opens with what actually needs you — tickets past the first-reply target, a colleague's question in Slack, an email waiting on a decision — as one short read at the top, then the same items as a list you open one at a time. Each one already carries the work: the drafted reply for a ticket, a researched answer for a Slack question with the sources it came from, a plain summary for anything about money. You approve, edit or dismiss it right there, and a draft that needs a fadmin check stays locked exactly like it does in the Queue. Nothing is sent without your tap. Down the right you get the rest of your day: today's meetings, the Slack you missed (only mentions, DMs and threads you're in), and the few emails worth your time. The draggable card grid is gone.",
+  },
+  {
     id: "seed-2026-09-01-a",
     date: "2026-09-01",
     title: "Your agent name is now separate from your Google name",

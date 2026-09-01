@@ -1,151 +1,184 @@
+import { Suspense } from "react"
+import { after } from "next/server"
+
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { WorkspaceLayout } from "@/components/workspace-layout"
-import { DashboardGrid } from "@/components/dashboard-grid"
-import { CalendarCard } from "@/components/cards/calendar-card"
-import { DashboardGreeting } from "@/components/dashboard-greeting"
-import { IntercomCardLive } from "@/components/cards/intercom-card-live"
-import { GmailCardLive } from "@/components/cards/gmail-card-live"
-import { NotionCard } from "@/components/cards/notion-card"
-import { SlackMiniCard } from "@/components/cards/slack-mini-card"
-import { getOpenCasesQueue, type CasesQueueData } from "@/lib/intercom"
-import { getPlaybooksDashboardData } from "@/lib/playbooks"
+import { AgentNameGate } from "@/components/home/agent-name-gate"
+import { BriefingBoard } from "@/components/home/briefing-board"
+import { DayTimeline } from "@/components/home/day-timeline"
+import { EmailDigest } from "@/components/home/email-digest"
+import { HomeGreeting } from "@/components/home/home-greeting"
+import { SectionHeader } from "@/components/home/section-header"
+import { SlackDigest } from "@/components/home/slack-digest"
+import {
+  BriefingBoardSkeleton,
+  DigestsSkeleton,
+  StatusBadgeSkeleton,
+} from "@/components/home/home-skeletons"
+import { getBriefing, markHomeSeen } from "@/components/home/data"
 import { getAgentProfile } from "@/lib/agent"
-import { getAgentTokens } from "@/lib/auth"
-import { getCalendarEvents, type CalRange, type GCalResult } from "@/lib/gcal"
-import { getGmailUnreadCount, type GmailResult } from "@/lib/gmail-client"
-import { getSlackUnreadSummary, type SlackUnreadResult } from "@/lib/slack"
+import { getDesktopDownloadUrl } from "@/lib/desktop-download"
+import type { Briefing } from "@/lib/briefing/types"
 
 export const dynamic = "force-dynamic"
 
-async function safe<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+// Home: the copilot's briefing. It opens with what needs the agent, each item
+// carries the work already prepared for it, and nothing leaves the app without
+// an explicit click. Replaces the old draggable dashboard grid.
+// Design: docs/plans/2026-09-01-home-briefing.md (workstream C).
+
+// One failed briefing must not blank the page: fall back to an empty one whose
+// source statuses say what broke.
+async function loadBriefing(email: string | null): Promise<Briefing> {
   try {
-    return await fn()
+    return await getBriefing(email)
   } catch (err) {
-    console.error(`[dashboard] ${label} failed:`, err)
-    return fallback
+    console.error("[home] briefing failed:", err)
+    const message = "Couldn't build your briefing. Refresh to retry."
+    return {
+      generatedAt: new Date().toISOString(),
+      since: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      narrative: message,
+      narrativeSource: "fallback",
+      counts: { now: 0, drafted: 0, researched: 0, locked: 0 },
+      items: [],
+      sources: [
+        { source: "intercom", state: "error", message },
+        { source: "slack", state: "error", message },
+        { source: "gmail", state: "error", message },
+        { source: "calendar", state: "error", message },
+      ],
+    }
   }
 }
 
-function getNextMeetingMinutes(gcal: GCalResult, nowIso: string): number | undefined {
-  if (gcal.connected !== true) return undefined
-  const now = new Date(nowIso).getTime()
-  const upcoming = gcal.events
-    .filter((e) => !e.isAllDay && e.start && new Date(e.start).getTime() > now)
-    .sort((a, b) => new Date(a.start!).getTime() - new Date(b.start!).getTime())
-  if (upcoming.length === 0) return undefined
-  return Math.max(0, Math.round((new Date(upcoming[0].start!).getTime() - now) / 60000))
+async function StatusBadge({ briefing }: { briefing: Promise<Briefing> }) {
+  const { sources } = await briefing
+  const failed = sources.filter((s) => s.state === "error").length
+  const live = sources.some((s) => s.state === "ok")
+  const variant = failed === sources.length ? "destructive" : live ? "secondary" : "default"
+  const label = failed === sources.length ? "Error" : live ? "Live" : "Setup"
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant={variant}>{label}</Badge>
+      </TooltipTrigger>
+      <TooltipContent>
+        {failed === sources.length
+          ? "Couldn't reach your sources. Refresh to retry."
+          : live
+            ? failed > 0
+              ? `Live, but ${failed} source${failed === 1 ? "" : "s"} didn't answer.`
+              : "Pulling from Intercom, Slack, Gmail and Calendar."
+            : "Connect your tools in Settings to fill this in."}
+      </TooltipContent>
+    </Tooltip>
+  )
 }
 
-export default async function DashboardPage({
-  searchParams,
+async function LeftColumn({
+  briefing,
+  downloadUrl,
 }: {
-  searchParams: Promise<{ cal?: string }>
+  briefing: Promise<Briefing>
+  downloadUrl: string
 }) {
-  const nowIso = new Date().toISOString()
-  const appId = process.env.INTERCOM_APP_ID ?? "yzo8ff0f"
-  const { cal } = await searchParams
-  const range: CalRange = cal === "week" || cal === "month" ? cal : "today"
+  return <BriefingBoard briefing={await briefing} downloadUrl={downloadUrl} />
+}
 
-  const [playbooks, agent, tokens] = await Promise.all([
-    safe("playbooks", getPlaybooksDashboardData, {
-      mode: "error" as const,
-      error: "Couldn't load playbooks.",
-      playbookCount: 0,
-      responseCount: 0,
-      rows: [],
-      allRows: [],
-    }),
-    safe("agent profile", getAgentProfile, {
-      firstName: "there",
-      name: null,
-      email: null,
-      timezone: null,
-      intercomAdminId: process.env.INTERCOM_ADMIN_ID ?? null,
-    }),
-    safe("agent tokens", getAgentTokens, {
-      email: null,
-      name: null,
-      googleToken: null,
-      slackToken: null,
-      notionToken: null,
-    }),
-  ])
+async function RightColumn({ briefing }: { briefing: Promise<Briefing> }) {
+  const data = await briefing
+  // "Starts soon" is measured against the moment the briefing was built, so the
+  // render stays pure (and matches the whenLabels the server already computed).
+  const generatedMs = Date.parse(data.generatedAt)
+  const nowMs = Number.isNaN(generatedMs) ? 0 : generatedMs
+  const status = (source: Briefing["sources"][number]["source"]) =>
+    data.sources.find((s) => s.source === source) ?? { source, state: "ok" as const, count: 0 }
 
-  const [gcal, gmail, slack] = await Promise.all([
-    safe<GCalResult>(
-      "calendar",
-      () => getCalendarEvents(range, nowIso, tokens.googleToken, tokens.email),
-      { connected: false, error: "Couldn't load Calendar. Retry shortly." },
-    ),
-    safe<GmailResult>(
-      "gmail unread",
-      () => getGmailUnreadCount(tokens.googleToken, tokens.email),
-      { connected: false, error: "Couldn't load Gmail. Retry shortly." },
-    ),
-    safe<SlackUnreadResult>(
-      "slack unread",
-      () => getSlackUnreadSummary(tokens.slackToken),
-      { connected: false, unreadCount: 0, workspaceUrl: "", error: "Couldn't load Slack. Retry shortly." },
-    ),
-  ])
+  const events = data.items.filter((i) => i.kind === "calendar_event")
+  const slack = data.items.filter((i) => i.source === "slack")
+  const email = data.items.filter((i) => i.source === "gmail")
 
-  const cases = await safe<CasesQueueData>(
-    "cases queue",
-    () => getOpenCasesQueue(playbooks.allRows, agent.intercomAdminId),
-    { mode: "error", error: "Couldn't load Intercom queue. Retry shortly.", rows: [] },
+  return (
+    <>
+      <section>
+        <SectionHeader title="Today" count={events.length} detail="events" />
+        <DayTimeline events={events} status={status("calendar")} nowMs={nowMs} />
+      </section>
+
+      <section>
+        <SectionHeader title="Slack you missed" count={slack.length} detail="new" />
+        <SlackDigest items={slack} status={status("slack")} since={data.since} />
+        <p className="mt-2 px-0.5 text-[11px] leading-snug text-muted-foreground">
+          Only mentions, DMs and threads you are in. Channels stay in Slack.
+        </p>
+      </section>
+
+      <section>
+        <SectionHeader title="Worth your time in email" count={email.length} />
+        <EmailDigest items={email} status={status("gmail")} since={data.since} />
+      </section>
+    </>
   )
+}
+
+export default async function HomePage() {
+  const [agent, downloadUrl] = await Promise.all([getAgentProfile(), getDesktopDownloadUrl()])
+
+  const header = (title: string, badge: React.ReactNode) => (
+    <header className="flex min-h-14 items-center gap-3 border-b px-4 lg:px-6">
+      <SidebarTrigger />
+      <Separator orientation="vertical" className="min-h-6" />
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <h1 className="text-base font-medium">{title}</h1>
+        {badge}
+      </div>
+    </header>
+  )
+
+  // Blocking one-field step (workstream A): customer-facing replies must never
+  // fall back to the Google profile name, so the briefing waits behind it.
+  if (agent.agentName == null) {
+    return (
+      <WorkspaceLayout>
+        {header("Home", null)}
+        <main className="p-4 lg:p-6">
+          <AgentNameGate />
+        </main>
+      </WorkspaceLayout>
+    )
+  }
+
+  const briefing = loadBriefing(agent.email)
+  after(() => markHomeSeen(agent.email))
 
   return (
     <WorkspaceLayout>
-      <header className="flex min-h-14 items-center gap-3 border-b px-4 lg:px-6">
-        <SidebarTrigger />
-        <Separator orientation="vertical" className="min-h-6" />
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <h1 className="text-base font-medium">Dashboard</h1>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Badge
-                variant={
-                  cases.mode === "live"
-                    ? "secondary"
-                    : cases.mode === "error"
-                    ? "destructive"
-                    : "default"
-                }
-              >
-                {cases.mode === "live" ? "Live" : cases.mode === "error" ? "Error" : "Demo"}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent>
-              {cases.mode === "live"
-                ? "Pulling from real Intercom data."
-                : cases.mode === "error"
-                ? "Couldn't reach Intercom — showing the last good state. Refresh to retry."
-                : "Showing seeded sample data — connect Intercom in Settings to go live."}
-            </TooltipContent>
-          </Tooltip>
+      {header(
+        "Home",
+        <Suspense fallback={<StatusBadgeSkeleton />}>
+          <StatusBadge briefing={briefing} />
+        </Suspense>,
+      )}
+
+      <main className="p-4 lg:p-6">
+        <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-12 lg:gap-x-6">
+          <div className="flex min-w-0 flex-col gap-5 lg:col-span-7">
+            <HomeGreeting firstName={agent.firstName} savedTimezone={agent.timezone} />
+            <Suspense fallback={<BriefingBoardSkeleton />}>
+              <LeftColumn briefing={briefing} downloadUrl={downloadUrl} />
+            </Suspense>
+          </div>
+          <div className="flex min-w-0 flex-col gap-5 lg:col-span-5">
+            <Suspense fallback={<DigestsSkeleton />}>
+              <RightColumn briefing={briefing} />
+            </Suspense>
+          </div>
         </div>
-      </header>
-
-      <main className="flex flex-col">
-        {/* greeting — full on first visit, compressed thereafter; timezone from browser */}
-        <DashboardGreeting
-          firstName={agent.firstName}
-          caseCount={(cases.rows ?? []).length}
-          nextMeetingMinutes={getNextMeetingMinutes(gcal, nowIso)}
-          savedTimezone={agent.timezone}
-        />
-
-        <DashboardGrid
-          calendarCard={<CalendarCard gcal={gcal} nowIso={nowIso} range={range} savedTimezone={agent.timezone} />}
-          intercomCard={<IntercomCardLive initial={cases} appId={appId} />}
-          gmailCard={<GmailCardLive initial={gmail} />}
-          slackCard={<SlackMiniCard slack={slack} />}
-          notionCard={<NotionCard />}
-        />
       </main>
     </WorkspaceLayout>
   )
