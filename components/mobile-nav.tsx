@@ -33,9 +33,7 @@ interface Props {
 const primaryItems = [
   { label: "Home", icon: HomeIcon, href: "/" },
   { label: "Cases", icon: ClipboardListIcon, href: "/cases" },
-  // /queue is a placeholder until workstream E lifts the queue panel out of
-  // Canvas; it links to /cases for now.
-  { label: "Queue", icon: InboxIcon, href: "/cases" },
+  { label: "Queue", icon: InboxIcon, href: "/queue" },
 ]
 
 /**

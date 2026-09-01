@@ -1,7 +1,7 @@
 ---
 title: Canvas Workflow
 tags: [canvas, react-flow, ui, workflow]
-updated: 2026-07-29
+updated: 2026-09-01
 ---
 
 # Canvas Workflow
@@ -63,6 +63,18 @@ Sidebar polling (paused when hidden/collapsed/inactive):
   Triage -> GET /api/triage       (5 min sweep cadence)
 ```
 
+## Standalone /queue
+
+The Queue tab is also reachable outside the Canvas, at **`/queue`** — a plain page inside `WorkspaceLayout` so the reply queue works on a phone and on web with no Electron shell. It is the sidebar's "Queue" item and the "Queue" tab of the mobile bottom bar (`components/mobile-nav.tsx`); the Canvas item is unchanged and still desktop-only.
+
+`components/queue/queue-list.tsx` is the standalone client list. It reads the same `GET /api/reply-queue` and splits it into **Ready to send**, **Needs your check** and **On request**, plus a line counting drafts still being written. Deliberately narrower than the Canvas panel: one card at a time, tap to expand, no multi-select, no bulk bar, no stuck-draft retry — that machinery stays in `queue-panel.tsx` where the desktop workflow needs it. Canvas selection hotkeys (`lib/canvas-hotkeys.ts`) are untouched and not used here.
+
+Both surfaces share `components/queue/queue-actions.ts`: the queue's client-side types plus the audited outbound path — `POST /api/draft/send` then a best-effort `POST /api/reply-queue/resolve` (`action: "edit"` when the agent changed the text, otherwise `"approve"`; `"reject"` for a dismissal). The panel keeps its own Canvas-coupled UI and simply imports those functions, so the two paths cannot drift on what they post to Intercom. `needsCheckConfirmed` is an explicit argument rather than something derived from the risk band — only a UI that actually ran a fadmin-check confirm may assert it.
+
+The lock rule is identical everywhere: a `needs_check` draft is **never** sendable from `/queue`. The card renders the lock reason (`LOCK_REASON_GENERIC` from `lib/briefing/format.ts`, the same copy [[Home Briefing]] uses) with "Open on desktop" and "Open in Intercom" in place of a send button, mirroring `components/home/prepared-card.tsx`. The server enforces the same thing independently — `/api/draft/send` answers 409 for a pending `needs_check` suggestion without a confirmation. Unassigned rows offer "Assign to me" first, exactly as in Canvas, and every send goes through the shared `SendConfirmDialog` so nothing leaves without an explicit tap plus a confirmation.
+
+`app/queue/page.tsx` resolves the Intercom deep-link app id and the desktop download URL server-side and passes them down as props, so no environment reaches the client.
+
 ## Persistence
 
 Canvas layouts are **not** stored server-side — an agent rebuilds the board each time they open a case. The only thing that persists is sidebar tab selection and collapse state, kept in `localStorage`. As a bandwidth optimization, all sidebar polling pauses when the pane isn't visible, the sidebar is collapsed, or the relevant tab isn't the active one.
@@ -79,6 +91,10 @@ Canvas layouts are **not** stored server-side — an agent rebuilds the board ea
 - `components/canvas/tool-node.tsx`
 - `components/canvas/card-handles.tsx`
 - `components/canvas/pin-button.tsx`
+- `components/canvas/queue-panel.tsx`
+- `components/queue/queue-list.tsx`
+- `components/queue/queue-actions.ts`
+- `app/queue/page.tsx`
 - `lib/canvas-hotkeys.ts`
 - `lib/canvas-tabs-store.ts`
 - `lib/canvas-bounds.ts`
@@ -88,4 +104,6 @@ Canvas layouts are **not** stored server-side — an agent rebuilds the board ea
 
 - [[Tool Cards and Fadmin]] — the embedded tool cards suggested on the canvas
 - [[Triage System]] — the unassigned pool backing the Triage tab
+- [[Home Briefing]] — the same drafts and the same lock rule, surfaced on Home
+- [[Draft Verify Pipeline]] — how the drafts in the Queue are produced and banded
 - [[Tech Stack]] — React Flow / `@xyflow/react` and the rest of the frontend stack

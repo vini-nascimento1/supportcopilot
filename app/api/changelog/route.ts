@@ -16,11 +16,18 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
-    id: "seed-2026-09-01-f",
+    id: "seed-2026-09-01-g",
     date: "2026-09-01",
-    title: "The sign-in page no longer shows the AI chat",
+    title: "Calmer status labels on Home and in the Queue",
     description:
-      "The AI chat bubble, command palette and notification bell used to float over the sign-in page before you had logged in. They now only appear once you're signed in.",
+      "The coloured text pills (green, amber, red) are gone. Every label is now a quiet grey tag with a small dot only where colour actually means something: green for a draft that is ready, amber for one that is locked until a fadmin check, red only when a source is down. Kinds like Email or Mention show a small icon instead of a coloured word, and unread Slack or email rows get a plain dot rather than a badge.",
+  },
+  {
+    id: "seed-2026-09-01-e",
+    date: "2026-09-01",
+    title: "The reply queue works on your phone",
+    description:
+      "Reviewing drafts used to mean opening Canvas on a desktop. There is now a Queue page in the sidebar and in the bottom bar on a phone, with the same drafts split into Ready to send, Needs your check and On request. Tap one to read it, edit it if you want, and approve it with a confirmation step before anything reaches the customer. Drafts that need a fadmin check stay locked here too: instead of a send button you get the reason and a way to open the case on desktop or in Intercom. Unassigned tickets show an Assign to me button first, same as in Canvas.",
   },
   {
     id: "seed-2026-09-01-d",
@@ -51,13 +58,6 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "When a draft couldn't look something up in Fadmin, it would sometimes reply with the lookup it couldn't do — \"I'm unable to verify your account classification, eligibility flags or rollout status\" — and hand the ticket to \"the technical team\", even when the real explanation was sitting in the playbook or knowledge base. That's the most robotic thing a reply can say, and the customer can't act on any of it. Drafts now lead with what we actually know: how the feature works, what really gates it, which assumption is wrong, and what won't fix it. A genuine gap gets one short clause, not the whole message. Drafts also stop repeating a customer's own questions back as a list of things that \"need verifying\".",
   },
   {
-    id: "seed-2026-08-30-b",
-    date: "2026-08-30",
-    title: "Drafts no longer promise to chase something up internally when there's no way to",
-    description:
-      "Drafts would offer things like \"I'll put this forward internally\" or \"I'll flag this with the product team\" for cases where no such route exists — so the customer waits, follows up, and whoever picks the ticket up next inherits a promise with nothing behind it. Drafts now only commit to a follow-up where a real path exists (payments and payout escalations, fraud reviews, moderation referrals), and those keep working exactly as before. Everywhere else they give the honest answer and close, with no invented review, no timeframe, and no suggestion that a feature is about to be switched on.",
-  },
-  {
     id: "seed-2026-08-30-a",
     date: "2026-08-30",
     title: "Pages that lean on playbooks open faster",
@@ -70,13 +70,6 @@ const SEED_ENTRIES: ChangelogEntry[] = [
     title: "The queue clears out drafts for tickets you've already handled",
     description:
       "Drafts for conversations you'd already answered or closed were only cleared while you had the Queue tab open, so they piled up in the background — thousands of them. Because the queue only tracks your most recent 200 drafts, a big enough pile could push a real, still-waiting draft out of view and cause the same ticket to be drafted twice. The background sweep now retires those finished drafts on its own, whether or not the tab is open. Drafts you generated yourself from the Inbox stay put, as before.",
-  },
-  {
-    id: "seed-2026-08-22-b",
-    date: "2026-08-22",
-    title: "No more double greeting at the top of a draft",
-    description:
-      "On queued drafts the greeting is added for you, but the draft often opened with its own \"Hello,\" on top of it — two greetings stacked, the clearest sign a reply wasn't written by a person. Drafts now start straight on the answer, and anything that slips through gets the extra greeting stripped before it reaches you.",
   },
   {
     id: "seed-2026-08-22-a",
@@ -107,46 +100,11 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "Drafts waiting on a fadmin check are skipped by bulk send, but nothing marked them unless you opened the row — so selecting 6 and being offered \"Approve & send 3\" looked like a glitch. Locked drafts now carry a \"needs check\" badge in the list, and the selection bar shows how many of your selected drafts are locked.",
   },
   {
-    id: "seed-2026-08-15-q",
-    date: "2026-08-15",
-    title: "\"Open on canvas\" works from the workspace command palette",
-    description:
-      "Using the command palette to open a tool card (Fadmin, ONDATO…) did nothing useful in the tabbed workspace — it opened a plain browser tab with a broken link instead of adding the card to your canvas. It now adds the card to the canvas you're looking at, and only that one.",
-  },
-  {
     id: "seed-2026-08-15-p",
     date: "2026-08-15",
     title: "Embedded tools keep your place when you switch tabs",
     description:
       "Switching workspace tabs and coming back used to reset an embedded tool (Fadmin, ONDATO…) to its starting page, losing wherever you'd navigated — while the address bar still showed the old deep link. Tools now reopen exactly where you left them, and pinned cards also adapt correctly when you resize the window instead of drifting off-screen.",
-  },
-  {
-    id: "seed-2026-08-15-o",
-    date: "2026-08-15",
-    title: "A cleared canvas stays cleared",
-    description:
-      "If you closed every card to get a clean canvas, reloading brought the default cards straight back. An intentionally emptied canvas now stays the way you left it (case canvases keep the essential Case Info and Conversation cards).",
-  },
-  {
-    id: "seed-2026-08-15-n",
-    date: "2026-08-15",
-    title: "Select-all in Triage now behaves like the other tabs",
-    description:
-      "In Inbox and Queue, Ctrl+A with a few rows selected extends the selection to everything; in Triage it cleared your selection instead. Triage now matches the others.",
-  },
-  {
-    id: "seed-2026-08-15-m",
-    date: "2026-08-15",
-    title: "A locked draft no longer dead-ends the reply box",
-    description:
-      "If a draft became \"needs your check\" while you had the case open, sending just failed with an error and there was no way past it. The reply box now recognises that situation, keeps everything you wrote, and switches into the normal confirm-to-send step so one more click (after your fadmin check) sends it.",
-  },
-  {
-    id: "seed-2026-08-15-l",
-    date: "2026-08-15",
-    title: "Your typing is never replaced by an arriving AI draft",
-    description:
-      "If you started typing a reply the moment a case opened, the queued AI draft could load a second later and silently wipe what you'd written. Anything you've typed now stays put; the AI draft only fills the box when it's empty.",
   },
   {
     id: "seed-2026-08-15-k",
@@ -156,76 +114,6 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "Ctrl+Enter in the Inbox used to instantly assign (or draft for) everything selected — one stray keystroke after a select-all could claim every unassigned ticket in the workspace. It now arms a confirm first, exactly like the Queue's bulk send: press again (or click) to run it.",
   },
   {
-    id: "seed-2026-08-15-j",
-    date: "2026-08-15",
-    title: "Switching inboxes can't briefly show the wrong list",
-    description:
-      "Flipping between Mine, Unassigned, or a teammate's inbox could momentarily display the previous inbox's tickets under the new label if the older request finished late — with the wrong bulk button attached. Late responses are now discarded, and the refresh button honestly reports when a refresh actually failed.",
-  },
-  {
-    id: "seed-2026-08-15-i",
-    date: "2026-08-15",
-    title: "Shift-click selection stays accurate while lists refresh",
-    description:
-      "Inbox rows shuffle as tickets come and go, and a shift-click range was counted by row position — so after a background refresh it could select different tickets than the ones you saw when you started. Ranges are now tracked by ticket, and \"Drafting…\" placeholders land on the exact tickets the server accepted when a big batch gets trimmed.",
-  },
-  {
-    id: "seed-2026-08-15-h",
-    date: "2026-08-15",
-    title: "Reopened cases refresh their tool links",
-    description:
-      "If a customer's email or name changed since you last had a case open, the Fadmin/ONDATO/MassPay cards on that canvas quietly kept pointing at the old details. Reopening a case now checks every tool card against the current customer info: cards you haven't opened yet just get the right link, and open ones show the usual \"this card is stale\" banner with a one-click Refresh.",
-  },
-  {
-    id: "seed-2026-08-15-g",
-    date: "2026-08-15",
-    title: "Pinning a card no longer scrambles your other cases' layouts",
-    description:
-      "Pinning a tool card quietly overwrote where that card sat on every case you opened afterwards, and unpinning left it stranded at the pinned spot. Each case now remembers its own layout while a card is pinned, and unpinning puts the card back where that case had it.",
-  },
-  {
-    id: "seed-2026-08-15-f",
-    date: "2026-08-15",
-    title: "Minimizing an embedded tool window actually hides it",
-    description:
-      "Minimizing a tool card (Fadmin, ONDATO, MassPay…) collapsed the card but could leave the embedded window itself floating over the canvas, covering whatever was underneath until you restored or closed it. Minimize now hides the window properly and restore brings it back exactly where it was.",
-  },
-  {
-    id: "seed-2026-08-15-e",
-    date: "2026-08-15",
-    title: "Queue rows always show the draft that will actually send",
-    description:
-      "When a draft was regenerated (for example right after \"Assign to me\"), the Queue row could keep showing — and send — the older version of the text, and the send was logged as if you had edited it. Rows now refresh completely when a draft is replaced, so what you read is what goes out.",
-  },
-  {
-    id: "seed-2026-08-15-d",
-    date: "2026-08-15",
-    title: "\"Needs your check\" drafts can't slip out through bulk send",
-    description:
-      "Drafts locked for a fadmin check (payouts, KYC, media) could still go out through the \"On request\" group's select-all and Approve & send, skipping the confirm step entirely. Bulk send now skips locked drafts and tells you how many need their own check, and the server itself refuses to send a locked draft that hasn't been confirmed — whichever screen it comes from.",
-  },
-  {
-    id: "seed-2026-08-15-c",
-    date: "2026-08-15",
-    title: "Opening a 13th canvas tab no longer blanks the workspace",
-    description:
-      "Once you had 12 canvases open, opening one more could leave the whole workspace blank — the new tab became active but had actually been dropped to make room. The tab strip now always drops the oldest tab to make space for a new one, never the one you just opened.",
-  },
-  {
-    id: "seed-2026-08-15-b",
-    date: "2026-08-15",
-    title: "The AI Assistant stays on top of embedded tool windows",
-    description:
-      "Embedded tool windows (Fadmin, ONDATO, MassPay…) are real browser views that draw over everything, and they were covering the AI Assistant panel and its launcher button whenever they overlapped. Tool windows now make room for the assistant, so you can keep Fadmin open and chat side by side. The assistant panel also fits properly on smaller laptop screens instead of running off the edge.",
-  },
-  {
-    id: "seed-2026-08-15-a",
-    date: "2026-08-15",
-    title: "Pinned tool cards no longer balloon to cover the whole canvas",
-    description:
-      "Pinning a tool card (Fadmin, ONDATO, MassPay…) while the canvas was zoomed in froze it at the zoomed-in size — often the entire canvas — and it stayed that way on every case until you unpinned it. Pinning now keeps the card at its real size wherever it sits on screen, and any card already stuck full-screen fixes itself the next time the canvas loads. Resizing is paused while a card is pinned; unpin to resize it.",
-  },
-  {
     id: "seed-2026-08-12-f",
     date: "2026-08-12",
     title: "Drafts hold firm when a customer just repeats the same demand",
@@ -233,88 +121,11 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "When a customer had already been given a final answer (e.g. a refund decline) and pushed back with the same demand again, just louder, drafts could treat an incidental detail in that message as a new fact worth reinvestigating and reopen the case instead of closing it. Drafts now recognise a restated demand for what it is and hold the decision unless the customer actually provides something new.",
   },
   {
-    id: "seed-2026-08-12-e",
-    date: "2026-08-12",
-    title: "Drafts stop second-guessing a customer's own date",
-    description:
-      "When a customer's local calendar date was a day ahead or behind the server's (a normal timezone gap), drafts sometimes stalled and asked them to \"confirm\" a date they'd already given correctly, instead of just using it to check the case. Drafts now treat a one-day gap as expected and only ask for clarification when a date is genuinely off by more than that.",
-  },
-  {
-    id: "seed-2026-08-12-d",
-    date: "2026-08-12",
-    title: "Assigning a ticket no longer loses the draft",
-    description:
-      "Claiming tickets from Triage sometimes left you with the ticket and no draft, with nothing saying anything had gone wrong. Several causes: a big \"Assign N + draft\" batch ran out of time partway through and quietly abandoned the rest, and a freshly written draft could be thrown away by a background tidy-up that hadn't yet noticed the ticket was yours. Both are fixed, and drafting now has enough time to finish the whole batch.",
-  },
-  {
-    id: "seed-2026-08-12-c",
-    date: "2026-08-12",
-    title: "Missing drafts now get retried on their own",
-    description:
-      "Until now, a draft that failed was only ever retried while you had the Queue tab open and in front of you. If you assigned a batch and switched away, nothing picked it back up. A background check now runs regularly and drafts anything that's assigned to you and still waiting on a customer reply, so a missing draft fixes itself instead of waiting for you to notice.",
-  },
-  {
-    id: "seed-2026-08-12-b",
-    date: "2026-08-12",
-    title: "\"Assigned — drafting a reply\" now tells you the truth",
-    description:
-      "When you assigned a ticket, you always got the same cheerful message about a draft being written, even on the occasions when the draft had actually failed. It now tells you when the ticket was claimed but the draft didn't come through, so you know to expect it shortly rather than waiting on something that was never coming.",
-  },
-  {
-    id: "seed-2026-08-12-a",
-    date: "2026-08-12",
-    title: "The Triage list refreshes itself again",
-    description:
-      "The automatic 5-minute Triage refresh had never actually been running, so the pool was only ever filled when someone pressed \"Sweep now\" by hand, and it went empty again after. The scheduled refresh now works, so Triage keeps showing unassigned tickets without anyone having to prompt it.",
-  },
-  {
-    id: "seed-2026-08-09-d",
-    date: "2026-08-09",
-    title: "Drafts can actually find help centre articles now",
-    description:
-      "Drafts are supposed to be grounded in our help centre articles, but the search behind that was looking for the customer's entire message as one exact phrase inside an article, so it almost never found anything. It now searches on the key terms from the ticket, which means the article content genuinely reaches the draft instead of quietly coming back empty.",
-  },
-  {
-    id: "seed-2026-08-09-c",
-    date: "2026-08-09",
-    title: "\"I'll request a review\" is now \"I'll review this now\"",
-    description:
-      "Drafts had a habit of describing a check you were about to do yourself as something being \"requested\" or \"submitted\", as if it went off to a separate reviewing team. When you're the one doing the check, the draft now says so plainly instead of making it sound like it's out of your hands.",
-  },
-  {
-    id: "seed-2026-08-09-b",
-    date: "2026-08-09",
-    title: "Drafts never tell a customer to dispute a charge again",
-    description:
-      "A draft talked a fan through reporting a charge as unauthorised with their payment provider. That is the one thing we can never say: a dispute gets that fan's own account banned under our zero-tolerance chargeback policy. Drafts now handle an unrecognised charge the way the guide says, by asking only for the card's first 6 and last 4 digits so you can look it up, and they correctly explain a pending charge as a hold the bank releases on its own. The verifier strips this advice too if it ever slips through.",
-  },
-  {
-    id: "seed-2026-08-09-a",
-    date: "2026-08-09",
-    title: "No more \"reply CANCEL IT and I'll do that\" drafts",
-    description:
-      "Drafts had a habit of ending with a robotic instruction to send back an exact keyword, which reads like an automated bot rather than the person the customer is talking to. When a draft needs your customer to okay something, it now just asks in plain words and lets them answer however they like.",
-  },
-  {
-    id: "seed-2026-08-05-a",
-    date: "2026-08-05",
-    title: "The AI Assistant answers again instead of erroring",
-    description:
-      "Every single message to the AI Assistant was coming back as \"Something went wrong\", because the model it runs on refuses one of the settings it was being sent, so nothing ever reached the assistant. Fixed, so asking it to read a ticket or search knowledge works again. If it ever does fail now, the error tells you what actually broke instead of leaving you to guess.",
-  },
-  {
     id: "seed-2026-08-03-f",
     date: "2026-08-03",
     title: "Ask the AI Assistant how the app itself works",
     description:
       "It now knows Support Copilot end to end — why canvas layouts don't save, why a pinned Fadmin card follows you between cases, what the risk badge on a Queue card means, why a draft is worded the way it is, what you need to connect for knowledge search to work. Ask it instead of hunting for someone who knows.",
-  },
-  {
-    id: "seed-2026-08-03-e",
-    date: "2026-08-03",
-    title: "The AI Assistant writes alert text that actually works now",
-    description:
-      "It was happy to put made-up placeholders like {{sla_status}} into an automation alert, which then showed up word-for-word in your notifications every 5 minutes. It now knows exactly which placeholders exist, and that an in-app alert is a short one-line notification — no Slack-style bold, no line breaks — so the alerts it writes read properly.",
   },
   {
     id: "seed-2026-08-03-d",
@@ -352,13 +163,6 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "Previously the only way to search your Notion/knowledge base through the AI Assistant was to attach a specific Intercom ticket. Now you can just ask — \"what does our W-8BEN article say?\" — with no ticket needed.",
   },
   {
-    id: "seed-2026-07-29-m",
-    date: "2026-07-29",
-    title: "Notion grounding actually works now — it silently didn't before",
-    description:
-      "Every AI draft, the Case copilot, and the AI Assistant have been searching Notion since the feature shipped, but a missing technical header made every single one of those searches fail invisibly — drafts fell back to playbook-only knowledge without any sign anything was wrong. Fixed at the root, so all three now actually pull in your live Notion knowledge base again.",
-  },
-  {
     id: "seed-2026-07-29-l",
     date: "2026-07-29",
     title: "Clearer error when the AI Assistant can't reach Notion",
@@ -378,20 +182,6 @@ const SEED_ENTRIES: ChangelogEntry[] = [
     title: "AI Assistant shows what it actually checked",
     description:
       "Replies from the AI Assistant now end with a short \"Checked:\" line listing what it actually looked at (playbooks, your open cases, a ticket + knowledge base, etc.) — so you know it's grounded, not just prose.",
-  },
-  {
-    id: "seed-2026-07-29-i",
-    date: "2026-07-29",
-    title: "Fixed a pinned tool card covering the whole Canvas",
-    description:
-      "A pinned card (Fadmin, ONDATO, etc.) could end up sized from an old window/sidebar state and cover the entire Canvas, with no visible way to undo it. Pinned cards now always fit the current screen, and there's a new \"Unpin all tool cards\" option in the canvas toolbox as a guaranteed way out if one ever looks wrong.",
-  },
-  {
-    id: "seed-2026-07-29-h",
-    date: "2026-07-29",
-    title: "Canvas sidebar button restored",
-    description:
-      "The standalone Canvas now has the same sidebar button as the rest of the workspace, so you can reopen or collapse the navigation without leaving the page.",
   },
   {
     id: "seed-2026-07-29-g",
@@ -436,25 +226,11 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "Settings was one long scroll. It's now split into four tabs — Profile, Canvas, AI & Drafting, and Integrations — so it's easier to find the one setting you actually came to change.",
   },
   {
-    id: "seed-2026-07-29-d",
-    date: "2026-07-29",
-    title: "Correcting a case's email now updates every tool card, not just the one",
-    description:
-      "If a customer messages from the wrong email and you correct it on the case card, already-open Fadmin/ONDATO/MassPay cards now show a one-click Refresh instead of silently staying on the old email. The corrected field also gets a visible \"edited\" badge with a way to revert to what Intercom actually has on file.",
-  },
-  {
     id: "seed-2026-07-09-a",
     date: "2026-07-09",
     title: "The app is noticeably faster — Canvas, Gmail, and page switching",
     description:
       "Fixed several things that were adding real delay: opening a case's Canvas no longer waits on an AI classification call before it can even render (the playbook match now loads in after), background Canvas tabs stopped silently re-polling Intercom every 15-30 seconds while hidden, every page navigation was doing duplicate sign-in checks, and the Sent Tracker was pulling every column (including the full email body) with no row limit. Canvas loading and page switching should feel noticeably snappier.",
-  },
-  {
-    id: "seed-2026-07-08-a",
-    date: "2026-07-08",
-    title: "Stuck \"Drafting…\" cards now recover instead of hanging",
-    description:
-      "AI draft generation could hang indefinitely if the AI router was rate-limited or slow, leaving the Queue's \"Drafting…\" placeholder stuck for up to 20 minutes. Generation now has proper timeouts, retries, and a shared throttle so a bulk \"Generate AI replies\" run no longer floods the router. A manual draft that still doesn't land within 4 minutes now flips to a \"Couldn't draft\" card with Retry / Dismiss instead of hanging.",
   },
   {
     id: "seed-2026-07-08-b",
@@ -548,13 +324,6 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "Connect Notion in Settings → Integrations and AI reply drafts pull from your live Notion knowledge base (plus Slack, Drive and other connectors) — not just the matched playbook. Works on both playbook and non-playbook cases. Internal/connector content is firewalled out of the customer-facing text. Each agent connects once via 'Connect Notion → Allow' and reconnects roughly monthly.",
   },
   {
-    id: "seed-2026-06-19-b",
-    date: "2026-06-19",
-    title: "Smarter playbook matching — no more wrong-playbook drafts",
-    description:
-      "The draft no longer force-matches every case onto a playbook. An AI classifier decides which playbook truly applies — or recognises that none does — so cases outside the playbooks stop getting confident-but-wrong drafts (those now fall back to live Notion knowledge). If the classifier is unavailable, it safely falls back to the old keyword matching.",
-  },
-  {
     id: "seed-2026-06-19-c",
     date: "2026-06-19",
     title: "Case copilot now answers from live Notion",
@@ -618,13 +387,6 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "Complete system prompt revision: clear context hierarchy (thread > articles > playbook), rules for closing conversations when the customer keeps insisting after being answered, and a firmer tone for policy and moderation decisions.",
   },
   {
-    id: "seed-2026-06-08-b",
-    date: "2026-06-08",
-    title: "AI error handling overhaul",
-    description:
-      "All AI tool errors now show friendly messages. Timeout detection, input validation, and fallback summaries if the final response fails.",
-  },
-  {
     id: "seed-2026-06-08-d",
     date: "2026-06-08",
     title: "Per-agent KPI metrics dashboard",
@@ -651,13 +413,6 @@ const SEED_ENTRIES: ChangelogEntry[] = [
     title: "Sidebar: avatar photo and New Features dialog",
     description:
       "Profile picture from Google account. Settings and changelog moved below workspace nav. New Features dialog with grouped entries.",
-  },
-  {
-    id: "seed-2026-06-07-a",
-    date: "2026-06-07",
-    title: "Automation manual run now executes actions",
-    description:
-      "Run button on monitor rules now sends Slack DMs, in-app alerts, and case flags instead of just counting them. Loading spinner prevents double-clicks.",
   },
   {
     id: "seed-2026-06-07-b",
@@ -730,32 +485,11 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "Real-time case creation from Intercom events. Signature verification, auto-bootstrap owner from environment variable.",
   },
   {
-    id: "seed-2026-06-06-b",
-    date: "2026-06-06",
-    title: "Intercom queue pagination fix",
-    description:
-      "Fixed 10-case cap — now loads full queue with pagination and live polling. Customer name/email displayed instead of 'Unknown'.",
-  },
-  {
     id: "seed-2026-06-05-a",
     date: "2026-06-05",
     title: "Slack bot DM landing zone",
     description:
       "Monitor alerts delivered via Slack DM. Troubleshooting guide for DMs landing in the Apps section.",
-  },
-  {
-    id: "seed-2026-06-04-a",
-    date: "2026-06-04",
-    title: "Gmail compose with reply-to-self fix",
-    description:
-      "HTML compose form with proper reply-to headers. Fixed layout and reply-to-self issue where sent emails appeared in the wrong thread.",
-  },
-  {
-    id: "seed-2026-06-01-a",
-    date: "2026-06-01",
-    title: "Multi-tenant audit",
-    description:
-      "Audited Intercom shared accounts, Google hd:fanvue.com restriction, and hardcoded agent names. Documented multi-tenant blockers.",
   },
 ]
 

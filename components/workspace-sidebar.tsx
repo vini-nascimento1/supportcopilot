@@ -10,6 +10,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   HomeIcon,
+  InboxIcon,
   LogOutIcon,
   MailIcon,
   MessageSquareIcon,
@@ -44,6 +45,9 @@ import { usePlatform } from "@/hooks/use-platform"
 const workspaceItems = [
   { label: "Home", icon: HomeIcon, href: "/" },
   { label: "Cases", icon: ClipboardListIcon, href: "/cases" },
+  // The reply queue standalone — the same drafts as the Canvas Queue tab, but
+  // reachable without opening Canvas (and the only way in on a phone).
+  { label: "Queue", icon: InboxIcon, href: "/queue" },
   { label: "Gmail", icon: MailIcon, href: "/gmail" },
   { label: "Slack", icon: MessageSquareIcon, href: "/slack" },
   { label: "Playbooks", icon: BookOpenIcon, href: "/playbooks" },

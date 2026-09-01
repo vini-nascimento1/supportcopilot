@@ -35,38 +35,17 @@ import {
   subscribePendingOnRequestDrafts,
   type PendingOnRequestDraft,
 } from "@/lib/on-request-drafts"
+// The queue's data shapes and its audited send/resolve path live in the shared
+// module so this panel and the standalone /queue page (components/queue/
+// queue-list.tsx) can never drift on what they post to Intercom.
+import {
+  byOldest,
+  postReject,
+  postSendAndResolve,
+  type DraftingItem,
+  type QueueItem,
+} from "@/components/queue/queue-actions"
 import { cn, relativeTime } from "@/lib/utils"
-
-// Mirrors lib/reply-queue-store.ts QueueItem (defined locally — that module is
-// server-only, can't be imported into a client component).
-type RiskBand = "ready" | "needs_check" | "low_confidence"
-type SuggestionSource = { title?: string; url?: string; kind?: string }
-type QueueItem = {
-  id: string
-  intercomConversationId: string
-  ownerId: string | null
-  customerName: string | null
-  subject: string | null
-  body: string
-  justification: string
-  sources: SuggestionSource[]
-  confidence: number | null
-  riskBand: RiskBand
-  createdAt: string
-}
-// A non-read conversation whose AI draft is still being generated (no ready row
-// yet). Mirrors the `drafting` payload from /api/reply-queue. `waitingSince` is
-// when the customer's message landed (Intercom waiting_since) — the basis for
-// telling a fresh placeholder from one that's been silently failing.
-type DraftingItem = {
-  conversationId: string
-  customerName: string | null
-  subject: string | null
-  waitingSince: string | null
-}
-
-const byOldest = (a: QueueItem, b: QueueItem) =>
-  new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
 
 // How long a conversation may sit in the "drafting" list (no ready row yet)
 // before we treat generation as likely failed rather than just slow. Measured
@@ -88,80 +67,6 @@ const AUTONOMOUS_RETRY_GRACE_MS = 4 * 60 * 1000
 // threshold (draftingSinceMs = when we first saw it there, undefined = brand new).
 function isAutonomousDraftingStuck(draftingSinceMs: number | undefined, nowMs: number): boolean {
   return draftingSinceMs != null && nowMs - draftingSinceMs > AUTONOMOUS_STUCK_AFTER_MS
-}
-
-// Single source of truth for the audited send path — POST /api/draft/send then
-// POST /api/reply-queue/resolve — shared by QueueRow's own approve button AND
-// the "Ready to send" bulk bar, so the two paths can never diverge.
-async function postSendAndResolve(
-  item: QueueItem,
-  body: string
-): Promise<{ ok: boolean; resolvedOk: boolean; error?: string }> {
-  const bodyChanged = body.trim() !== item.body.trim()
-  try {
-    const res = await fetch("/api/draft/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversationId: item.intercomConversationId,
-        body,
-        // Callers only ever reach this for a locked (needs_check) item after
-        // the row's own two-step confirm has already happened (QueueRow.send
-        // is gated by `confirming`; bulk callers filter locked items out
-        // before calling this at all) — so it's safe to assert here.
-        needsCheckConfirmed: item.riskBand === "needs_check",
-      }),
-    })
-    if (!res.ok) {
-      return {
-        ok: false,
-        resolvedOk: false,
-        error: await readApiError(res, `Failed to send (${res.status})`),
-      }
-    }
-  } catch (error) {
-    return {
-      ok: false,
-      resolvedOk: false,
-      error:
-        error instanceof Error ? error.message : "Couldn't send. Open the case and try there.",
-    }
-  }
-
-  // The queue-clearing resolve call is best-effort — the send already went out,
-  // so a failure here just means the row lingers until the next reconcile.
-  const resolveRes = await fetch("/api/reply-queue/resolve", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      conversationId: item.intercomConversationId,
-      suggestionId: item.id,
-      action: bodyChanged ? "edit" : "approve",
-      bodyChanged,
-      finalBody: body,
-    }),
-  }).catch(() => null)
-
-  return { ok: true, resolvedOk: !!resolveRes?.ok }
-}
-
-// Shared reject/dismiss path — a single resolve call, no outbound send.
-async function postReject(item: QueueItem): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const res = await fetch("/api/reply-queue/resolve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversationId: item.intercomConversationId,
-        suggestionId: item.id,
-        action: "reject",
-      }),
-    })
-    if (!res.ok) return { ok: false, error: await res.text() }
-    return { ok: true }
-  } catch {
-    return { ok: false, error: "Couldn't dismiss this suggestion." }
-  }
 }
 
 // The autonomous non-read AI reply queue: pre-computed suggestions for the
@@ -543,7 +448,9 @@ export function QueuePanel({
     let failed = 0
     let resolveFailed = false
     for (const item of targets) {
-      const result = await postSendAndResolve(item, item.body)
+      // `ready` excludes needs_check by construction, so nothing locked can
+      // reach here — assert the confirmation flag as false rather than deriving it.
+      const result = await postSendAndResolve(item, item.body, { needsCheckConfirmed: false })
       if (result.ok) {
         sent++
         if (!result.resolvedOk) resolveFailed = true
@@ -643,7 +550,9 @@ export function QueuePanel({
     let failed = 0
     let resolveFailed = false
     for (const item of targets) {
-      const result = await postSendAndResolve(item, item.body)
+      // `targets` filtered out every needs_check row above, so this bulk path
+      // never asserts a fadmin check it didn't run.
+      const result = await postSendAndResolve(item, item.body, { needsCheckConfirmed: false })
       if (result.ok) {
         sent++
         if (!result.resolvedOk) resolveFailed = true
@@ -1198,7 +1107,12 @@ function QueueRow({
   const send = async () => {
     if (sending) return
     setSending(true)
-    const result = await postSendAndResolve(item, body)
+    // A locked row only reaches here after the row's own two-step "Are you
+    // sure?" confirm (onApprove arms `confirming` first), so asserting the
+    // fadmin check for it is honest.
+    const result = await postSendAndResolve(item, body, {
+      needsCheckConfirmed: item.riskBand === "needs_check",
+    })
     if (!result.ok) {
       toast.error(result.error ?? "Couldn't send. Open the case and try there.")
       setSending(false)
