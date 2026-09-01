@@ -7,6 +7,12 @@ import { streamChatCompletion, getAuxDraftModel } from "@/lib/draft-ai"
 import type { AttentionItem, PreparedSource } from "@/lib/briefing/types"
 import type { SlackItemContext } from "@/lib/briefing/sources/slack"
 import { MAX_TITLE_CHARS, sanitizeLine } from "@/lib/briefing/format"
+import { readsAsQuestion } from "@/lib/briefing/asks"
+
+// The ask heuristics live in lib/briefing/asks.ts (pure, no server-only) since
+// the Slack source needs them for urgency too. Re-exported here so existing
+// importers keep working.
+export { readsAsQuestion }
 
 // Copilot research for COLLEAGUE messages only: a Slack DM to the agent, or a
 // channel message that mentions them personally or a user group they belong to.
@@ -21,33 +27,6 @@ import { MAX_TITLE_CHARS, sanitizeLine } from "@/lib/briefing/format"
 
 /** Per the plan: at most three researched items per briefing. */
 export const MAX_RESEARCHED_ITEMS = 3
-
-/** Interrogatives that open a question even without a question mark. */
-const INTERROGATIVES = ["who", "what", "when", "where", "why", "how", "which", "is", "are", "do", "does", "did", "can", "could", "should", "would", "any"]
-
-/** Phrases that make a statement an ask directed at the reader. */
-const ASK_PHRASES = ["can you", "could you", "do we", "should we", "did we", "are we", "any idea", "do you know", "let me know", "thoughts?"]
-
-/**
- * Does this message read as a question aimed at the agent? Kept deliberately
- * conservative: a false negative costs nothing (the row still shows, just
- * without a prepared answer), a false positive burns a model call and puts a
- * half-relevant answer in front of the agent.
- */
-export function readsAsQuestion(rawText: string | null | undefined): boolean {
-  const text = (rawText ?? "").trim()
-  if (!text) return false
-
-  const lower = text.toLowerCase()
-  if (lower.includes("?")) return true
-  if (ASK_PHRASES.some((p) => lower.includes(p))) return true
-
-  // Strip a leading @mention ("<@U123> what's the refund policy") before
-  // looking at the first word.
-  const withoutMentions = lower.replace(/<[@!][^>]*>/g, " ").trim()
-  const firstWord = withoutMentions.split(/[^a-z']+/).filter(Boolean)[0]
-  return Boolean(firstWord && INTERROGATIVES.includes(firstWord))
-}
 
 /** Which items are eligible at all: Slack colleague messages that ask something. */
 export function selectResearchTargets(

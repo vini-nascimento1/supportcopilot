@@ -453,6 +453,44 @@ export async function markThreadRead(
   )
 }
 
+/**
+ * Whether each thread still carries Gmail's UNREAD label, keyed by thread id.
+ *
+ * The Home briefing uses this to drop an email the agent has since read in
+ * Gmail itself (see lib/briefing/read-signals.ts). `format=minimal` keeps the
+ * bodies off the wire — only ids and label names come back, which is all the
+ * check needs and all we want to touch. A thread that errors is left out of the
+ * map entirely, so an unknown thread reads as "not read", never as "read".
+ */
+export async function getThreadsUnreadState(
+  token: string,
+  email: string | null,
+  threadIds: string[]
+): Promise<Record<string, boolean>> {
+  const unique = [...new Set(threadIds)].filter(Boolean)
+  const out: Record<string, boolean> = {}
+  if (unique.length === 0) return out
+
+  const BATCH = 8
+  for (let i = 0; i < unique.length; i += BATCH) {
+    await Promise.allSettled(
+      unique.slice(i, i + BATCH).map(async (threadId) => {
+        const res = await googleFetch(
+          email,
+          token,
+          `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=minimal`
+        )
+        if (!res || !res.ok) return
+        const data = (await res.json()) as { messages?: Array<{ labelIds?: string[] }> }
+        const messages = data.messages ?? []
+        if (messages.length === 0) return
+        out[threadId] = messages.some((m) => (m.labelIds ?? []).includes("UNREAD"))
+      })
+    )
+  }
+  return out
+}
+
 // ── Attachment download ─────────────────────────────────────────────────────
 
 export async function getAttachmentData(

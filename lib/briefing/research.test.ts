@@ -51,28 +51,11 @@ async function* streamOf(text: string) {
 }
 
 describe("readsAsQuestion", () => {
-  it("accepts an explicit question mark", () => {
+  // The rule itself now lives in lib/briefing/asks.ts and is covered there;
+  // research.ts re-exports it, so this only guards the re-export.
+  it("is still reachable from research.ts", () => {
     expect(readsAsQuestion("is the payout still on hold?")).toBe(true)
-  })
-
-  it("accepts an interrogative opener without punctuation", () => {
-    expect(readsAsQuestion("what happens when KYC returns null")).toBe(true)
-  })
-
-  it("looks past a leading @mention", () => {
-    expect(readsAsQuestion("<@U0AGENT> how do we handle a chargeback")).toBe(true)
-  })
-
-  it("accepts the ask phrases the plan names", () => {
-    expect(readsAsQuestion("can you take a look at this one")).toBe(true)
-    expect(readsAsQuestion("do we have a macro for this")).toBe(true)
-    expect(readsAsQuestion("should we escalate it")).toBe(true)
-  })
-
-  it("rejects a plain statement — a false positive burns a model call", () => {
     expect(readsAsQuestion("shipped the fix, thanks for the review")).toBe(false)
-    expect(readsAsQuestion("")).toBe(false)
-    expect(readsAsQuestion(null)).toBe(false)
   })
 })
 

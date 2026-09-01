@@ -80,17 +80,39 @@ describe("toSlackItem", () => {
     expect(item.actions).toEqual(["reply", "open"])
     // Research fills this in later; the source itself proposes nothing.
     expect(item.prepared).toBeUndefined()
+    // The channel's last_read can settle whether this was read in Slack.
+    expect(item.readSignal).toEqual({
+      kind: "slack_channel",
+      channelId: "D123",
+      ts: "1788000000.000100",
+    })
   })
 
-  it("normalizes a personal channel mention into a 'now' item", () => {
+  it("keeps a bot DM out of 'now' — a notification is not a person waiting", () => {
+    const item = toSlackItem(message({ isBot: true, botName: "Zapier", userName: "Zapier" }), "dm", NOW)
+    expect(item.kind).toBe("slack_dm")
+    expect(item.urgency).toBe("today")
+  })
+
+  it("makes a personal mention 'now' only when it actually asks something", () => {
     const item = toSlackItem(
-      message({ channelId: "C9", channelName: "payments", text: `<@${USER}> got a sec?` }),
+      message({ channelId: "C9", channelName: "payments", text: `<@${USER}> can you check this?` }),
       "mention",
       NOW
     )
     expect(item.kind).toBe("slack_mention")
     expect(item.urgency).toBe("now")
     expect(item.title).toBe("Grace mentioned you in #payments")
+  })
+
+  it("drops a cc-style mention to the digest — nobody asked for anything", () => {
+    const item = toSlackItem(
+      message({ channelId: "C9", channelName: "payments", text: `cc <@${USER}> for visibility` }),
+      "mention",
+      NOW
+    )
+    expect(item.kind).toBe("slack_mention")
+    expect(item.urgency).toBe("today")
   })
 
   it("puts a user-group mention in the calmer band — anyone on the group can take it", () => {
@@ -101,6 +123,29 @@ describe("toSlackItem", () => {
     )
     expect(item.urgency).toBe("today")
     expect(item.kind).toBe("slack_mention")
+  })
+
+  it("omits the read signal for a threaded reply — last_read says nothing about threads", () => {
+    const reply = toSlackItem(
+      message({
+        channelId: "C9",
+        channelName: "payments",
+        ts: "1788000300.000400",
+        threadTs: "1788000000.000100",
+        text: `<@${USER}> can you confirm?`,
+      }),
+      "mention",
+      NOW
+    )
+    expect(reply.readSignal).toBeUndefined()
+
+    // A thread PARENT is still a plain channel message, so it keeps its signal.
+    const parent = toSlackItem(
+      message({ channelId: "C9", ts: "1788000000.000100", threadTs: "1788000000.000100" }),
+      "mention",
+      NOW
+    )
+    expect(parent.readSignal).toMatchObject({ kind: "slack_channel", channelId: "C9" })
   })
 
   it("builds a permalink when Slack did not return one", () => {

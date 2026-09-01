@@ -3,7 +3,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("@/lib/gmail-client", () => ({ getInboxThreads: vi.fn() }))
 
 import { getInboxThreads, type GmailThreadSummary } from "@/lib/gmail-client"
-import { classifyEmail, collectGmailItems, isPartnerSender, toEmailItem } from "./gmail"
+import {
+  classifyEmail,
+  collectGmailItems,
+  emailUrgency,
+  isAutomatedSender,
+  isPartnerSender,
+  toEmailItem,
+} from "./gmail"
 
 const NOW = Date.parse("2026-09-01T12:00:00.000Z")
 
@@ -54,6 +61,66 @@ describe("classifyEmail", () => {
       })
     ).toBe("email_fyi")
   })
+
+  it("keeps a machine sender out of the action pile even when it says please", () => {
+    expect(isAutomatedSender("newsletter@vendor.com")).toBe(true)
+    expect(
+      classifyEmail({
+        from: "Vendor Weekly <newsletter@vendor.com>",
+        subject: "This month at Vendor",
+        snippet: "Please see the attached report. Questions?",
+      })
+    ).toBe("email_fyi")
+  })
+
+  it("no longer treats Intercom notification mail as a partner", () => {
+    // The ticket queue already sits at the top of Home; counting the same work
+    // twice is exactly the noise this rule set is removing.
+    expect(isPartnerSender("notifications@intercom.io")).toBe(false)
+  })
+})
+
+describe("emailUrgency", () => {
+  const colleague = (subject: string, snippet: string) => ({
+    from: "colleague@fanvue.com",
+    subject,
+    snippet,
+  })
+
+  it("interrupts for a payout/identity partner even on a no-reply address", () => {
+    const partner = { from: "noreply@masspay.io", subject: "Payout batch failed", snippet: "" }
+    expect(classifyEmail(partner)).toBe("email_action")
+    expect(emailUrgency(partner, "email_action")).toBe("now")
+  })
+
+  it("interrupts for a colleague ask that carries a strong phrase", () => {
+    const t = colleague("Refund sheet", "Can you approve this by EOD?")
+    expect(classifyEmail(t)).toBe("email_action")
+    expect(emailUrgency(t, "email_action")).toBe("now")
+  })
+
+  it("leaves an ordinary question at 'today' — no clock is running on it", () => {
+    const t = colleague("Quick question", "Quick question about ground D?")
+    expect(classifyEmail(t)).toBe("email_action")
+    expect(emailUrgency(t, "email_action")).toBe("today")
+  })
+
+  it("puts machines and FYIs in the calm band", () => {
+    const news = {
+      from: "newsletter@vendor.com",
+      subject: "Urgent: last chance",
+      snippet: "Action required to keep your seat.",
+    }
+    // Marketing urgency is not urgency: the sender decides this one.
+    expect(emailUrgency(news, "email_fyi")).toBe("later")
+    expect(emailUrgency(colleague("Notes", "Shipped."), "email_fyi")).toBe("later")
+  })
+
+  it("does not read a strong phrase out of a longer word", () => {
+    expect(emailUrgency(colleague("Design review", "Assigned the design work?"), "email_action")).toBe(
+      "today"
+    )
+  })
 })
 
 describe("toEmailItem", () => {
@@ -64,7 +131,7 @@ describe("toEmailItem", () => {
       id: "gmail:thread-1",
       source: "gmail",
       kind: "email_action",
-      // An email is a "today" job — no customer clock is running on it.
+      // A payout partner is operationally load-bearing, so it interrupts.
       urgency: "now",
       whenLabel: "1h 30m ago",
       deepLink: "https://mail.google.com/mail/u/0/#inbox/thread-1",
@@ -75,6 +142,36 @@ describe("toEmailItem", () => {
     )
     // v1 proposes no reply for email: summary only, built from subject + snippet.
     expect(item.prepared?.kind).toBe("summary")
+    // Reading it in Gmail is enough to clear it from the next briefing.
+    expect(item.readSignal).toEqual({ kind: "gmail_thread", threadId: "thread-1" })
+  })
+
+  it("carries the ordinary-ask email at 'today' rather than 'now'", () => {
+    const item = toEmailItem(
+      thread({
+        from: "colleague@fanvue.com",
+        fromName: "Ada Lovelace",
+        subject: "Quick question",
+        snippet: "Any thoughts on the ground D wording?",
+      }),
+      NOW
+    )
+    expect(item.kind).toBe("email_action")
+    expect(item.urgency).toBe("today")
+  })
+
+  it("keeps a newsletter out of the action pile", () => {
+    const item = toEmailItem(
+      thread({
+        from: "newsletter@vendor.com",
+        fromName: "Vendor Weekly",
+        subject: "This month at Vendor",
+        snippet: "Please see the attached report.",
+      }),
+      NOW
+    )
+    expect(item.kind).toBe("email_fyi")
+    expect(item.urgency).toBe("later")
   })
 
   it("puts an FYI in the calm band", () => {

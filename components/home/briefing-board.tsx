@@ -74,9 +74,20 @@ export function BriefingBoard({
   // An explicit "not for me": the X button or a left swipe on a phone.
   const onDismiss = useCallback((id: string) => dismiss([id], "Dismissed"), [dismiss])
 
+  // "Not now": the same dismissal with an expiry, so the row comes back on its
+  // own once `until` passes.
+  const onSnooze = useCallback(
+    (id: string, until: string, label: string) =>
+      dismiss([id], `Snoozed until ${label}`, { until }),
+    [dismiss],
+  )
+
   // Acting on an item is reading it: a sent or rejected draft, a Slack answer
   // sent, or a deep link opened at the source.
-  const onHandled = useCallback((id: string) => dismiss([id], "Cleared from Home"), [dismiss])
+  const onHandled = useCallback(
+    (id: string) => dismiss([id], "Cleared from Home", { reason: "acted" }),
+    [dismiss],
+  )
 
   const onClearAll = useCallback(() => {
     const ids = visibleRows.map((i) => i.id)
@@ -137,6 +148,7 @@ export function BriefingBoard({
           openId={openId}
           onToggle={onToggle}
           onDismiss={onDismiss}
+          onSnooze={onSnooze}
           onHandled={onHandled}
           downloadUrl={downloadUrl}
           empty={

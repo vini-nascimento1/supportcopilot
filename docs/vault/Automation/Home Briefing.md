@@ -20,13 +20,16 @@ Design plan: `docs/plans/2026-09-01-home-briefing.md`. Mockup: `docs/plans/home-
 
 | Type | What it is |
 |---|---|
-| `AttentionItem` | One normalized thing needing the agent: id, source, kind, title, context, urgency, `whenLabel`, deep link, actions, optional `prepared` |
+| `AttentionItem` | One normalized thing needing the agent: id, source, kind, title, context, urgency, `whenLabel`, deep link, actions, optional `prepared`, optional `readSignal` (how the source can later tell the agent read it elsewhere) |
+| `AttentionGroup` | What the agent has to *do*: `reply` (a customer ticket), `answer` (a colleague's Slack message with a reply action) or `decide` (email, workflow posts, anything with only "open"). `attentionGroup(item)` is pure; "Needs you now" renders one sub-header per non-empty group when two or more are present |
 | `PreparedContent` | What the copilot already did: `draft` (a reply-queue customer reply), `answer` (a researched Slack reply), `summary` (an email digest, no reply proposed) |
 | `SourceStatus` | Per-source `ok` / `not_connected` / `error`, so the UI can render "Connect Slack" instead of a silent empty list |
 | `Briefing` | `generatedAt`, `since`, `narrative`, `narrativeSource`, `counts`, ranked `items`, `sources` |
 
-`isNeedsYouNow(item, nowMs)` and `countBriefing(items)` are pure functions on the contract, so the
-"Needs you now" rule is identical on server and client.
+`isNeedsYouNow(item, nowMs)`, `countBriefing(items)` and `attentionGroup(item)` are pure functions on
+the contract, so the "Needs you now" rule and its Reply / Answer / Decide split are identical on server
+and client. `isNeedsYouNow` is purely urgency-driven: the *sources* decide urgency (tables below), so
+the section and `counts.now` agree by construction.
 
 ## Data flow
 
@@ -91,8 +94,27 @@ Scope is deliberately narrow, and enforced in code rather than by convention:
 Whole channels are never fetched, other people's threads are never read, and the agent's own
 messages are dropped. Thread replies to the agent's own messages (`slack_thread_reply`) are v2.
 
-A personal mention or a DM is urgency `now`; a **user-group** mention is `today` — anyone on the
-group can take it, so it must not shout as loudly as a direct ask.
+Urgency, i.e. what reaches "Needs you now" (`toSlackItem`, tightened 2026-09-01 after the list kept
+filling with cc-style mentions the agent had already seen):
+
+| Message | Condition | Urgency |
+|---|---|---|
+| DM | from a person | `now` |
+| DM | from a bot (`isBot`) | `today` |
+| Personal `<@…>` mention | the text asks something: `asksTheReader` in `lib/briefing/asks.ts` (a question, or a request phrase such as "please", "can you", "eta", "wdyt", "take a look", "urgent") | `now` |
+| Personal mention | cc-style, asks nothing | `today` |
+| User-group mention (@support-team) | always — anyone on the group can take it | `today` |
+| Workflow/bot post in a channel | says "assigned to you" | `now` |
+| Workflow/bot post in a channel | anything else | `today` |
+
+Phrase matching uses a word-start boundary (`containsPhrase`), so "eta" does not fire on "beta" and
+Slack markup is stripped first so a user id cannot smuggle a phrase in. `readsAsQuestion` (the
+research gate) lives in the same module and is re-exported from `research.ts`.
+
+Every Slack item carries `readSignal: { kind: "slack_channel", channelId, ts }` **except a threaded
+reply** (`threadTs` set and different from `ts`): a channel's `last_read` moves independently of its
+threads, so a thread reply would read as seen the moment the agent opened anything else in the
+channel. Those rows stay until dealt with.
 
 **Workflow and bot posts are events, not people.** A Slack workflow ("Raise" in `#payout-issues`)
 posts *"A new Payout Issue ticket has been created and assigned to you: Ticket Title …"*. Rendering
@@ -127,8 +149,20 @@ before that column existed resolve it lazily via `auth.test` and persist it. See
 ### Gmail — `email_action`, `email_fyi`
 
 Unread inbox threads since `since` (`in:inbox is:unread after:<epoch>`), classified by a small
-keyword heuristic: a known partner sender (MassPay / Ondato / TripleA), a direct question, or an ask
-phrase ("please", "confirm", "by EOD") makes it an action; everything else is FYI.
+keyword heuristic (`classifyEmail` → kind, `emailUrgency` → urgency):
+
+| Sender / content | Kind | Urgency |
+|---|---|---|
+| Payout/identity partner (`PARTNER_SENDER_FRAGMENTS`: masspay, ondato, triplea, triple-a) | `email_action` | `now` |
+| Automated sender (`AUTOMATED_SENDER_FRAGMENTS`: noreply, newsletter, notifications@, info@, hello@, marketing@, digest@, updates@, mailer-daemon, calendar-notification, …) | `email_fyi` | `later` |
+| A person, asks something, and subject+snippet hits a `STRONG_ACTION_PHRASES` entry ("action required", "approve", "confirm", "deadline", "by EOD", "waiting on you", "urgent", "asap", "please review", "sign", "respond by") | `email_action` | `now` |
+| A person, asks something ("?" or a soft `ACTION_PHRASES` hit) | `email_action` | `today` |
+| Everything else | `email_fyi` | `later` |
+
+Partner beats automated (`noreply@masspay…` is still `now`); automated beats the "?" pass (a
+newsletter ending in "questions?" is an FYI). Intercom was removed from the partner list on
+2026-09-01: its notification mail duplicated the ticket queue already on Home. Every email item
+carries `readSignal: { kind: "gmail_thread", threadId }`.
 
 **Nothing from email reaches a model in v1.** `prepared` is a deterministic `summary` built from the
 subject and Gmail's own snippet. See [[Gmail Integration]].
@@ -192,8 +226,63 @@ from counts alone. `narrativeSource` tells the UI which one it got.
 
 The briefing is rebuilt from live sources, so without per-item state anything the agent handled
 outside the app would keep coming back. `briefing_dismissals` (see
-[[Database Schema Reference]]) holds one `(agent_id, item_id)` row per finished item and nothing
-else — no title, no body, no counterparty.
+[[Database Schema Reference]]) holds one `(agent_id, item_id)` row per finished or parked item and
+nothing else — no title, no body, no counterparty. Each row carries a `reason`:
+
+| reason | Written by | Meaning |
+|---|---|---|
+| `manual` | client (`POST`, default) | the X, a left swipe, Clear all |
+| `acted` | client (`POST { reason: "acted" }`) | a draft sent or rejected, a Slack answer sent, a deep link opened |
+| `read` | **server only**, `lib/briefing/read-signals.ts` | the source says the agent already read it (below). A client sending `reason: "read"` gets `400` |
+| `snooze` | client (`POST { until }`) | hidden only while `snoozed_until` is in the future; once it passes the row is ignored and the item comes back on its own |
+
+`getDismissedIds` returns ids whose `snoozed_until` is null or still ahead of `now`; an unparseable
+`snoozed_until` counts as hidden rather than expired, so a corrupt row can never resurrect an item.
+
+### Read signals — auto-dismiss from Slack and Gmail
+
+The agent should not have to dismiss what they plainly read at the source. Every item that *can* be
+checked carries a `readSignal` (set by its source module, see above); `detectReadItems` in
+`lib/briefing/read-signals.ts` resolves them:
+
+- `slack_channel`: `conversations.info(channel).last_read` (`lib/slack.ts::getChannelLastRead`). Read
+  when `Number(last_read) >= Number(ts)`; a NaN on either side is "unknown", never "read".
+- `gmail_thread`: `GET users/me/threads/{id}?format=minimal` (`lib/gmail-client.ts::getThreadsUnreadState`).
+  Read when no message in the thread still carries `UNREAD`; an unknown thread is never "read".
+
+`planReadChecks` dedupes and caps the lookups (`MAX_SLACK_CHANNEL_CHECKS = 15`,
+`MAX_GMAIL_THREAD_CHECKS = 10`); the whole check is raced against `READ_CHECK_TIMEOUT_MS = 2500` and
+on timeout answers with whatever landed in time. It never throws — a failed or slow check costs a
+stale row, never the page.
+
+`buildBriefing` runs it on both paths (`markReadItems`), over items not already dismissed:
+
+- **cache hit**: candidates are the cached items with a `readSignal`; `getAgentTokens()` is fetched
+  only when there is at least one; read ids are unioned with the dismissed set before
+  `applyDismissals`, so a mention answered in Slack two minutes ago leaves Home on the next load
+  instead of waiting out the TTL;
+- **fresh build**: the check runs after the four sources and **before** research, ranking and the
+  narrative. Read items are removed from the merged list and from `slack.contexts` (nothing is
+  researched for a question already dealt with), so the model narrative and the cached copy describe
+  only what the agent has not seen.
+
+Both paths persist the answer as `reason = "read"` rows, best effort. A read signal is **not
+undoable by design**: the signal came from the source, not from a click, so the row is excluded from
+the cached copy on the fresh path; a `DELETE` still clears the row but the item only reappears after
+a rebuild, and only if the source no longer says read. Log line, counts only:
+`[briefing] read-signals agent=… checked=N read=M`.
+
+### Snooze — "not now"
+
+A snooze is a dismissal with an expiry. The client resolves the time in the agent's local clock
+(`lib/briefing/snooze.ts`, pure and unit-tested): **Later today** (now + 3h, offered only while that
+lands before 19:00), **Tomorrow 9:00**, and **next Monday 9:00** (or the Monday after, labelled "Next
+week", when tomorrow already is Monday). On pointer devices a clock icon sits left of the X and is
+revealed by the same hover/focus rule; on every size the expanded row's header line carries a
+"Snooze" button, so touch and keyboard reach it too. Both open the same shadcn `Popover` menu (label
+left, resolved time right), stop click propagation so the row never toggles, and post
+`{ ids, until }`. The toast reads "Snoozed until tomorrow 9:00" with the usual Undo, which `DELETE`s
+the row and therefore un-snoozes.
 
 **Applied at read time.** `buildBriefing` reads the ids once and calls `applyDismissals` on both the
 cache-hit path and the freshly-built one, *after* `writeCache`. So the cached copy stays complete
@@ -218,12 +307,15 @@ comes from the session cookie, never the request, so a caller can only change th
 
 | | Request | Success |
 |---|---|---|
-| `POST` | `{ "ids": ["intercom:123", "slack:C0A:1788…"] }` | `200 { "dismissed": 2, "ids": [...] }` |
-| `DELETE` | same body | `200 { "restored": 2, "ids": [...] }` |
+| `POST` | `{ "ids": ["intercom:123", "slack:C0A:1788…"], "reason"?: "manual" \| "acted", "until"?: ISO }` | `200 { "dismissed": 2, "ids": [...], "until"?: ISO }` (`until` echoed only for a snooze) |
+| `DELETE` | `{ "ids": [...] }` | `200 { "restored": 2, "ids": [...] }` — also un-snoozes |
 
-Validation (`parseItemIds`, pure and unit-tested): an array of 1–200 entries, each a string of at
-most 200 chars matching `/^(intercom|slack|gmail|calendar):/`, deduplicated. Anything else is
-`400 { error }`; no session is `401`; no agent row is `404`. Rows older than 14 days are pruned
+Validation (`parseDismissBody`, pure and unit-tested; `parseItemIds` is a thin wrapper kept for
+callers): `ids` is an array of 1–200 entries, each a string of at most 200 chars matching
+`/^(intercom|slack|gmail|calendar):/`, deduplicated; `reason` may only be `manual` or `acted`
+(`read` and `snooze` are refused — `read` is server-only, `snooze` is implied by `until`); `until`
+must parse, be in the future and at most `MAX_SNOOZE_MS` (14 days) ahead, and when present the stored
+reason is `snooze`. Anything else is `400 { error }`; no session is `401`; no agent row is `404`. Rows older than 14 days are pruned
 opportunistically inside `getDismissedIds`, best effort — a failed prune never reaches the caller.
 
 ### What counts as a dismissal
@@ -240,7 +332,11 @@ opportunistically inside `getDismissedIds`, best effort — a failed prune never
   "Check on desktop" links are the exception: they are a step toward sending, not the end of the
   item, so they leave the row in place.
 
-Every one of these shows a toast with an **Undo** for ~5 seconds, which `DELETE`s the same ids.
+- **snoozing** it (clock icon / Snooze button), which hides it until the chosen time;
+- being **read at the source** (Slack `last_read`, Gmail `UNREAD` gone) — server-side, no toast, not
+  undoable (see Read signals above).
+
+Every client-side one of these shows a toast with an **Undo** for ~5 seconds, which `DELETE`s the same ids.
 
 `briefing-board.tsx` owns the session's dismissed set, so the hero tiles and the section header
 recount immediately (`countBriefing` is pure and runs on the client). The right-hand digests and the
@@ -258,9 +354,10 @@ server-side filter.
   and control characters stripped, length capped.
 - Nothing sends or approves without a click, and a locked (`needs_check`) draft only sends through the locked `SendConfirmDialog`, where the agent asserts the fadmin check (that sets `needsCheckConfirmed`); it otherwise stays locked
   everywhere.
-- `briefing_dismissals` stores an agent id and an item id, nothing else — no title, no body, no
-  customer name or email — and the dismiss route accepts nothing else either. Logs carry agent ids
-  and counts only, never message text.
+- `briefing_dismissals` stores an agent id, an item id, a reason and an optional snooze time,
+  nothing else — no title, no body, no customer name or email — and the dismiss route accepts
+  nothing else either. Read-signal lookups fetch only `last_read` / label ids, never message
+  bodies. Logs carry agent ids and counts only, never message text.
 - Sign-in is unchanged Google Workspace SSO — see [[Auth and Session]].
 
 ## Database columns
@@ -282,15 +379,23 @@ create table if not exists public.briefing_dismissals (
   agent_id uuid references agents(id) on delete cascade,
   item_id text,
   dismissed_at timestamptz default now(),
+  reason text not null default 'manual' check (reason in ('manual','acted','read','snooze')),
+  snoozed_until timestamptz,
   primary key (agent_id, item_id)
 );
+create index if not exists briefing_dismissals_snoozed_until_idx
+  on public.briefing_dismissals (agent_id, snoozed_until) where snoozed_until is not null;
 ```
 
 ## Key files
 
 - `lib/briefing/types.ts` — the shared contract (`AttentionItem`, `Briefing`, `isNeedsYouNow`, `countBriefing`)
 - `lib/briefing/build.ts` — `buildBriefing(email)`, ranking, cache, `computeSince`, `applyDismissals`, `markHomeSeen(email)`
-- `lib/briefing/dismissals.ts` — `getDismissedIds`, `dismissItems`, `undismissItems`, `parseItemIds`, 14-day prune
+- `lib/briefing/dismissals.ts` — `getDismissedIds` (snooze-aware), `dismissItems` (reason / until), `undismissItems`, `parseDismissBody`, 14-day prune
+- `lib/briefing/read-signals.ts` — `planReadChecks`, `resolveReadItems`, `detectReadItems` (Slack `last_read` + Gmail `UNREAD`, 2.5s deadline)
+- `lib/briefing/asks.ts` — `readsAsQuestion`, `asksTheReader`, `containsPhrase` (the Slack urgency and research gates)
+- `lib/briefing/snooze.ts` — `snoozeOptions`, `snoozeToastLabel`, `snoozeAtLabel` (client-side, local time)
+- `components/home/attention-list.tsx` — Reply / Answer / Decide grouping; `attention-row.tsx` — X, swipe, snooze menu; `use-dismissals.ts` — optimistic POST/DELETE with Undo
 - `lib/briefing/format.ts` — `whenLabel` helpers, sanitizers, `deriveLockReason`
 - `lib/briefing/sources/intercom.ts` — ticket items + queue-draft reconciliation
 - `lib/briefing/sources/slack.ts` — DM / mention items, `slack_user_id` resolution

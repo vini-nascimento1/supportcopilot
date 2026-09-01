@@ -3,21 +3,34 @@
 import { useEffect, useState } from "react"
 
 import { AttentionRow } from "@/components/home/attention-row"
-import type { AttentionItem } from "@/lib/briefing/types"
+import {
+  ATTENTION_GROUP_LABEL,
+  ATTENTION_GROUP_ORDER,
+  attentionGroup,
+  type AttentionItem,
+} from "@/lib/briefing/types"
 
 const LEAVE_MS = 220
 
 // The "Needs you now" list. It renders every row the server sent and animates
-// out the ones the board has marked dismissed — sent, rejected, opened, swiped
-// or X-ed. The dismissed set lives in the board because the hero tiles and the
-// section header count off the same list; here it only drives the fade and
-// collapse, and an Undo (an id leaving the set) puts the row straight back.
+// out the ones the board has marked dismissed — sent, rejected, opened, swiped,
+// snoozed or X-ed. The dismissed set lives in the board because the hero tiles
+// and the section header count off the same list; here it only drives the fade
+// and collapse, and an Undo (an id leaving the set) puts the row straight back.
+//
+// Rows are then split into Reply / Answer / Decide, so a customer waiting, a
+// colleague's question and a decision never sit in one undifferentiated pile.
+// The split is derived from the items on every render, never stored, so the
+// leave animation and Undo keep working exactly as before. With only one group
+// in play there are no sub-headers: the section header already names the list.
+
 export function AttentionList({
   items,
   dismissedIds,
   openId,
   onToggle,
   onDismiss,
+  onSnooze,
   onHandled,
   downloadUrl,
   empty,
@@ -27,6 +40,7 @@ export function AttentionList({
   openId: string | null
   onToggle: (id: string) => void
   onDismiss: (id: string) => void
+  onSnooze: (id: string, until: string, label: string) => void
   onHandled: (id: string) => void
   downloadUrl?: string
   empty?: React.ReactNode
@@ -52,23 +66,48 @@ export function AttentionList({
     return <>{empty ?? null}</>
   }
 
+  const groups = ATTENTION_GROUP_ORDER.map((group) => ({
+    group,
+    rows: visible.filter((i) => attentionGroup(i) === group),
+  })).filter((g) => g.rows.length > 0)
+
+  const showHeaders = groups.length > 1
+
   return (
     <div>
-      {visible.map((item) => {
-        const leaving = dismissedIds.includes(item.id)
-        return (
-          <AttentionRow
-            key={item.id}
-            item={item}
-            open={openId === item.id && !leaving}
-            leaving={leaving}
-            onToggle={() => onToggle(item.id)}
-            onDismiss={onDismiss}
-            onHandled={onHandled}
-            downloadUrl={downloadUrl}
-          />
-        )
-      })}
+      {groups.map(({ group, rows }) => (
+        <div key={group} className={showHeaders ? "mt-3.5 first:mt-0" : undefined}>
+          {showHeaders && (
+            <div className="mb-1.5 flex items-baseline gap-2">
+              <span className="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">
+                {ATTENTION_GROUP_LABEL[group].title}
+              </span>
+              <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                {rows.length}
+              </span>
+              <span className="hidden truncate text-[11px] text-muted-foreground md:inline">
+                {ATTENTION_GROUP_LABEL[group].hint}
+              </span>
+            </div>
+          )}
+          {rows.map((item) => {
+            const leaving = dismissedIds.includes(item.id)
+            return (
+              <AttentionRow
+                key={item.id}
+                item={item}
+                open={openId === item.id && !leaving}
+                leaving={leaving}
+                onToggle={() => onToggle(item.id)}
+                onDismiss={onDismiss}
+                onSnooze={onSnooze}
+                onHandled={onHandled}
+                downloadUrl={downloadUrl}
+              />
+            )
+          })}
+        </div>
+      ))}
     </div>
   )
 }

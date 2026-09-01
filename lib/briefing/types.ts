@@ -81,6 +81,41 @@ export type AttentionItem = {
   // Set on the item that opened the copilot's research (kind slack_mention/dm)
   // while the research is still running, so the UI can render a skeleton.
   pending?: boolean
+  // How the source can tell, later, that the agent already read this item
+  // outside the app. lib/briefing/read-signals.ts checks these at read time
+  // and auto-dismisses (reason "read") whatever the signal says is seen.
+  // Omitted when no reliable signal exists (e.g. a mention inside a thread:
+  // a channel's last_read says nothing about its threads).
+  readSignal?: ReadSignal
+}
+
+export type ReadSignal =
+  // Seen once conversations.info(channel).last_read >= ts.
+  | { kind: "slack_channel"; channelId: string; ts: string }
+  // Seen once the thread no longer carries Gmail's UNREAD label.
+  | { kind: "gmail_thread"; threadId: string }
+
+// What the agent has to DO about an item. "Needs you now" is grouped by this,
+// so a customer reply, a colleague's question and a decision never sit in one
+// undifferentiated pile. Pure, identical on server and client.
+export type AttentionGroup = "reply" | "answer" | "decide"
+
+export const ATTENTION_GROUP_ORDER: readonly AttentionGroup[] = ["reply", "answer", "decide"]
+
+export const ATTENTION_GROUP_LABEL: Record<AttentionGroup, { title: string; hint: string }> = {
+  reply: { title: "Reply", hint: "Customers waiting on you" },
+  answer: { title: "Answer", hint: "Colleagues asking you" },
+  decide: { title: "Decide", hint: "Needs a call from you" },
+}
+
+export function attentionGroup(item: AttentionItem): AttentionGroup {
+  if (item.kind === "ticket_awaiting_reply") return "reply"
+  if (item.source === "slack") {
+    // A workflow post (Raise, Moderation) only offers "open": nobody asked the
+    // agent anything, so it is a decision, not an answer to write.
+    return item.prepared?.kind === "answer" || item.actions.includes("reply") ? "answer" : "decide"
+  }
+  return "decide"
 }
 
 // Per-source status so the UI can render "connect" / "nothing new" states.

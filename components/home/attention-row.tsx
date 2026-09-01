@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react"
 import {
   CalendarIcon,
   ChevronRightIcon,
+  ClockIcon,
   MailIcon,
   MessageSquareIcon,
   SparklesIcon,
@@ -11,10 +12,12 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tag } from "@/components/ui/status-tag"
 import { PreparedCard } from "@/components/home/prepared-card"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
+import { snoozeAtLabel, snoozeOptions, snoozeToastLabel, type SnoozeOption } from "@/lib/briefing/snooze"
 import type { AttentionItem, AttentionKind } from "@/lib/briefing/types"
 
 // One row in "Needs you now": urgency bar, source chip, when, title, context,
@@ -26,6 +29,11 @@ import type { AttentionItem, AttentionKind } from "@/lib/briefing/types"
 // through the list's onDismiss, which posts to /api/briefing/dismiss and offers
 // an Undo. Acting on the row (sending, rejecting, opening the deep link) counts
 // as handling it too; that comes back up from PreparedCard.
+//
+// Snoozing: "not now" rather than "not for me". A clock next to the X on
+// pointer devices, and a Snooze button in the expanded panel's header on every
+// size, so touch and keyboard reach it too. Both open the same menu and post
+// the same dismissal with an `until`, so the row comes back on its own.
 
 const KIND_CHIP: Record<AttentionKind, string> = {
   ticket_awaiting_reply: "Ticket",
@@ -84,12 +92,72 @@ type Gesture = {
   axis: "x" | "y" | null
 }
 
+// The snooze menu. Options are resolved when the menu opens, never during
+// render: the row is server-rendered too, and a clock read at render time would
+// hydrate to a different set. Clicks are stopped here so opening the menu, or
+// picking from it, never toggles the row underneath.
+function SnoozeMenu({
+  onPick,
+  children,
+}: {
+  onPick: (option: SnoozeOption) => void
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const [now, setNow] = useState<Date | null>(null)
+  const [options, setOptions] = useState<SnoozeOption[]>([])
+
+  const onOpenChange = useCallback((next: boolean) => {
+    if (next) {
+      const at = new Date()
+      setNow(at)
+      setOptions(snoozeOptions(at))
+    }
+    setOpen(next)
+  }, [])
+
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild onClick={(e) => e.stopPropagation()}>
+        {children}
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={6}
+        className="w-52 gap-0 p-1"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="px-2 pt-1 pb-1.5 text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">
+          Bring it back
+        </p>
+        {options.map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              onPick(option)
+            }}
+            className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-[12.5px] hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+          >
+            <span className="truncate">{option.label}</span>
+            <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">
+              {now ? snoozeAtLabel(option.until, now) : ""}
+            </span>
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 export function AttentionRow({
   item,
   open,
   leaving,
   onToggle,
   onDismiss,
+  onSnooze,
   onHandled,
   downloadUrl,
 }: {
@@ -99,6 +167,8 @@ export function AttentionRow({
   onToggle: () => void
   /** Explicit "I don't need this" — the X button or a left swipe. */
   onDismiss: (id: string) => void
+  /** "Not now": hide it until `until` (ISO), `label` is toast text. */
+  onSnooze: (id: string, until: string, label: string) => void
   /** The agent acted on it (sent, rejected, opened it at the source). */
   onHandled: (id: string) => void
   downloadUrl?: string
@@ -178,6 +248,13 @@ export function AttentionRow({
       if (commit) onDismiss(item.id)
     },
     [endGesture, item.id, offset, onDismiss],
+  )
+
+  const pickSnooze = useCallback(
+    (option: SnoozeOption) => {
+      onSnooze(item.id, option.until.toISOString(), snoozeToastLabel(option.until, new Date()))
+    },
+    [item.id, onSnooze],
   )
 
   const handleToggle = useCallback(() => {
@@ -261,7 +338,17 @@ export function AttentionRow({
               </span>
             </button>
 
-            {/* Pointer devices: an X that appears on hover or keyboard focus. */}
+            {/* Pointer devices: snooze and dismiss, revealed on hover or focus. */}
+            <SnoozeMenu onPick={pickSnooze}>
+              <button
+                type="button"
+                aria-label="Snooze"
+                className="absolute top-2 right-8 hidden size-6 cursor-pointer place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none data-[state=open]:opacity-100 motion-reduce:transition-none group-hover/row:opacity-100 md:grid"
+              >
+                <ClockIcon className="size-3.5" />
+              </button>
+            </SnoozeMenu>
+
             <button
               type="button"
               aria-label="Dismiss"
@@ -287,9 +374,21 @@ export function AttentionRow({
         {open && (
           <div id={panelId} className="mb-3 overflow-hidden rounded-lg border bg-card">
             <div className="border-b px-3.5 py-3">
-              <p className="mb-1 text-[11px] font-semibold text-muted-foreground">
-                {kindChipLabel(item.kind)} · {item.whenLabel}
-              </p>
+              <div className="mb-1 flex items-center gap-2">
+                <p className="min-w-0 truncate text-[11px] font-semibold text-muted-foreground">
+                  {kindChipLabel(item.kind)} · {item.whenLabel}
+                </p>
+                {/* Every size, so touch and keyboard get snooze too. */}
+                <SnoozeMenu onPick={pickSnooze}>
+                  <button
+                    type="button"
+                    className="-my-1 ml-auto flex h-6 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none motion-reduce:transition-none"
+                  >
+                    <ClockIcon className="size-3.5" />
+                    Snooze
+                  </button>
+                </SnoozeMenu>
+              </div>
               <p className="text-[13px] leading-relaxed">{item.context}</p>
             </div>
             <PreparedCard item={item} onHandled={onHandled} downloadUrl={downloadUrl} />

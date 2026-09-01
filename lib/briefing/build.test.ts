@@ -8,7 +8,11 @@ vi.mock("@/lib/briefing/sources/gmail", () => ({ collectGmailItems: vi.fn() }))
 vi.mock("@/lib/briefing/sources/calendar", () => ({ collectCalendarItems: vi.fn() }))
 vi.mock("@/lib/briefing/research", () => ({ researchSlackItems: vi.fn() }))
 vi.mock("@/lib/briefing/narrative", () => ({ generateNarrative: vi.fn() }))
-vi.mock("@/lib/briefing/dismissals", () => ({ getDismissedIds: vi.fn() }))
+vi.mock("@/lib/briefing/dismissals", () => ({
+  getDismissedIds: vi.fn(),
+  dismissItems: vi.fn(),
+}))
+vi.mock("@/lib/briefing/read-signals", () => ({ detectReadItems: vi.fn() }))
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
 import { getAgentTokens } from "@/lib/auth"
@@ -18,7 +22,8 @@ import { collectGmailItems } from "@/lib/briefing/sources/gmail"
 import { collectCalendarItems } from "@/lib/briefing/sources/calendar"
 import { researchSlackItems } from "@/lib/briefing/research"
 import { generateNarrative } from "@/lib/briefing/narrative"
-import { getDismissedIds } from "@/lib/briefing/dismissals"
+import { dismissItems, getDismissedIds } from "@/lib/briefing/dismissals"
+import { detectReadItems } from "@/lib/briefing/read-signals"
 import {
   BRIEFING_TTL_MS,
   MAX_LOOKBACK_MS,
@@ -206,6 +211,10 @@ describe("buildBriefing", () => {
     vi.mocked(generateNarrative).mockReset()
     vi.mocked(getDismissedIds).mockReset()
     vi.mocked(getDismissedIds).mockResolvedValue(new Set<string>())
+    vi.mocked(dismissItems).mockReset()
+    vi.mocked(dismissItems).mockResolvedValue(0)
+    vi.mocked(detectReadItems).mockReset()
+    vi.mocked(detectReadItems).mockResolvedValue(new Set<string>())
 
     vi.mocked(getAgentTokens).mockResolvedValue({
       email: "a@fanvue.com",
@@ -347,6 +356,101 @@ describe("buildBriefing", () => {
     // Undo has to be able to bring the row back without a rebuild.
     const cached = updates[0].briefing_cache as { items: AttentionItem[] }
     expect(cached.items).toHaveLength(1)
+  })
+
+  it("drops an item the read signal says was already read, and records why", async () => {
+    const mention = item({
+      id: "slack:C1:1712345678.000100",
+      source: "slack",
+      kind: "slack_mention",
+      readSignal: { kind: "slack_channel", channelId: "C1", ts: "1712345678.000100" },
+    })
+    vi.mocked(collectSlackItems).mockResolvedValue({
+      items: [mention],
+      contexts: new Map([["slack:C1:1712345678.000100", {} as never]]),
+      status: { source: "slack", state: "ok", count: 1 },
+    })
+    vi.mocked(detectReadItems).mockResolvedValue(new Set(["slack:C1:1712345678.000100"]))
+    const { db, updates } = fakeDb(agentRow())
+    vi.mocked(getSupabaseAdminClient).mockReturnValue(db)
+
+    const briefing = await buildBriefing("a@fanvue.com", { now: NOW })
+
+    // Only the item without a signal survives, in the response AND in the cache
+    // — a read signal is not undoable, so the cached copy omits it too.
+    expect(briefing.items.map((i) => i.id)).toEqual(["intercom:1"])
+    const cached = updates[0].briefing_cache as { items: AttentionItem[] }
+    expect(cached.items.map((i) => i.id)).toEqual(["intercom:1"])
+    expect(dismissItems).toHaveBeenCalledWith("agent-1", ["slack:C1:1712345678.000100"], {
+      reason: "read",
+    })
+    // Nothing is researched for an item that is already gone.
+    expect(vi.mocked(researchSlackItems).mock.calls[0][0].contexts.size).toBe(0)
+  })
+
+  it("filters a newly-read item out of a cache hit", async () => {
+    const mention = item({
+      id: "slack:C1:1712345678.000100",
+      source: "slack",
+      kind: "slack_mention",
+      readSignal: { kind: "slack_channel", channelId: "C1", ts: "1712345678.000100" },
+    })
+    const cached = {
+      generatedAt: new Date(NOW - 60_000).toISOString(),
+      since: new Date(NOW - 3_600_000).toISOString(),
+      narrative: "cached",
+      narrativeSource: "model",
+      counts: { now: 1, drafted: 0, researched: 0, locked: 0 },
+      items: [mention],
+      sources: [],
+    }
+    const { db } = fakeDb(
+      agentRow({ briefing_cache: cached, briefing_cached_at: cached.generatedAt })
+    )
+    vi.mocked(getSupabaseAdminClient).mockReturnValue(db)
+    vi.mocked(detectReadItems).mockResolvedValue(new Set(["slack:C1:1712345678.000100"]))
+
+    const briefing = await buildBriefing("a@fanvue.com", { now: NOW })
+
+    expect(briefing.items).toEqual([])
+    expect(briefing.narrativeSource).toBe("fallback")
+    expect(collectIntercomItems).not.toHaveBeenCalled()
+    expect(dismissItems).toHaveBeenCalledWith("agent-1", ["slack:C1:1712345678.000100"], {
+      reason: "read",
+    })
+  })
+
+  it("keeps the briefing intact when the read check fails", async () => {
+    const mention = item({
+      id: "slack:C1:1712345678.000100",
+      source: "slack",
+      kind: "slack_mention",
+      readSignal: { kind: "slack_channel", channelId: "C1", ts: "1712345678.000100" },
+    })
+    vi.mocked(collectSlackItems).mockResolvedValue({
+      items: [mention],
+      contexts: new Map(),
+      status: { source: "slack", state: "ok", count: 1 },
+    })
+    vi.mocked(detectReadItems).mockRejectedValue(new Error("slack down"))
+    const { db } = fakeDb(agentRow())
+    vi.mocked(getSupabaseAdminClient).mockReturnValue(db)
+
+    const briefing = await buildBriefing("a@fanvue.com", { now: NOW })
+
+    expect(briefing.items.map((i) => i.id).sort()).toEqual([
+      "intercom:1",
+      "slack:C1:1712345678.000100",
+    ])
+    expect(dismissItems).not.toHaveBeenCalled()
+  })
+
+  it("does not check read signals for items that carry none", async () => {
+    const { db } = fakeDb(agentRow())
+    vi.mocked(getSupabaseAdminClient).mockReturnValue(db)
+
+    await buildBriefing("a@fanvue.com", { now: NOW })
+    expect(detectReadItems).not.toHaveBeenCalled()
   })
 
   it("returns a safe empty briefing when the agent row is missing", async () => {

@@ -50,19 +50,21 @@ One row per support agent, created on first Supabase Auth login. Holds identity,
 
 ### `briefing_dismissals`
 
-One row per Home briefing item an agent has finished with — dismissed with the X, swiped away on a phone, cleared in bulk, or acted on (draft sent or rejected, Slack answer sent, deep link opened). The briefing is rebuilt from live sources every five minutes, so without this table anything the agent already handled would keep reappearing. See [[Home Briefing]].
+One row per Home briefing item an agent has finished with, or parked: dismissed with the X, swiped away on a phone, cleared in bulk, acted on (draft sent or rejected, Slack answer sent, deep link opened), detected as read at the source (Slack `last_read`, Gmail `UNREAD` label gone), or snoozed until a later time. The briefing is rebuilt from live sources every five minutes, so without this table anything the agent already handled would keep reappearing. See [[Home Briefing]].
 
 | Column | Type | Notes |
 |---|---|---|
 | agent_id | uuid | PK (with `item_id`), FK → `agents.id` `on delete cascade` |
 | item_id | text | PK (with `agent_id`) — the `AttentionItem.id`, e.g. `intercom:<conversationId>`, `slack:<channel>:<ts>`, `gmail:<threadId>`, `calendar:<eventId>` |
 | dismissed_at | timestamptz | default `now()` — also the retention clock |
+| reason | text | not null, default `'manual'`, check in (`manual`, `acted`, `read`, `snooze`). Why the row exists: X/swipe/Clear all, an action on the item, a read signal from the source, or a snooze |
+| snoozed_until | timestamptz | null except for `reason = 'snooze'`. While in the future the item is hidden; once it passes, the row is ignored and the item comes back. Partial index `(agent_id, snoozed_until) where snoozed_until is not null` |
 
 The row holds **no content**: no title, no body, no counterparty, nothing that identifies a customer beyond an id the agent already had on screen. Service-role access only (`getSupabaseAdminClient`), never a browser client.
 
 Retention is 14 days, pruned opportunistically inside `getDismissedIds()` (`delete … where agent_id = $1 and dismissed_at < now() - 14 days`). Item ids stop matching live source data long before that, so an old row can only ever hide something that no longer exists.
 
-**Read/write:** `lib/briefing/dismissals.ts`, applied at read time by `lib/briefing/build.ts::applyDismissals`; API route `app/api/briefing/dismiss` (`POST` to dismiss, `DELETE` to undo).
+**Read/write:** `lib/briefing/dismissals.ts`, applied at read time by `lib/briefing/build.ts::applyDismissals`; API route `app/api/briefing/dismiss` (`POST` to dismiss or, with `until`, snooze; `DELETE` to undo either). Rows with `reason = 'read'` are written server-side by `lib/briefing/read-signals.ts`, never by the client.
 
 ## AI reply pipeline
 

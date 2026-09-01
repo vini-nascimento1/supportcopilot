@@ -11,17 +11,35 @@ import { toast } from "sonner"
 // Optimistic on purpose: the row leaves the moment the agent asks it to, and a
 // failed POST puts it straight back with an error toast rather than leaving the
 // UI and the database disagreeing.
+//
+// A snooze is the same call with `until` set: the server keeps the dismissal
+// only until that timestamp, then the item comes back on its own. Undo is a
+// DELETE either way, which also un-snoozes.
 
 /** How long the Undo action stays on screen. */
 export const UNDO_MS = 5000
 
-export type Dismiss = (ids: string[], message: string) => void
+export type DismissOptions = {
+  /** "acted" = the agent handled it here; "manual" = an explicit X / swipe. */
+  reason?: "manual" | "acted"
+  /** ISO timestamp in the future — turns the dismissal into a snooze. */
+  until?: string
+}
 
-async function post(method: "POST" | "DELETE", ids: string[]): Promise<boolean> {
+export type Dismiss = (ids: string[], message: string, opts?: DismissOptions) => void
+
+async function post(
+  method: "POST" | "DELETE",
+  ids: string[],
+  opts?: DismissOptions,
+): Promise<boolean> {
   const res = await fetch("/api/briefing/dismiss", {
     method,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
+    // DELETE only ever restores; the reason/until belong to the POST.
+    body: JSON.stringify(
+      method === "POST" ? { ids, reason: opts?.reason, until: opts?.until } : { ids },
+    ),
   }).catch(() => null)
   return Boolean(res?.ok)
 }
@@ -37,13 +55,13 @@ export function useDismissals(): { dismissedIds: string[]; dismiss: Dismiss } {
   }, [])
 
   const dismiss = useCallback<Dismiss>(
-    (ids, message) => {
+    (ids, message, opts) => {
       const batch = [...new Set(ids)].filter(Boolean)
       if (batch.length === 0) return
 
       setDismissedIds((prev) => [...new Set([...prev, ...batch])])
       void (async () => {
-        if (!(await post("POST", batch))) {
+        if (!(await post("POST", batch, opts))) {
           setDismissedIds((prev) => prev.filter((id) => !batch.includes(id)))
           toast.error("Couldn't clear that from Home. Try again.")
           return

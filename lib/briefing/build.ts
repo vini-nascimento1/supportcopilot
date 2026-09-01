@@ -9,7 +9,8 @@ import { collectSlackItems, type SlackItemContext } from "@/lib/briefing/sources
 import { researchSlackItems } from "@/lib/briefing/research"
 import { generateNarrative } from "@/lib/briefing/narrative"
 import { buildFallbackNarrative } from "@/lib/briefing/narrative-fallback"
-import { getDismissedIds } from "@/lib/briefing/dismissals"
+import { dismissItems, getDismissedIds } from "@/lib/briefing/dismissals"
+import { detectReadItems } from "@/lib/briefing/read-signals"
 import {
   countBriefing,
   type AttentionItem,
@@ -22,6 +23,7 @@ import {
 //
 // Shape of a request: read the agent row → run the four sources in parallel,
 // each in its own try/catch so one dead integration cannot empty the page →
+// drop whatever the agent has already read in Slack/Gmail (read signals) →
 // research at most three Slack questions → rank → narrate → cache.
 //
 // Deliberately NOT here:
@@ -144,6 +146,49 @@ export function applyDismissals(
   }
 }
 
+/** Dismissals and read signals hide an item the same way; callers see one set. */
+function unionIds(a: ReadonlySet<string>, b: ReadonlySet<string>): Set<string> {
+  const out = new Set(a)
+  for (const id of b) out.add(id)
+  return out
+}
+
+/**
+ * Ask Slack and Gmail which of these items the agent has already read outside
+ * the app, and record the answer as a dismissal with reason "read".
+ *
+ * Best effort in every direction: a failed check, a slow check or a failed
+ * write all resolve to "nothing was read", which costs a stale row on the page
+ * and never the page itself. Counts only in the log — no ids, no titles.
+ */
+async function markReadItems(
+  row: AgentRow,
+  email: string,
+  candidates: AttentionItem[],
+  googleToken: string | null
+): Promise<Set<string>> {
+  if (candidates.length === 0) return new Set()
+
+  let read: Set<string>
+  try {
+    read = await detectReadItems(candidates, {
+      slackToken: row.slack_token,
+      googleToken,
+      email,
+    })
+  } catch {
+    return new Set()
+  }
+
+  console.log(
+    `[briefing] read-signals agent=${row.id} checked=${candidates.length} read=${read.size}`
+  )
+  if (read.size > 0) {
+    await dismissItems(row.id, [...read], { reason: "read" }).catch(() => {})
+  }
+  return read
+}
+
 async function readAgentRow(email: string): Promise<AgentRow | null> {
   const db = getSupabaseAdminClient()
   if (!db) return null
@@ -231,10 +276,25 @@ export async function buildBriefing(
   if (!opts.force) {
     const cached = readCache(row, nowMs)
     if (cached) {
+      // A cache hit still checks read signals: the agent may have answered the
+      // mention in Slack itself two minutes ago, and waiting out the TTL to
+      // notice would make Home look stale exactly when it matters.
+      const candidates = cached.items.filter(
+        (item) => !dismissed.has(item.id) && Boolean(item.readSignal)
+      )
+      let googleToken: string | null = null
+      if (candidates.length > 0) {
+        try {
+          googleToken = (await getAgentTokens()).googleToken
+        } catch {
+          googleToken = null
+        }
+      }
+      const read = await markReadItems(row, email, candidates, googleToken)
       console.log(
         `[briefing] cache hit agent=${row.id} items=${cached.items.length} dismissed=${dismissed.size}`
       )
-      return applyDismissals(cached, dismissed)
+      return applyDismissals(cached, unionIds(dismissed, read))
     }
   }
 
@@ -281,12 +341,28 @@ export async function buildBriefing(
     })),
   ])
 
+  // Anything the agent already read in Slack or Gmail drops out here, BEFORE
+  // research, ranking and the narrative: no point researching an answer to a
+  // question that has been dealt with, and the model must describe the list the
+  // agent will actually see. Unlike a dismissal this is not undoable — the
+  // signal came from the source, not from a click — so the cached copy
+  // legitimately omits these items too.
+  const collected = [...intercom.items, ...slack.items, ...gmail.items, ...calendar.items]
+  const readCandidates = collected.filter(
+    (item) => !dismissed.has(item.id) && Boolean(item.readSignal)
+  )
+  const read = await markReadItems(row, email, readCandidates, tokens.googleToken)
+
   // Research runs only over the Slack contexts, and only for messages that read
   // as a question to this agent (capped at 3 inside researchSlackItems).
+  const contexts =
+    read.size > 0
+      ? new Map([...slack.contexts].filter(([id]) => !read.has(id)))
+      : slack.contexts
   let prepared = new Map<string, AttentionItem["prepared"]>()
   try {
     prepared = await researchSlackItems({
-      contexts: slack.contexts,
+      contexts,
       email,
       origin: opts.origin ?? "",
     })
@@ -302,7 +378,7 @@ export async function buildBriefing(
     }),
     ...gmail.items,
     ...calendar.items,
-  ]
+  ].filter((item) => !read.has(item.id))
 
   const items = rankItems(merged)
   const counts = countBriefing(items)

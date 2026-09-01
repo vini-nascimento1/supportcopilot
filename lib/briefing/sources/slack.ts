@@ -8,8 +8,9 @@ import {
   searchMentions,
   type SlackBriefingMessage,
 } from "@/lib/slack"
-import type { AttentionItem, SourceStatus } from "@/lib/briefing/types"
+import type { AttentionItem, AttentionUrgency, SourceStatus } from "@/lib/briefing/types"
 import { MAX_CONTEXT_CHARS, agoLabel, firstNameOf, sanitizeLine } from "@/lib/briefing/format"
+import { asksTheReader } from "@/lib/briefing/asks"
 
 // Slack half of the Home briefing. Scope, decided in the plan and enforced here:
 //   • DMs and group DMs sent TO the agent since `since`
@@ -96,14 +97,25 @@ export function extractTicketTitle(rawText: string): string | null {
  * One Slack message → one AttentionItem. Pure so the DM/mention split, the
  * urgency rule and the sanitized context line are fixture-testable.
  *
- * A personal mention or a DM is "now" (someone is waiting on this agent
- * specifically); a user-group mention is "today" — anyone on the group can take
- * it, so it must not shout as loudly as a direct ask.
+ * Urgency, i.e. what lands in "Needs you now":
+ *   • DM from a person → "now". getUnreadDms already gates these on unread, and
+ *     nobody DMs to say nothing. A DM from a bot is a notification, so "today".
+ *   • personal `<@…>` mention → "now" only when the message actually asks the
+ *     agent something (see asksTheReader). A cc-style mention ("cc @vini for
+ *     visibility") is "today": worth seeing, not worth interrupting for.
+ *   • user-group mention (@support-team) → "today". Anyone on the group can
+ *     take it, so it must not shout as loudly as a direct ask.
  *
  * A workflow/bot post (`message.isBot`) is an EVENT, not a person: "Raise" did
  * not mention anyone, it raised a ticket. So it gets event wording, only an
  * "open" action, and research.ts refuses to draft a reply to it — answering a
- * workflow bot in Slack would be noise at best.
+ * workflow bot in Slack would be noise at best. Only "assigned to you" makes
+ * one of those "now".
+ *
+ * `readSignal` lets read-signals.ts auto-dismiss what the agent already read in
+ * Slack itself. It is omitted for a threaded reply on purpose: the channel's
+ * `last_read` moves independently of its threads, so it would report a thread
+ * reply as seen the moment the agent read anything else in the channel.
  */
 export function toSlackItem(
   message: SlackBriefingMessage,
@@ -112,6 +124,7 @@ export function toSlackItem(
 ): AttentionItem {
   const isDm = reason === "dm"
   const occurredAt = new Date(message.tsSeconds * 1000).toISOString()
+  const isThreadReply = Boolean(message.threadTs && message.threadTs !== message.ts)
   const base = {
     id: `slack:${message.channelId}:${message.ts}`,
     source: "slack" as const,
@@ -119,6 +132,15 @@ export function toSlackItem(
     whenLabel: agoLabel(occurredAt, nowMs),
     deepLink: fallbackPermalink(message),
     externalId: message.ts,
+    ...(isThreadReply
+      ? {}
+      : {
+          readSignal: {
+            kind: "slack_channel" as const,
+            channelId: message.channelId,
+            ts: message.ts,
+          },
+        }),
   }
 
   if (message.isBot && !isDm) {
@@ -142,13 +164,20 @@ export function toSlackItem(
   }
 
   const sender = firstNameOf(message.userName)
+  const urgency: AttentionUrgency = isDm
+    ? message.isBot
+      ? "today"
+      : "now"
+    : reason === "mention" && asksTheReader(message.text)
+      ? "now"
+      : "today"
 
   return {
     ...base,
     kind: isDm ? "slack_dm" : "slack_mention",
     title: isDm ? `${sender} messaged you` : `${sender} mentioned you in #${message.channelName}`,
     context: sanitizeLine(message.text, MAX_CONTEXT_CHARS),
-    urgency: reason === "group_mention" ? "today" : "now",
+    urgency,
     actions: ["reply", "open"],
   }
 }
@@ -241,8 +270,8 @@ export async function collectSlackItems(opts: {
   for (const dm of dms) push(dm, "dm")
   for (const mention of mentions) push(mention, mentionReason(mention, userId))
 
-  // Newest first, then cap. DMs and personal mentions naturally win the ranking
-  // in build.ts because they carry urgency "now".
+  // Newest first, then cap. DMs and mentions that actually ask something win
+  // the ranking in build.ts because they carry urgency "now".
   items.sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt))
   const capped = items.slice(0, MAX_SLACK_ITEMS)
   const cappedIds = new Set(capped.map((i) => i.id))

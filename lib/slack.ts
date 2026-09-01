@@ -1084,3 +1084,49 @@ export async function getUnreadDms(
   }
   return out.sort((a, b) => b.tsSeconds - a.tsSeconds)
 }
+
+/**
+ * Each channel's read cursor: `conversations.info(channel).last_read`, the ts
+ * of the last message the agent has seen in that channel.
+ *
+ * Used by the Home briefing to notice that a mention was already read in Slack
+ * itself, so the item disappears from Home instead of nagging (see
+ * lib/briefing/read-signals.ts). Best effort throughout: a channel that errors
+ * or has no cursor is simply left out of the map, which reads as "unknown", not
+ * "read". Nothing per channel is logged — the map is keyed by ids only.
+ */
+export async function getChannelLastRead(
+  token: string,
+  channelIds: string[]
+): Promise<Record<string, string>> {
+  const unique = [...new Set(channelIds)].filter(Boolean)
+  const out: Record<string, string> = {}
+  if (unique.length === 0) return out
+
+  const BATCH = 8
+  for (let i = 0; i < unique.length; i += BATCH) {
+    await Promise.allSettled(
+      unique.slice(i, i + BATCH).map(async (channelId) => {
+        try {
+          const res = await fetch(
+            `https://slack.com/api/conversations.info?channel=${encodeURIComponent(channelId)}`,
+            { headers: { Authorization: `Bearer ${token}` }, next: { revalidate: 0 } }
+          )
+          const data = (await res.json()) as {
+            ok: boolean
+            error?: string
+            channel?: { last_read?: string }
+          }
+          if (!data.ok) {
+            console.warn(`[slack] conversations.info error: ${data.error ?? "unknown"}`)
+            return
+          }
+          if (data.channel?.last_read) out[channelId] = data.channel.last_read
+        } catch {
+          /* ignore — an unknown cursor never marks anything read */
+        }
+      })
+    )
+  }
+  return out
+}

@@ -16,6 +16,34 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-09-01-i",
+    date: "2026-09-01",
+    title: "Home clears itself when you read things elsewhere",
+    description:
+      "If you already read a Slack mention in Slack, or opened an email in Gmail, Home notices and takes it off your list on the next load. No more dismissing things you have plainly seen. Only mentions you could have seen in the channel count; a reply buried in a thread stays until you deal with it.",
+  },
+  {
+    id: "seed-2026-09-01-j",
+    date: "2026-09-01",
+    title: "Snooze anything on Home",
+    description:
+      "Not now, but not never. Hover a row and hit the clock (or open the row on your phone and tap Snooze) to push it to later today, tomorrow morning or next Monday. It disappears until then and comes back on its own. Undo is in the toast, same as dismiss.",
+  },
+  {
+    id: "seed-2026-09-01-k",
+    date: "2026-09-01",
+    title: "Needs you now is sorted by what you have to do",
+    description:
+      "The list is now split into Reply (customers waiting on a ticket reply), Answer (colleagues asking you something in Slack) and Decide (emails and workflow posts that need a call from you), so you can clear one kind of work at a time.",
+  },
+  {
+    id: "seed-2026-09-01-l",
+    date: "2026-09-01",
+    title: "Only real asks reach Needs you now",
+    description:
+      "A Slack mention gets into Needs you now only when the message actually asks you something; a cc for visibility goes to the Slack digest instead. Emails count only when they come from a payout or KYC partner or clearly ask for an action or approval; newsletters and automated notifications stay out of the way in the email digest.",
+  },
+  {
     id: "seed-2026-09-01-h",
     date: "2026-09-01",
     title: "Dismiss what you have already handled on Home",
