@@ -37,6 +37,14 @@ export const BRIEFING_TTL_MS = 5 * 60 * 1000
 /** Window a briefing covers when the agent has never been seen before. */
 export const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000
 
+/**
+ * The window never shrinks below this, however recently Home was opened. A
+ * mention from two hours ago that nobody handled is still "missed"; without a
+ * floor, every visit would stamp last_seen_at and the very next build would
+ * cover an empty window.
+ */
+export const MIN_LOOKBACK_MS = 8 * 60 * 60 * 1000
+
 type AgentRow = {
   id: string
   intercom_admin_id: string | null
@@ -48,15 +56,20 @@ type AgentRow = {
   briefing_cached_at: string | null
 }
 
-/** The digest window: since the agent last opened Home, else the last 24h. */
+/**
+ * The digest window: since the agent last opened Home, floored at 8h and
+ * capped at 24h. A first-ever visit or a bad timestamp gets the full 24h.
+ */
 export function computeSince(lastSeenAt: string | null, nowMs: number): string {
   const parsed = lastSeenAt ? Date.parse(lastSeenAt) : NaN
   if (!Number.isFinite(parsed) || parsed > nowMs) {
     return new Date(nowMs - DEFAULT_LOOKBACK_MS).toISOString()
   }
   // Never look back further than the default window — an agent returning from
-  // two weeks off should get a briefing, not an archive.
-  return new Date(Math.max(parsed, nowMs - DEFAULT_LOOKBACK_MS)).toISOString()
+  // two weeks off should get a briefing, not an archive — and never less than
+  // the floor.
+  const floored = Math.min(parsed, nowMs - MIN_LOOKBACK_MS)
+  return new Date(Math.max(floored, nowMs - DEFAULT_LOOKBACK_MS)).toISOString()
 }
 
 const URGENCY_RANK: Record<AttentionItem["urgency"], number> = { now: 0, today: 1, later: 2 }

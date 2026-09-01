@@ -78,7 +78,10 @@ export function mentionReason(
   message: SlackBriefingMessage,
   userId: string
 ): "mention" | "group_mention" {
-  return message.text.includes(`<@${userId}>`) ? "mention" : "group_mention"
+  // lib/slack.ts sets mentionsSelf from the raw text before humanizing it;
+  // the raw-markup check is the fallback for messages built elsewhere.
+  const personal = message.mentionsSelf ?? message.text.includes(`<@${userId}>`)
+  return personal ? "mention" : "group_mention"
 }
 
 /**

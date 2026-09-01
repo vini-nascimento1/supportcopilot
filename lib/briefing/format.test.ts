@@ -11,6 +11,7 @@ import {
   sanitizeLine,
   untilLabel,
   waitingLabel,
+  humanizeSlackText,
 } from "./format"
 
 const NOW = Date.parse("2026-09-01T12:00:00.000Z")
@@ -119,5 +120,34 @@ describe("matchLockedCategory", () => {
     expect(matchLockedCategory(["Banned user"])).toBe("ban")
     expect(matchLockedCategory(["billing"])).toBeNull()
     expect(matchLockedCategory(null)).toBeNull()
+  })
+})
+
+describe("humanizeSlackText", () => {
+  it("renders the agent's own mention as @you and resolved users by first name", () => {
+    expect(
+      humanizeSlackText("<@U1> can you check with <@U2>?", { selfId: "U1", names: { U2: "Grace Hopper" } })
+    ).toBe("@you can you check with @Grace?")
+  })
+
+  it("falls back to a generic handle for unknown users", () => {
+    expect(humanizeSlackText("<@U9> ping")).toBe("@teammate ping")
+    expect(humanizeSlackText("<@U9|ollie> ping")).toBe("@ollie ping")
+  })
+
+  it("handles user groups, channels, broadcasts and links", () => {
+    expect(humanizeSlackText("<!subteam^S1|@support-team> see <#C1|payouts>")).toBe("@support-team see #payouts")
+    expect(humanizeSlackText("<!subteam^S1> <!here>")).toBe("@team @here")
+    expect(humanizeSlackText("read <https://x.test/a|this> and <https://x.test/b>")).toBe(
+      "read this and https://x.test/b"
+    )
+  })
+
+  it("decodes Slack's HTML entities", () => {
+    expect(humanizeSlackText("KYC &amp; payouts &lt;3")).toBe("KYC & payouts <3")
+  })
+
+  it("returns an empty string for empty input", () => {
+    expect(humanizeSlackText(null)).toBe("")
   })
 })

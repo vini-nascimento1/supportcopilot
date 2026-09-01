@@ -50,7 +50,7 @@ export function SlackDigest({
           </span>
           {item.prepared ? (
             <Badge className="shrink-0 bg-emerald-500/12 text-emerald-700 dark:text-emerald-400">
-              drafted
+              researched
             </Badge>
           ) : (
             <Badge variant="outline" className="shrink-0">

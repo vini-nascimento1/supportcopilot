@@ -38,7 +38,7 @@ buildBriefing(email)
         │
         ├─ read `agents` row ── fresh briefing_cache (< 5 min)? ──▶ return it
         │
-        ├─ since = agents.last_seen_at, clamped to the last 24h
+        ├─ since = agents.last_seen_at, floored at 8h and capped at 24h
         │
         ├─ 4 sources in parallel, each in its own try/catch ──▶ SourceStatus
         │     ├─ sources/intercom.ts   getNonReadAssignedConversations + getPendingSuggestionsForAgent
@@ -145,7 +145,7 @@ from counts alone. `narrativeSource` tells the UI which one it got.
 - `agents.last_seen_at` is **read** by the build for `since` and **written** by the Home page via
   `markHomeSeen(email)`. If the build moved that clock it would consume its own window and every
   later digest would come back empty.
-- `since` is clamped to 24 hours, so an agent back from two weeks off gets a briefing, not an archive.
+- `since` is capped at 24 hours, so an agent back from two weeks off gets a briefing, not an archive, and floored at 8 hours (`MIN_LOOKBACK_MS`) so re-opening Home never empties the digests: an unhandled mention from two hours ago is still missed.
 
 ## Security properties
 

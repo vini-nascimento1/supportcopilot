@@ -98,6 +98,13 @@ describe("mentionReason", () => {
     expect(mentionReason(message({ text: `hey <@${USER}> ping` }), USER)).toBe("mention")
     expect(mentionReason(message({ text: "<!subteam^S1> ping" }), USER)).toBe("group_mention")
   })
+
+  it("trusts the mentionsSelf flag once the markup has been humanized", () => {
+    expect(mentionReason(message({ text: "hey @you ping", mentionsSelf: true }), USER)).toBe("mention")
+    expect(mentionReason(message({ text: "hey @support-team ping", mentionsSelf: false }), USER)).toBe(
+      "group_mention"
+    )
+  })
 })
 
 describe("resolveSlackUserId", () => {

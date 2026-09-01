@@ -566,7 +566,11 @@ export async function getNonReadAssignedConversations(
         body: JSON.stringify(body),
         cache: "no-store",
       })
-      if (!response.ok) return null
+      if (!response.ok) {
+        // Status only — the briefing and queue both surface this as "unreachable".
+        console.warn(`[intercom] non-read search failed: ${response.status}`)
+        return null
+      }
 
       const payload = (await response.json()) as {
         conversations?: IntercomConversation[]

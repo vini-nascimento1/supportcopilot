@@ -114,10 +114,15 @@ export type CalendarItem = AttentionItem & { kind: "calendar_event" }
 export function isNeedsYouNow(item: AttentionItem, nowMs: number): boolean {
   switch (item.kind) {
     case "ticket_awaiting_reply":
-    case "slack_mention":
     case "slack_dm":
     case "email_action":
-      return true
+    case "slack_mention":
+      // The source decides: tickets, DMs and action emails are always "now"; a
+      // personal mention is "now" while a user-group mention (@support-team)
+      // is "today" — anyone on the group can take it, so it stays in the
+      // digest. Keeping this on urgency means the section and counts.now
+      // always agree.
+      return item.urgency === "now"
     case "calendar_event": {
       if (!item.dueAt) return false
       const ms = Date.parse(item.dueAt) - nowMs

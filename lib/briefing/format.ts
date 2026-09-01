@@ -175,3 +175,45 @@ export function deriveLockReason(input: {
   if (!category) return LOCK_REASON_GENERIC
   return `Verify ${CATEGORY_LABELS[category] ?? category} in fadmin before sending.`
 }
+
+// ── Slack markup ────────────────────────────────────────────────────────────
+
+const SLACK_TOKEN_RE = /<([^<>]+)>/g
+
+/**
+ * Turn Slack's wire markup into what a person would read: `<@U…>` becomes
+ * "@you" for the agent or "@FirstName" when the id was resolved, user groups
+ * become "@handle", channels "#name", links their label. Pure; applied by the
+ * lib/slack.ts briefing helpers before text reaches an AttentionItem.
+ */
+export function humanizeSlackText(
+  raw: string | null | undefined,
+  opts: { selfId?: string | null; names?: Record<string, string> } = {}
+): string {
+  if (!raw) return ""
+  const names = opts.names ?? {}
+  const out = raw.replace(SLACK_TOKEN_RE, (_whole, inner: string) => {
+    const [target, label] = inner.split("|", 2) as [string, string | undefined]
+    if (target.startsWith("@")) {
+      const id = target.slice(1)
+      if (opts.selfId && id === opts.selfId) return "@you"
+      const name = names[id]
+      if (name) return `@${name.split(" ")[0]}`
+      return label ? `@${label.replace(/^@/, "")}` : "@teammate"
+    }
+    if (target.startsWith("!subteam^")) {
+      return label ? `@${label.replace(/^@/, "")}` : "@team"
+    }
+    if (target === "!here" || target === "!channel" || target === "!everyone") {
+      return `@${target.slice(1)}`
+    }
+    if (target.startsWith("#")) {
+      return label ? `#${label.replace(/^#/, "")}` : "#channel"
+    }
+    if (/^(https?:|mailto:)/i.test(target)) {
+      return label ?? target
+    }
+    return label ?? target
+  })
+  return out.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+}

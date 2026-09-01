@@ -1,6 +1,7 @@
 import "server-only"
 
 import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { humanizeSlackText } from "@/lib/briefing/format"
 
 /**
  * Slack integration.
@@ -738,6 +739,11 @@ export type SlackBriefingMessage = {
   /** Unix seconds (float ts truncated) for ordering/filters. */
   tsSeconds: number
   permalink: string
+  /**
+   * The raw text named the agent personally (<@U…>). Computed before the
+   * markup is humanized, since the id no longer appears afterwards.
+   */
+  mentionsSelf?: boolean
 }
 
 export type SlackUserGroup = { id: string; handle: string; name: string }
@@ -862,6 +868,9 @@ export async function searchMentions(
   for (const match of batches.flat()) {
     if (!match.ts || !match.channel?.id) continue
     if (match.user === opts.userId) continue // the agent's own message
+    // DMs are covered by getUnreadDms; a search hit inside one would render
+    // as "#U0…" (Slack names an im channel after the other user).
+    if (match.channel.id.startsWith("D")) continue
     const tsSeconds = Math.floor(parseFloat(match.ts))
     if (!Number.isFinite(tsSeconds) || tsSeconds < opts.sinceUnix) continue
     const key = `${match.channel.id}:${match.ts}`
@@ -876,9 +885,26 @@ export async function searchMentions(
       text: match.text ?? "",
       tsSeconds,
       permalink: match.permalink ?? "",
+      mentionsSelf: (match.text ?? "").includes(`<@${opts.userId}>`),
     })
   }
+
+  // search.messages returns handles ("hangen.niu"), not display names, and
+  // leaves <@U…> markup in the text. Resolve authors plus anyone mentioned
+  // (capped inside resolveSlackUsers) and rewrite both.
+  const mentioned = out.flatMap((m) => [m.userId, ...mentionedUserIds(m.text)])
+  const names = await resolveSlackUsers(token, mentioned.filter((id) => id.startsWith("U") || id.startsWith("W")))
+  const nameMap = Object.fromEntries(Object.entries(names).map(([id, v]) => [id, v.name]))
+  for (const m of out) {
+    m.userName = nameMap[m.userId] ?? m.userName
+    m.text = humanizeSlackText(m.text, { selfId: opts.userId, names: nameMap })
+  }
   return out.sort((a, b) => b.tsSeconds - a.tsSeconds)
+}
+
+/** User ids referenced as <@U…> inside a message body. */
+function mentionedUserIds(text: string): string[] {
+  return [...text.matchAll(/<@([UW][A-Z0-9]+)(?:|[^>]*)?>/g)].map((m) => m[1])
 }
 
 type DmChannel = { id: string; name: string; userId?: string; isMpim: boolean }
@@ -1000,6 +1026,19 @@ export async function getUnreadDms(
         }
       })
     )
+  }
+
+  // Group-DM authors and anyone mentioned in a body were not in the first
+  // resolve pass; fill them in, then strip the wire markup.
+  const missing = out
+    .flatMap((m) => [m.userId, ...mentionedUserIds(m.text)])
+    .filter((id) => !nameByUser[id])
+  const extra = missing.length ? await resolveSlackUsers(token, missing) : {}
+  const nameMap: Record<string, string> = {}
+  for (const [id, v] of Object.entries({ ...nameByUser, ...extra })) nameMap[id] = v.name
+  for (const m of out) {
+    m.userName = nameMap[m.userId] ?? m.userName
+    m.text = humanizeSlackText(m.text, { selfId: auth.userId, names: nameMap })
   }
   return out.sort((a, b) => b.tsSeconds - a.tsSeconds)
 }

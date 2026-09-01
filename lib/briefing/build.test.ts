@@ -20,6 +20,7 @@ import { generateNarrative } from "@/lib/briefing/narrative"
 import {
   BRIEFING_TTL_MS,
   DEFAULT_LOOKBACK_MS,
+  MIN_LOOKBACK_MS,
   buildBriefing,
   computeSince,
   markHomeSeen,
@@ -75,9 +76,17 @@ const agentRow = (over: Row = {}): Row => ({
 })
 
 describe("computeSince", () => {
-  it("uses the agent's last visit", () => {
-    const lastSeen = new Date(NOW - 2 * 3_600_000).toISOString()
+  it("uses the agent's last visit when it is older than the floor", () => {
+    const lastSeen = new Date(NOW - 12 * 3_600_000).toISOString()
     expect(computeSince(lastSeen, NOW)).toBe(lastSeen)
+  })
+
+  it("never shrinks the window below the 8h floor", () => {
+    const lastSeen = new Date(NOW - 2 * 3_600_000).toISOString()
+    expect(computeSince(lastSeen, NOW)).toBe(new Date(NOW - MIN_LOOKBACK_MS).toISOString())
+    expect(computeSince(new Date(NOW).toISOString(), NOW)).toBe(
+      new Date(NOW - MIN_LOOKBACK_MS).toISOString()
+    )
   })
 
   it("falls back to 24h for a first-ever visit", () => {
@@ -119,7 +128,8 @@ describe("isNeedsYouNow", () => {
   it("counts every human-waiting kind", () => {
     expect(isNeedsYouNow(item({ kind: "ticket_awaiting_reply" }), NOW)).toBe(true)
     expect(isNeedsYouNow(item({ kind: "slack_dm" }), NOW)).toBe(true)
-    expect(isNeedsYouNow(item({ kind: "slack_mention" }), NOW)).toBe(true)
+    expect(isNeedsYouNow(item({ kind: "slack_mention", urgency: "now" }), NOW)).toBe(true)
+    expect(isNeedsYouNow(item({ kind: "slack_mention", urgency: "today" }), NOW)).toBe(false)
     expect(isNeedsYouNow(item({ kind: "email_action" }), NOW)).toBe(true)
   })
 

@@ -65,7 +65,7 @@ describe("toEmailItem", () => {
       source: "gmail",
       kind: "email_action",
       // An email is a "today" job — no customer clock is running on it.
-      urgency: "today",
+      urgency: "now",
       whenLabel: "1h 30m ago",
       deepLink: "https://mail.google.com/mail/u/0/#inbox/thread-1",
       externalId: "thread-1",

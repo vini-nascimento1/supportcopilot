@@ -80,7 +80,9 @@ export function toEmailItem(thread: GmailThreadSummary, nowMs: number): Attentio
     context: snippet ? `From ${sender} · ${snippet}` : `From ${sender}`,
     // An email that asks for something is a "today" job, not a now one: the
     // customer clock is not running on it the way it is on an Intercom ticket.
-    urgency: kind === "email_action" ? "today" : "later",
+    // An email that asks the agent for something belongs in "Needs you now";
+    // an FYI is digest-only.
+    urgency: kind === "email_action" ? "now" : "later",
     occurredAt: thread.date,
     whenLabel: agoLabel(thread.date, nowMs),
     deepLink: `https://mail.google.com/mail/u/0/#inbox/${thread.id}`,
