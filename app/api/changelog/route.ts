@@ -58,6 +58,13 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "Replies now avoid the stock phrases and rhythm that make a message feel AI-generated — words like \"delve\" and \"seamless\", openers like \"I hope this email finds you well\", strings of same-length sentences, and overuse of em dashes or exclamation marks. Nothing about what a draft says has changed, only how it's worded.",
   },
   {
+    id: "seed-2026-09-12-g",
+    date: "2026-09-12",
+    title: "Thorough answers aren't penalised anymore",
+    description:
+      "Drafts used to treat \"two or three sentences\" as the target length for any reply, which sometimes cut a real explanation short. Now the goal is a reply the customer has nothing left to argue with — a confirmation of something already said still stays short, but a policy or billing explanation gets to run as long as it needs to. What's still trimmed is padding: caveats, hedges, and restatements that don't add anything.",
+  },
+  {
     id: "seed-2026-09-08-a",
     date: "2026-09-08",
     title: "Drafts no longer name the fraud team",

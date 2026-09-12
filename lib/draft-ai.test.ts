@@ -162,7 +162,7 @@ describe("confirm, don't re-open — an already-answered question just gets agre
 
   it.each(builders)("%s makes a yes/no question get the direct answer first", (_name, out) => {
     expect(out).toContain("A yes/no question gets the answer first")
-    expect(out).toContain("Match the reply's length to what was actually asked")
+    expect(out).toContain("A confirmation of something already explained deserves one or two sentences")
   })
 
   it.each(builders)("%s forbids overturning an answer an agent already gave in the thread", (_name, out) => {
@@ -183,13 +183,14 @@ describe("confirm, don't re-open — an already-answered question just gets agre
   it.each(builders)("%s states a precedence order so a shape rule can't manufacture substance", (_name, out) => {
     expect(out).toContain("When two rules in this prompt conflict")
     expect(out).toContain("Don't re-open what is already settled")
-    expect(out).toContain("A formatting rule is never a reason to add substance")
+    expect(out).toContain("A formatting rule is never a reason to add OR remove substance")
   })
 
   it.each(builders)("%s names the target reply shape, not just the prohibitions", (_name, out) => {
     expect(out).toContain("What a good reply looks like")
     expect(out).toContain("Answer the actual question in the first sentence")
-    expect(out).toContain("Length is not care, and a short reply is not a lazy one")
+    expect(out).toContain("The target is a reply the customer can't argue with, not a short one")
+    expect(out).toContain("What actually has to go is padding, not length")
   })
 
   // The call-to-action rule is what made a confirm-and-close draft bolt an
@@ -1047,5 +1048,50 @@ describe("anti-AI-slop writing rules", () => {
     )
     expect(out[0].content).toContain("Reword the tells that flag a reply as AI-written")
     expect(out[0].content).toContain("wording only")
+  })
+})
+
+// Vincenzo, 2026-09-12 (second pass): the prompt used to treat brevity itself
+// as a virtue ("two or three sentences is a finished reply"), which cuts
+// exactly the kind of thorough explanation that makes a customer stop
+// pushing back. Length now tracks how much genuine explanation is needed;
+// only padding — content that does no work — is still banned regardless of
+// length.
+describe("length tracks substance, not a target — a good explanation can run long", () => {
+  const builders: Array<[string, string]> = [
+    ["buildSystemPrompt", buildSystemPrompt(undefined, [], "Vini", [])],
+    ["buildNotionAwareSystemPrompt", buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])],
+    ["buildImproveSystemPrompt", buildImproveSystemPrompt("Vini")],
+  ]
+
+  it.each(builders)("%s says being unanswerable, not brief, is the goal", (_name, out) => {
+    expect(out).toContain("The target is a reply the customer can't argue with, not a short one")
+    expect(out).toContain("cutting it down to \"two or three sentences\" to look disciplined makes it WORSE")
+  })
+
+  it.each(builders)("%s still bans padding regardless of length", (_name, out) => {
+    expect(out).toContain("What actually has to go is padding, not length")
+    expect(out).not.toContain("A correct reply is often two or three sentences")
+  })
+
+  it("no longer states an arbitrary sentence-count target anywhere in the stack", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    expect(out).not.toContain("two or three sentences. That is a finished reply")
+  })
+
+  it("scopes the closure rule's brevity to an already-answered confirmation, not answers in general", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    expect(out).toContain("A confirmation of something already explained deserves one or two sentences")
+    expect(out).toContain("It does NOT mean answers in general should be kept short")
+  })
+
+  it("makes the verifier stop trimming a long draft just for being long", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Fan asked why a subscription renewed after a free trial." },
+      { role: "user", content: "Why was I charged?" },
+    ]
+    const out = buildDraftVerifierMessages(messages, "A full, thorough explanation of the billing mechanism.")
+    expect(out[0].content).toContain("Never trim a draft just because it's long")
+    expect(out[0].content).toContain("Shortening a real explanation to look tighter makes the draft worse")
   })
 })
