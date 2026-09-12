@@ -16,6 +16,34 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-09-12-a",
+    date: "2026-09-12",
+    title: "Every ticket now shows its tags",
+    description:
+      "Inbox and Triage rows show the conversation's Intercom tags — CREATOR, FAN, AGENCY, PAYOUTS, KYC, REFUND and the rest — right under the message preview, colour-coded so who you're talking to stands out from what it's about. You can see what a ticket is before you open it. Long tag lists are trimmed to three with a \"+2\" you can hover for the rest.",
+  },
+  {
+    id: "seed-2026-09-12-b",
+    date: "2026-09-12",
+    title: "Filter Triage by tag — including tags you never want to see",
+    description:
+      "Open Filters in the Triage tab and you get a chip for every tag currently in the pool, with how many tickets carry it. Click once to see only that tag, click again to hide it completely, click a third time to switch it off. Hiding wins over everything else, so \"hide AGENCY\" means agency tickets stop reaching your list even when they also match one of your keywords. Unlike keywords, this reads Intercom's own tags, so it doesn't slip when a ticket is worded oddly or came through the AI. Your choices are saved to your account and shown above the keyword chips so you never forget a filter is on.",
+  },
+  {
+    id: "seed-2026-09-12-c",
+    date: "2026-09-12",
+    title: "Drafts now open, explain and close properly",
+    description:
+      "AI drafts used to hand over the outcome and stop there — a refusal with nothing in front of it and nothing after it, leaving the customer unsure what happens next. Every draft now follows the same arc: a short acknowledgement before bad news, the actual reason in plain words with what it means for the customer, and a clear ending — either it's sorted and closed, or the one next step and who's doing it. Drafts that genuinely have nothing outstanding still stay short; the reply just says so instead of inventing a follow-up.",
+  },
+  {
+    id: "seed-2026-09-08-a",
+    date: "2026-09-08",
+    title: "Drafts no longer name the fraud team",
+    description:
+      "AI-drafted replies about bans, chargebacks or suspicious charges used to sometimes say the word \"fraud\" or name the fraud team straight to the customer. Drafts now use neutral wording like \"our team\" or \"a review\" instead — the handling underneath hasn't changed, just the wording the customer sees.",
+  },
+  {
     id: "seed-2026-09-01-i",
     date: "2026-09-01",
     title: "Home clears itself when you read things elsewhere",
