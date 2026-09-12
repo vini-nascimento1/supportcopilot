@@ -1,7 +1,7 @@
 ---
 title: System Prompt Architecture
 tags: [ai, prompting, drafting]
-updated: 2026-08-30
+updated: 2026-09-12
 ---
 
 # System Prompt Architecture
@@ -19,6 +19,8 @@ The layers are assembled in a fixed order, and the order matters: later layers (
 **Added 2026-08-09 — "request a review" vs. doing it yourself:** a live draft said "I'll ... request a review if needed" for a Fadmin check the agent performs directly. Same failure as above in a subtler form: "request"/"submit" implies handing the action to a separate reviewing party, even when the agent IS the one doing it. The rule now tells the model to say "I'll review this now" / "I'm looking into it" for self-performed checks, and reserves "request"/"raise"/"escalate" for the one case where it's literally true — a different internal team is actually being hit.
 
 **Added 2026-08-22 — owning the work is not a licence to defer it:** the rule above turned out to have a blind side. A draft answering a plain buyer's-remorse refund request wrote "I'll review your refund request and provide an update here once the review is complete" — perfectly obedient to the 2026-08-09 bullet (the agent reviews it themselves, no handoff), and still wrong, because there was nothing to review: the answer was already knowable from policy. The rule now adds that "I'll review this" must never be used to avoid giving an answer you already have. It settles who owns the work, not whether the work is needed. See [[#3c. Refund Posture Rules (added 2026-08-22)]] for the substance side of the same fix.
+
+**Added 2026-09-08 — never name "fraud" or the fraud team to the customer:** Vincenzo flagged that drafts had said the word "fraud," or named the fraud team directly, more than five times across bans, chargebacks, unrecognised charges, and KYC-mismatch disputes. This is purely a wording leak, not a policy gap — `PAYMENT_DISPUTE_RULES` (§3b) and the ban-communication rules already say the right thing to *do*; the model was just also saying the word out loud to the customer while doing it. `AGENT_IDENTITY_RULES` now adds a standalone bullet: never write "fraud" or "the fraud team" in the customer-facing message, even when the case genuinely is one — say "our team," "a review," or "account security" instead. It's deliberately scoped as wording-only so it can't be read as license to change what gets disclosed or promised. The two source strings that used to leak the literal phrase (`PAYMENT_DISPUTE_RULES`'s "raise it with the payments/fraud team," and the verifier's identical phrasing) were reworded at the same time. The [[Draft Verify Pipeline]] verifier carries the rule too, as a second gate: it scrubs any surviving "fraud" / "fraud team" mention by rewording that passage, rather than deleting the surrounding content wholesale. Locked in by `lib/draft-ai.test.ts` ("never says 'fraud' to the customer").
 
 ## 2. Capability Boundary Rules
 
@@ -145,6 +147,20 @@ Reading the *assembled* prompt as one document (see `scripts/dump-assembled-prom
 
 The rule stack was roughly 90% prohibitions: 55 bullet directives containing 41 instances of "never". Told only what *not* to do, the model falls back on generic assistant instincts — hedge, caveat, ask a clarifying question — and that default **is** the pushback the team kept patching one incident at a time. Naming the target explicitly is cheaper than banning every way of missing it, so the prompt now states the shape it wants: answer in the first sentence, give the one thing that happens next if there is one, then stop. It says outright that a two-or-three-sentence reply is finished work, not a rough draft.
 
+## `REPLY_ARC_RULES` — opening, middle, close (added 2026-09-12)
+
+`GOOD_REPLY_SHAPE` tells the model to answer and stop; it never said what a finished reply is *made of*. The result, flagged in Vincenzo's September case-handling refresher, is a draft that is factually correct and still fails: the outcome arrives bare, with nothing in front of it and nothing behind it. The live example was a payout refusal — *"Your payout request can't be approved because the content removed from your account was identified as stolen, and no earnings were generated from it. A warning has also been issued on your account!"* — with no acknowledgement before the bad news, an earnings line the creator cannot interpret, no next step, and an exclamation mark on the worst sentence in the reply. The creator reopened the case; the next agent reversed the warning and enabled payouts.
+
+The block names three parts and says none of them is optional:
+
+1. **Opening — land on the person before the outcome.** The greeting is the opening when one is due (see `greetingToneRule()` above); otherwise open on the substance. On bad news — refusal, refund declined, payout blocked, warning, restriction, ban — **one** short acknowledgement sentence comes first, never an apology for a correct decision, and never an exclamation mark on the bad-news line.
+2. **Middle — say what happened, or what is happening.** The reason or mechanism in plain words, because someone who understands *why* accepts an answer they dislike while a bare verdict gets reopened. Every stated fact carries its consequence with it. Compliance and moderation decisions must say what triggered it, what it means for the account, and what gets the account back. A question is allowed only when the answer is genuinely needed and genuinely absent from the thread — never a re-ask of what the customer or another agent already covered.
+3. **Close — the customer never guesses what happens now.** Resolved → thank and close. Unfinished → the one next step and who owns it. Refused and final → say it is the decision and what remains open to them.
+
+The obvious failure mode of a shape rule is that it starts manufacturing substance to fill its own slots, which is exactly what `RULE_PRECEDENCE` item 5 exists to prevent — so the arc is explicitly filed there as formatting (the weakest tier), and both the block and item 5 now state that the acknowledgement is one sentence and that a close with nothing outstanding is one line saying so, never a fabricated review or question. `GOOD_REPLY_SHAPE`'s "answer in the first sentence" carries a matching carve-out for the acknowledgement line so the two cannot be read as contradicting each other.
+
+The [[Draft Verify Pipeline]] verifier enforces the same three points as a second gate: it adds a missing acknowledgement before bad news (and strips the exclamation mark) *without* softening the outcome, attaches the consequence to a fact the customer cannot interpret, and makes a draft end on what happens now — using only what the source context supports, never an invented step or timeline. Locked in by `lib/draft-ai.test.ts` ("opening, middle and close — a reply has to have a shape").
+
 ## 7. Tone Preference (optional, last)
 
 An agent's personal voice setting — Professional, Warm, Human, or a free-text Custom tone, configured in [[Settings and Profile]] — is injected as its own section, deliberately placed **after** every rule above it.
@@ -192,7 +208,7 @@ Before/after on the `confirm-and-close` fixture, which reproduces the live 2026-
 
 ## Key files
 
-- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `AGENT_IDENTITY_RULES`, `UNBACKED_COMMITMENT_RULES`, `REFUND_POSTURE_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `greetingToneRule()`, `buildAgentGreeting()`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
+- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `REPLY_ARC_RULES`, `AGENT_IDENTITY_RULES`, `UNBACKED_COMMITMENT_RULES`, `REFUND_POSTURE_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `greetingToneRule()`, `buildAgentGreeting()`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
 - `scripts/dump-assembled-prompt.mts` — assembled-prompt dump for all four paths
 - `scripts/eval-draft-behavior.mts` — behavioural eval, `--dry-run` / `--self-test` / `--runs=N` / `--scenario=<id>`
 - `lib/draft-ai.test.ts` — "chargeback / bank-dispute guardrail", "refund posture — answer up front, never coach the exemptions", "greeting is injected exactly once", "no keyword-gated confirmations", and "confirm, don't re-open" assert the rules survive prompt refactors
@@ -213,6 +229,7 @@ buildSystemPrompt(playbook, examples, agentName, articles, hasAgentReplied, gree
         ├─ 5. English-only instruction    (repeated again on the user message footer)
         ├─ 0a. RULE_PRECEDENCE            (which rule wins when two conflict)
         ├─ 0b. GOOD_REPLY_SHAPE           (the positive target: answer, next step, stop)
+        ├─ 0c. REPLY_ARC_RULES            (opening acknowledgement, middle, close with a next step)
         ├─ 6. Today's date                (explicit, for elapsed-time math)
         ├─ 6b. CONVERSATION_CLOSURE_RULES (confirm an answered question, don't re-open it)
         └─ 7. toneInstructionSection(toneInstruction)   ← optional, always LAST

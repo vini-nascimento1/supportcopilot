@@ -859,3 +859,82 @@ describe("no unbacked promise of internal action", () => {
     expect(out[0].content).toContain("Delete an unbacked promise of internal action")
   })
 })
+
+// Vincenzo, 2026-09-08: the word "fraud" and "the fraud team" kept leaking into
+// customer-facing drafts (bans, chargebacks, unrecognised charges) even though
+// the underlying handling was correct — a wording leak, not a policy gap.
+describe("never says 'fraud' to the customer", () => {
+  const builders: Array<[string, string]> = [
+    ["buildSystemPrompt", buildSystemPrompt(undefined, [], "Vini", [])],
+    ["buildNotionAwareSystemPrompt", buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])],
+    ["buildImproveSystemPrompt", buildImproveSystemPrompt("Vini")],
+  ]
+
+  it.each(builders)("%s bans writing \"fraud\" or naming the fraud team", (_name, out) => {
+    expect(out).toContain('Never write the word "fraud" or name "the fraud team" in the customer-facing message')
+  })
+
+  it("makes the verifier scrub a leaked mention of fraud", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Use the KB only." },
+      { role: "user", content: "Why was my account banned?" },
+    ]
+    const out = buildDraftVerifierMessages(
+      messages,
+      "This was flagged by our fraud team and your account has been banned as a result."
+    )
+    expect(out[0].content).toContain('Scrub the word "fraud" and any mention of "the fraud team"')
+  })
+})
+
+// Vincenzo, 2026-09-12 (Case Handling & Tone Refresher): drafts were arriving
+// as a bare verdict — no acknowledgement in front of a refusal, facts stated
+// with no consequence attached, and nothing at the end telling the customer
+// whether the ball was with them or with us. The flagged payout refusal was
+// reopened and reversed by the next agent.
+describe("opening, middle and close — a reply has to have a shape", () => {
+  const builders: Array<[string, string]> = [
+    ["buildSystemPrompt", buildSystemPrompt(undefined, [], "Vini", [])],
+    ["buildNotionAwareSystemPrompt", buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])],
+    ["buildImproveSystemPrompt", buildImproveSystemPrompt("Vini")],
+  ]
+
+  it.each(builders)("%s carries the three-part reply arc", (_name, out) => {
+    expect(out).toContain("## Every reply has an opening, a middle and a close")
+    expect(out).toContain("one short sentence acknowledging where they stand comes FIRST")
+    expect(out).toContain("Every fact you state carries its consequence with it")
+    expect(out).toContain("never leave them wondering what happens now")
+  })
+
+  it.each(builders)("%s keeps the arc from inventing a next step", (_name, out) => {
+    expect(out).toContain("shape never manufactures substance")
+    expect(out).toContain("The arc decides how an answer is laid out, never what it contains")
+  })
+
+  it.each(builders)("%s still bans re-asking what the thread already answers", (_name, out) => {
+    expect(out).toContain("Never re-ask what the customer already told you")
+  })
+
+  it("keeps the answer-first rule but carves out the acknowledgement line", () => {
+    const out = buildSystemPrompt(undefined, [], "Vini", [])
+    expect(out).toContain("Answer the actual question in the first sentence")
+    expect(out).toContain("bad news gets a single acknowledgement sentence in front of it")
+  })
+
+  it("makes the verifier repair a bare refusal instead of softening the outcome", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Payout blocked: content removed as stolen." },
+      { role: "user", content: "Please approve my payout." },
+    ]
+    const out = buildDraftVerifierMessages(
+      messages,
+      "Your payout request can't be approved because the content removed from your account was identified as stolen, and no earnings were generated from it!"
+    )
+    expect(out[0].content).toContain("Never let bad news arrive bare")
+    expect(out[0].content).toContain("strip any exclamation mark from the bad-news line")
+    expect(out[0].content).toContain("never soften, hedge or change the outcome itself")
+    expect(out[0].content).toContain("Give a stated fact its consequence")
+    expect(out[0].content).toContain("Make the draft end on what happens now")
+    expect(out[0].content).toContain("Never invent a step, a check, a review or a timeline just to have an ending")
+  })
+})
