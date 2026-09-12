@@ -30,6 +30,13 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "Open Filters in the Triage tab and you get a chip for every tag currently in the pool, with how many tickets carry it. Click once to see only that tag, click again to hide it completely, click a third time to switch it off. Hiding wins over everything else, so \"hide AGENCY\" means agency tickets stop reaching your list even when they also match one of your keywords. Unlike keywords, this reads Intercom's own tags, so it doesn't slip when a ticket is worded oddly or came through the AI. Your choices are saved to your account and shown above the keyword chips so you never forget a filter is on.",
   },
   {
+    id: "seed-2026-09-12-d",
+    date: "2026-09-12",
+    title: "AI refund claims follow the new disclosure rule",
+    description:
+      "The refund playbook has been updated for fans who asked a fully-AI creator whether they were real and got a misleading answer. Anything bought before that answer stays non-refundable — the AI tag was on the profile. Anything bought after it is refundable. Drafts and playbook guidance now point you at the creator's actual message and its timestamp as the cut-off.",
+  },
+  {
     id: "seed-2026-09-12-c",
     date: "2026-09-12",
     title: "Drafts now open, explain and close properly",

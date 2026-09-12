@@ -32,9 +32,12 @@ time and folds it back in here so the next ticket is faster. Don't treat this do
 - Load the Chrome tools once per session in a single batched `ToolSearch` call (see the
   claude-in-chrome MCP server instructions) rather than one at a time.
 - For reading the queue and full conversation contents, prefer the Intercom MCP tools
-  (`search_conversations`, `get_conversation`) over clicking through the UI — much faster, and you
-  already have this access. Reserve the browser for things the MCP can't do: Fadmin, actually
-  sending replies, viewing images/attachments, checking Slack.
+  (`search_conversations`, `get_conversation`) over clicking through the UI — much faster and
+  cheaper, and you already have this access. This applies even when Vincenzo pastes a direct
+  conversation URL ("check this one") — call `get_conversation` with that id/URL first rather than
+  navigating the browser and scrolling through the thread; only fall back to scrolling the UI if the
+  MCP call fails or you need something it doesn't return. Reserve the browser for things the MCP
+  can't do: Fadmin, actually sending replies, viewing images/attachments, checking Slack.
 
 ## 1. Sweeping the queue
 
@@ -168,6 +171,78 @@ that id instead of trusting the inline list.
   for a fresh ref right before each click once the page has changed since the last one; don't reuse a
   coordinate from an earlier screenshot.
 
+**Finding the account is not the same as being allowed to name it.** Once you have it, see §10 before
+putting anything about it in a reply.
+
+## 10. The charge sits on a *different* account: what you can and cannot tell the customer
+
+Recurring shape: a fan writes in about a charge they do not recognise, and Fadmin shows the payment
+is billed from a **different** Fanvue account than the email they contacted from. Same card, another
+account. Usually a second signup they forgot about (different email, or a Google/Apple/X social
+login), occasionally a genuinely stolen card. Added after ticket 215475711332067 (2026-08-30).
+
+**Hard rule: you may not name that account.** Not the email, not the `@handle`, not the creator it
+subscribes to, not a partially masked version, and no confirmation if the customer guesses it
+themselves. "It was his own card" does **not** unlock it. The policy gates on *verified account
+holder contacting from their registered address*, and by definition they are not writing from that
+account's registered address.
+
+Sources, all checked 2026-08-30:
+- Notion **KYC & Identity Data Handling Policy for CS, Sales & Support**
+  (`32f0f38712768152b1dee19361f9ae40`, owner Ollie Andrews, status Active): personal data may only be
+  shared with the verified account holder, 1:1, via their registered contact details. Its
+  do-not-disclose list explicitly names *"email addresses associated with an account"* and *"any
+  confirmation of identity linkage between accounts"*.
+- Slack **#general-support** policy post (Ollie Andrews, `1774519412.522569`): *"Sharing personal
+  data with someone who is not the verified account holder is a data breach."* Step 1 of his flow:
+  if they contact from a different address, do not proceed, ask them to re-contact from the
+  registered one.
+- Precedent, same case handled twice by Viktoriia in **#fraud-issues** (`1760095572.382679`,
+  `1777279872.674279`): explain the charges as subscription renewals, offer to help them stop being
+  charged, never name the account. Her line: due to GDPR nobody will share this info with him.
+- What it looks like when it goes wrong: breach record **BR-2025-001** in the Notion Breach Log
+  (creator emails disclosed to a fan by support).
+
+**What you CAN share** (facts about their own card, not identifiers of another data subject):
+amount, date and time, that it is a completed payment rather than a pending authorisation, that it
+is a subscription **renewal** rather than a new charge or a duplicate, and that it will keep
+recurring until the subscription is cancelled. Give these up front. Withholding them reads as a
+stonewall and pushes the customer straight to a chargeback.
+
+**Workflow:**
+1. Do the Fadmin lookup anyway, for yourself. You need to know internally whether this is a
+   forgotten renewal or an unauthorised card use. Payments resource, Advanced tab, BIN + last 4
+   (see §9.8), then the owning account's Subscriptions (`show/6`) and Spending (`show/7`) tabs.
+2. Reply with the payment facts plus one honest sentence: the charge is not billed from the account
+   they are writing from, so it cannot be actioned from this conversation. Say the reason is data
+   protection. Do not pretend you found nothing.
+3. **Make the customer produce the account.** Ask them to check other email addresses they may have
+   used, whether they signed up with Google / Apple / X instead of email and password, or to send
+   the `@handle` if they can find it. Ready wording exists in **#internal-support**
+   (`1786307931.844069`, `1757061747.872709`).
+4. Once they name it and it matches what Fadmin already shows, they have self-identified. Proceed
+   normally and help them stop the renewals: Settings, Payments & Subscriptions, Manage My
+   Subscriptions, Unsubscribe, at least 24h before the renewal date.
+5. If they cannot produce it, **do not fill in the blank for them.** Escalate to **#fraud-issues** as
+   a card-on-another-account case and let Fraud decide. That is also the correct route the moment the
+   pattern looks like a stolen card rather than a forgotten signup.
+
+**Do / don't:**
+- DON'T name or confirm the other account's email, handle, or the creator it subscribes to.
+- DON'T cancel, refund or otherwise act on the other account off the back of an unverified request.
+- DON'T tell them to dispute it with their bank. Zero-tolerance chargebacks would ban their own
+  account (see the fan-side chargeback playbook).
+- DO answer the payment question directly and offer the route to stop the charges.
+- If a colleague has already disclosed the account details, that is a suspected data breach: flag it
+  to **Ollie Bednal** per the KYC policy's escalation table rather than quietly moving on.
+
+**Related trap from the same ticket: don't read hold-vs-charge off the bank's wording.** The
+customer's Polish bank push said *"Autoryzacja transakcji kartą"*, and two agents in a row told him
+it was a temporary authorisation that would drop off. It was a completed renewal that had been
+billing monthly since Dec 2024. That phrase is just what his bank calls any card transaction. Check
+the invoice status in Fadmin (`PAID` vs `NOT_PAID`) and never infer it from a translated push
+notification.
+
 ## 9. Refund / content-mismatch dispute investigations
 
 See [[feedback_refund_investigation_fadmin_workflow]] for the full writeup. Short version:
@@ -211,12 +286,16 @@ See [[feedback_refund_investigation_fadmin_workflow]] for the full writeup. Shor
    fuller text genuinely isn't in the DOM until you click it; `get_page_text`/`javascript_tool` will
    return the same truncated string as the screenshot until you `find` and click the actual "show
    more" button first.
-   **The "AI Creator" badge alone doesn't tell you which flavor of AI applies** — support-response-batch
-   §4k's Ground K (added 2026-08-22) only refunds a **fully-synthetic** account (no real person behind
-   it) that explicitly claimed to be real; an AI-edited/deepfaked account with a **real** person behind
-   it is telling the truth if it says the same thing, and stays Ground A (no refund). The badge and bio
-   don't distinguish the two — you'll need the actual chat wording (what the creator said when asked)
-   plus, where it matters, Fadmin/Moderation context on whether a real person is behind the account.
+   **The "AI Creator" badge alone doesn't settle it** — support-response-batch §4k's Ground K (rewritten
+   2026-09-12) only applies to a **fully-synthetic** account (no real person behind it) that answered a
+   direct "are you AI?" misleadingly ("I only use AI to enhance", "I am real", "it's just Photoshop");
+   an AI-edited account with a **real** person behind it is telling the truth saying the same thing and
+   stays Ground A (no refund). The badge and bio don't distinguish the two — you need the actual chat
+   wording plus Fadmin/Moderation context on whether a real person is behind the account.
+   **When Ground K does apply, the badge stops mattering from the moment of that reply onward:** scroll
+   the chat to the misleading message and **record its exact timestamp** — purchases before it are not
+   refundable, purchases after it are. The timestamp is the deliverable of this check, so screenshot or
+   note it alongside the transaction times from the Payments resource.
 7. **That same creator page's Activity Timeline and Balances panel are worth a look in any refund
    dispute, not just AI ones** — it surfaces prior admin notes/strikes (e.g. stolen-content or
    underage-feature flags), `OFF_PLATFORM_ACTIVITY` warnings, and aggregate `Refund Count` / `Refund
