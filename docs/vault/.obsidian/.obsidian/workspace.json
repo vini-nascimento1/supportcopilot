@@ -1,20 +1,20 @@
 {
   "main": {
-    "id": "8f760392bac60a33",
+    "id": "c1e30bb64f58cf9b",
     "type": "split",
     "children": [
       {
-        "id": "abb9c0e0355242af",
+        "id": "b20efcbc7fecdfa5",
         "type": "tabs",
         "children": [
           {
-            "id": "2e5d09e2f137d568",
+            "id": "797ff742e0abf9fe",
             "type": "leaf",
             "state": {
-              "type": "graph",
+              "type": "empty",
               "state": {},
-              "icon": "lucide-git-fork",
-              "title": "Graph view"
+              "icon": "lucide-file",
+              "title": "New tab"
             }
           }
         ]
@@ -23,15 +23,15 @@
     "direction": "vertical"
   },
   "left": {
-    "id": "c68406cfb7308709",
+    "id": "bab157fe0694b0e3",
     "type": "split",
     "children": [
       {
-        "id": "2b9942c687665414",
+        "id": "3c0f6e2864c90a21",
         "type": "tabs",
         "children": [
           {
-            "id": "df44929633bff219",
+            "id": "c627456db282f9c7",
             "type": "leaf",
             "state": {
               "type": "file-explorer",
@@ -44,7 +44,7 @@
             }
           },
           {
-            "id": "c27f9e0dbdddb4dc",
+            "id": "9fe4fa290faab67c",
             "type": "leaf",
             "state": {
               "type": "search",
@@ -61,7 +61,7 @@
             }
           },
           {
-            "id": "0abcd8f406dd379f",
+            "id": "be740b1b847f6cd3",
             "type": "leaf",
             "state": {
               "type": "bookmarks",
@@ -77,20 +77,19 @@
     "width": 300
   },
   "right": {
-    "id": "bd38bcd17be87089",
+    "id": "e47fe93796e7b23e",
     "type": "split",
     "children": [
       {
-        "id": "ff0f38bd961938b1",
+        "id": "1835791d10c3e4c1",
         "type": "tabs",
         "children": [
           {
-            "id": "8ab20fb2ec9cc704",
+            "id": "cdb3cb8de421893d",
             "type": "leaf",
             "state": {
               "type": "backlink",
               "state": {
-                "file": "AI Pipeline/System Prompt Architecture.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -100,25 +99,24 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for System Prompt Architecture"
+              "title": "Backlinks"
             }
           },
           {
-            "id": "def1acd7dcbcb5c7",
+            "id": "7efa8bdbe3ccef63",
             "type": "leaf",
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "AI Pipeline/System Prompt Architecture.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from System Prompt Architecture"
+              "title": "Outgoing links"
             }
           },
           {
-            "id": "2aced03b1f35a087",
+            "id": "5bf023a6653b9bf0",
             "type": "leaf",
             "state": {
               "type": "tag",
@@ -133,7 +131,7 @@
             }
           },
           {
-            "id": "5dc3bf0bb5709ad7",
+            "id": "17b12d41b1c5a61a",
             "type": "leaf",
             "state": {
               "type": "all-properties",
@@ -147,18 +145,17 @@
             }
           },
           {
-            "id": "90b82e9cf1466637",
+            "id": "81e13a2eba3f03f3",
             "type": "leaf",
             "state": {
               "type": "outline",
               "state": {
-                "file": "AI Pipeline/System Prompt Architecture.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of System Prompt Architecture"
+              "title": "Outline"
             }
           }
         ]
@@ -179,14 +176,6 @@
       "bases:Create new base": false
     }
   },
-  "active": "2e5d09e2f137d568",
-  "lastOpenFiles": [
-    "Architecture/Auth and Session.md",
-    "Automation/Automation Rules Engine.md",
-    "Untitled.canvas",
-    "AI Pipeline/System Prompt Architecture.md",
-    "AI Pipeline/Draft Verify Pipeline.md",
-    "Canvas/Canvas Workflow.md",
-    "00-Index.md"
-  ]
+  "active": "797ff742e0abf9fe",
+  "lastOpenFiles": []
 }
