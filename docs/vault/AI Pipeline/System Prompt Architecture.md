@@ -169,6 +169,20 @@ The obvious failure mode of a shape rule is that it starts manufacturing substan
 
 The [[Draft Verify Pipeline]] verifier enforces the same three points as a second gate: it adds a missing acknowledgement before bad news (and strips the exclamation mark) *without* softening the outcome, attaches the consequence to a fact the customer cannot interpret, and makes a draft end on what happens now — using only what the source context supports, never an invented step or timeline. Locked in by `lib/draft-ai.test.ts` ("opening, middle and close — a reply has to have a shape").
 
+## `ANTI_AI_SLOP_RULES` — writing that doesn't read as AI-written (added 2026-09-12)
+
+Every rule above this one governs *what* a draft says. This one governs *how* — the wording and rhythm that let a customer tell a reply was AI-generated even when the content is exactly right. Adapted from the public
+[jalaalrd/anti-ai-slop-writing](https://github.com/jalaalrd/anti-ai-slop-writing) skill, trimmed down to what applies to a short support message (the social-media rules — hashtag stacks, thread openers, header formatting — don't apply here and were dropped):
+
+- A banned-vocabulary list (delve, seamless, utilize, leverage-as-verb, rest assured, unprecedented, …) and banned stock openers ("I hope this email finds you well", "It's worth noting that", "Certainly,", "Moreover,").
+- Sentence-length variety and no parataxis — chaining short flat declaratives with no connective tissue is the single most measurable AI tell the source material cites.
+- Punctuation discipline: at most one em dash and one exclamation mark per reply.
+- Contractions, because that's how a person actually types.
+
+It's deliberately **not** baked into `buildSystemPrompt()`/`buildNotionAwareSystemPrompt()`/`buildImproveSystemPrompt()` the way the rules above it are. It follows the same pattern as `REPLY_STYLE_NUDGE`: exported standalone and appended by each call site (`app/api/draft/route.ts`, `app/api/ai/chat/route.ts`, `lib/reply-queue-pipeline.ts`) right after the style nudge, so every draft path gets it without duplicating it per builder. `app/api/draft/adapt-macro/route.ts` is the one path that skips both — it's adapting an already-approved macro's exact wording, not generating free text.
+
+Filed at the same precedence tier as `REPLY_ARC_RULES`: wording only, and explicitly barred from dropping a fact, a step, or a policy point to satisfy a style constraint. The [[Draft Verify Pipeline]] verifier carries a matching rule as a second gate — it rewords a surviving AI tell (stock vocabulary, an opener, over-length em-dash or exclamation-mark use, or three same-length sentences in a row) without touching the substance. Locked in by `lib/draft-ai.test.ts` ("anti-AI-slop writing rules"). The unmodified upstream skill is also vendored at `.claude/skills/anti-ai-slop-writing/` for Claude Code's own writing in this repo (commit messages, docs, Slack drafts) — a separate, broader use from the trimmed customer-reply subset described here.
+
 ## 7. Tone Preference (optional, last)
 
 An agent's personal voice setting — Professional, Warm, Human, or a free-text Custom tone, configured in [[Settings and Profile]] — is injected as its own section, deliberately placed **after** every rule above it.
@@ -216,7 +230,7 @@ Before/after on the `confirm-and-close` fixture, which reproduces the live 2026-
 
 ## Key files
 
-- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `REPLY_ARC_RULES`, `AGENT_IDENTITY_RULES`, `UNBACKED_COMMITMENT_RULES`, `REFUND_POSTURE_RULES`, `SUBSCRIPTION_BILLING_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `greetingToneRule()`, `buildAgentGreeting()`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
+- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `REPLY_ARC_RULES`, `AGENT_IDENTITY_RULES`, `UNBACKED_COMMITMENT_RULES`, `REFUND_POSTURE_RULES`, `SUBSCRIPTION_BILLING_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `ANTI_AI_SLOP_RULES`, `greetingToneRule()`, `buildAgentGreeting()`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
 - `scripts/dump-assembled-prompt.mts` — assembled-prompt dump for all four paths
 - `scripts/eval-draft-behavior.mts` — behavioural eval, `--dry-run` / `--self-test` / `--runs=N` / `--scenario=<id>`
 - `lib/draft-ai.test.ts` — "chargeback / bank-dispute guardrail", "refund posture — answer up front, never coach the exemptions", "greeting is injected exactly once", "no keyword-gated confirmations", and "confirm, don't re-open" assert the rules survive prompt refactors
@@ -245,7 +259,14 @@ buildSystemPrompt(playbook, examples, agentName, articles, hasAgentReplied, gree
                  "shapes voice only — never overrides any rule above"
         │
         ▼
-Final system prompt  ──▶  streamChatCompletion()  ──▶  draft
+Final system prompt
+        │  (each call site — app/api/draft/route.ts, app/api/ai/chat/route.ts,
+        │   lib/reply-queue-pipeline.ts — appends these two after the prompt is built:)
+        ├─ REPLY_STYLE_NUDGE      (output the reply, not a plan; no magic-word gating)
+        ├─ ANTI_AI_SLOP_RULES     (no stock AI vocabulary/openers; sentence variety; 1 em dash/! max)
+        │
+        ▼
+streamChatCompletion()  ──▶  draft
 ```
 
 See also: [[Draft Verify Pipeline]], [[Settings and Profile]], [[Canvas Workflow]], [[Database Schema Reference]].

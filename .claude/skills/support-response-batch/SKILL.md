@@ -338,6 +338,14 @@ A draft that is factually right but shapeless still fails. Check all three befor
 3. **Close** — the customer never has to guess what happens now. Resolved → thank them and close it. Not finished → the one next step and who owns it (them in their account, or Vincenzo coming back here). Refused and final → say it's the decision and what, if anything, is still open to them.
 Shape never invents substance: if nothing is outstanding, the close is one line saying so — not a fabricated review, check, or question.
 
+### Write it like a person, not like an AI (2026-09-12, anti-AI-slop pass)
+Drafts get flagged for *how* they're written even when the content is right. Before handing one over:
+- Cut stock AI vocabulary (delve, seamless, utilize, leverage-as-verb, rest assured, unprecedented) and stock openers ("I hope this email finds you well", "It's worth noting that", "Certainly,", "Moreover,").
+- Vary sentence length — never three same-length sentences in a row — and don't chain short flat statements with no connective tissue ("This is correct. It happens automatically. You can cancel it." → connect them instead).
+- One em dash max, one exclamation mark max, per reply.
+- Use contractions.
+This is wording only — never cut a fact, a step, or a policy point to satisfy it. Full source: `.claude/skills/anti-ai-slop-writing/SKILL.md` (vendored from [jalaalrd/anti-ai-slop-writing](https://github.com/jalaalrd/anti-ai-slop-writing); this is the trimmed customer-reply subset, also enforced in the draft prompt itself as `ANTI_AI_SLOP_RULES`).
+
 ## 6. Hard rules
 - Real customers — cautious over clever. When unsure of policy, check Notion, don't guess. If Notion and the playbook don't settle it, ask a leader/manager before drafting a resolution.
 - Don't paste secrets or tokens anywhere. If asked to actually send, and there's no working Intercom write path, hand the drafts back for copy-paste rather than improvising credentials.

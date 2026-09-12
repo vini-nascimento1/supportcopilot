@@ -24,6 +24,7 @@ import {
   streamChatCompletion,
   getAuxDraftModel,
   REPLY_STYLE_NUDGE,
+  ANTI_AI_SLOP_RULES,
   type OpenAIMessage,
 } from "@/lib/draft-ai"
 import { encodeImageAttachments } from "@/lib/attachments"
@@ -338,6 +339,7 @@ export async function computeAndPersistSuggestion(
   // Steer the model away from emitting its action plan as a checklist and
   // asking to proceed — output just the reply.
   systemPrompt += `\n\n${REPLY_STYLE_NUDGE}`
+  systemPrompt += `\n\n${ANTI_AI_SLOP_RULES}`
   const userMessage = await buildGroundedDraftUserMessage(conversation, images, hasAgentReplied, hasKnownEmail)
   const messages: OpenAIMessage[] = [
     { role: "system", content: systemPrompt },

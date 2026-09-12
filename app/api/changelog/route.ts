@@ -51,6 +51,13 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "When a fan is angry about a charge that's clearly their own subscription, renewal or converted free trial, drafts no longer ask for card digits or promise to verify the transaction — calling it a scam doesn't make it unidentified. Instead the draft explains the billing properly on the first reply: a free trial takes payment details and converts automatically unless it's cancelled before it ends, a processed renewal can't be reversed, and a subscription buys access to the content that was there at the time of purchase, not a promise of future posts. It ends with the cancellation path and the direct link. First policy answers are allowed to be this thorough now; repeat demands still get the short, firm version.",
   },
   {
+    id: "seed-2026-09-12-f",
+    date: "2026-09-12",
+    title: "Drafts read less like an AI wrote them",
+    description:
+      "Replies now avoid the stock phrases and rhythm that make a message feel AI-generated — words like \"delve\" and \"seamless\", openers like \"I hope this email finds you well\", strings of same-length sentences, and overuse of em dashes or exclamation marks. Nothing about what a draft says has changed, only how it's worded.",
+  },
+  {
     id: "seed-2026-09-08-a",
     date: "2026-09-08",
     title: "Drafts no longer name the fraud team",

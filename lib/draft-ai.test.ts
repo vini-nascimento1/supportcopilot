@@ -17,6 +17,7 @@ import {
   getAuxDraftModel,
   getDefaultReasoningEffort,
   REPLY_STYLE_NUDGE,
+  ANTI_AI_SLOP_RULES,
   buildEvidenceSection,
   buildEvidenceSystemPrompt,
 } from "./draft-ai"
@@ -997,5 +998,54 @@ describe("subscription and free-trial billing — explain it, don't investigate 
     expect(out[0].content).toContain("Cut a card-digit ask on a charge the source already identifies")
     expect(out[0].content).toContain("calling it a scam does not make it unidentified")
     expect(out[0].content).toContain("Do not shorten a first full billing or policy explanation into a bare verdict")
+  })
+})
+
+// Adapted 2026-09-12 from the "anti-ai-slop-writing" skill
+// (github.com/jalaalrd/anti-ai-slop-writing) so drafts stop reading as
+// AI-written: banned corporate vocabulary and stock openers, sentence-length
+// variety, no parataxis, and punctuation discipline (one em dash, one
+// exclamation mark max).
+describe("anti-AI-slop writing rules", () => {
+  it("bans stock AI vocabulary and openers", () => {
+    expect(ANTI_AI_SLOP_RULES).toContain("delve")
+    expect(ANTI_AI_SLOP_RULES).toContain("seamless")
+    expect(ANTI_AI_SLOP_RULES).toContain("I hope this email finds you well")
+    expect(ANTI_AI_SLOP_RULES).toContain("Please don't hesitate to reach out")
+  })
+
+  it("requires sentence-length variety and bans parataxis", () => {
+    expect(ANTI_AI_SLOP_RULES).toContain("Vary sentence length")
+    expect(ANTI_AI_SLOP_RULES).toContain("No parataxis")
+  })
+
+  it("caps em dashes and exclamation marks", () => {
+    expect(ANTI_AI_SLOP_RULES).toContain("At most one em dash and one exclamation mark")
+  })
+
+  it("is a wording-only rule, never a licence to drop substance", () => {
+    expect(ANTI_AI_SLOP_RULES).toContain("never on WHAT it says")
+  })
+
+  it("is appended alongside REPLY_STYLE_NUDGE at every draft call site", () => {
+    const chatRoute = require("fs").readFileSync(require("path").join(__dirname, "../app/api/ai/chat/route.ts"), "utf8")
+    const draftRoute = require("fs").readFileSync(require("path").join(__dirname, "../app/api/draft/route.ts"), "utf8")
+    const pipeline = require("fs").readFileSync(require("path").join(__dirname, "./reply-queue-pipeline.ts"), "utf8")
+    for (const source of [chatRoute, draftRoute, pipeline]) {
+      expect(source).toContain("ANTI_AI_SLOP_RULES")
+    }
+  })
+
+  it("makes the verifier reword AI tells without changing the facts", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Payout enabled after KYC review." },
+      { role: "user", content: "Is my payout fixed?" },
+    ]
+    const out = buildDraftVerifierMessages(
+      messages,
+      "I hope this email finds you well. Rest assured, we will seamlessly delve into this — moreover, please don't hesitate to reach out!"
+    )
+    expect(out[0].content).toContain("Reword the tells that flag a reply as AI-written")
+    expect(out[0].content).toContain("wording only")
   })
 })

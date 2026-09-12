@@ -11,6 +11,7 @@ import {
   hasAgentPersonallyReplied,
   streamChatCompletion,
   REPLY_STYLE_NUDGE,
+  ANTI_AI_SLOP_RULES,
 } from "@/lib/draft-ai"
 import type { OpenAIMessage } from "@/lib/draft-ai"
 import { encodeImageAttachments } from "@/lib/attachments"
@@ -112,6 +113,7 @@ export async function POST(req: NextRequest) {
   // Steer the model away from emitting its action plan as a checklist and asking
   // to proceed — output just the reply.
   systemPrompt += `\n\n${REPLY_STYLE_NUDGE}`
+  systemPrompt += `\n\n${ANTI_AI_SLOP_RULES}`
 
   const encoder = new TextEncoder()
 

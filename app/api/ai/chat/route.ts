@@ -20,6 +20,7 @@ import {
   getTextDraftModel,
   getAuxDraftModel,
   REPLY_STYLE_NUDGE,
+  ANTI_AI_SLOP_RULES,
   type OpenAIMessage,
 } from "@/lib/draft-ai"
 import { withAiSlot, openaiFetch, openaiApiKey } from "@/lib/ai-throttle"
@@ -896,6 +897,7 @@ async function handleToolCall(
           systemPrompt += `\n\n## Extra instruction for this specific draft\n${guidance.trim()}`
         }
         systemPrompt += `\n\n${REPLY_STYLE_NUDGE}`
+        systemPrompt += `\n\n${ANTI_AI_SLOP_RULES}`
 
         const userMessage = buildUserMessage(convo, undefined, null, hasAgentReplied, hasKnownEmail)
         const draftMessages: OpenAIMessage[] = [
