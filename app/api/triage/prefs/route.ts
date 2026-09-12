@@ -5,8 +5,8 @@ import { normalizeTriagePrefs } from "@/lib/triage/match"
 import { getTriagePrefs, saveTriagePrefs } from "@/lib/triage/store"
 import { expandKeywords } from "@/lib/triage/expand"
 
-// Save the signed-in agent's triage filter prefs (keywords, audiences,
-// priorityOnly, expand). Expansion is opt-in and cached: a model call to
+// Save the signed-in agent's triage filter prefs (keywords, audiences, tag
+// include/exclude, priorityOnly, expand). Expansion is opt-in and cached: a model call to
 // widen `keywords` only fires when expand=true AND the normalized keyword
 // set actually changed since the cached expandedFor — every other save
 // (toggling priorityOnly, flipping expand back on with unchanged keywords,
@@ -38,6 +38,8 @@ export async function POST(req: Request) {
     expand: input.expand,
     audiences: input.audiences,
     priorityOnly: input.priorityOnly,
+    tags: input.tags,
+    excludeTags: input.excludeTags,
     expandedTerms: existing.expandedTerms,
     expandedFor: existing.expandedFor,
   })

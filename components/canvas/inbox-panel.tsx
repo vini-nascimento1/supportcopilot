@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
+import { ConversationTags } from "@/components/canvas/conversation-tags"
 import { broadcastCanvasRefresh, onCanvasRefresh } from "@/lib/canvas-refresh"
 import { useCanvasListHotkeys } from "@/lib/canvas-hotkeys"
 import { addPendingOnRequestDrafts } from "@/lib/on-request-drafts"
@@ -67,6 +68,7 @@ type SupportCase = {
   snippet: string
   intercomUrl: string | null
   tip: CaseTip | null
+  tags: string[]
   waitingSince: string | null
   lastAdminReplyAt: string | null
 }
@@ -1035,6 +1037,9 @@ function RowHeader({ row }: { row: SupportCase }) {
       {row.snippet && (
         <span className="line-clamp-1 text-[11px] text-muted-foreground">{row.snippet}</span>
       )}
+      {/* Intercom's own tags — who this is (CREATOR / FAN / AGENCY) and what
+          it's about (PAYOUTS / KYC / REFUND), before anything is opened. */}
+      <ConversationTags tags={row.tags ?? []} className="mt-0.5" />
     </>
   )
 }

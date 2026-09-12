@@ -34,6 +34,12 @@ export type TriagePrefs = {
   expandedFor: string
   audiences: string[]
   priorityOnly: boolean
+  /** Exact Intercom tags to keep (OR'd). Empty = no tag include filter. */
+  tags: string[]
+  /** Exact Intercom tags to drop. A ticket carrying any of them never shows,
+      even when it also matches an included tag or a keyword — this is the
+      "never show me agency tickets" switch, and an exclusion has to win. */
+  excludeTags: string[]
 }
 
 export const EMPTY_TRIAGE_PREFS: TriagePrefs = {
@@ -43,10 +49,13 @@ export const EMPTY_TRIAGE_PREFS: TriagePrefs = {
   expandedFor: "",
   audiences: [],
   priorityOnly: false,
+  tags: [],
+  excludeTags: [],
 }
 
 const MAX_KEYWORDS = 20
 const MAX_EXPANDED_TERMS = 60
+const MAX_TAG_FILTERS = 40
 
 // Trim/lowercase every string in `value`, drop empties, cap the result at
 // `cap` entries. Non-array or non-string entries are dropped rather than
@@ -94,7 +103,34 @@ export function normalizeTriagePrefs(raw: unknown): TriagePrefs {
     expandedFor: typeof r.expandedFor === "string" ? r.expandedFor : "",
     audiences,
     priorityOnly: r.priorityOnly === true,
+    // Stored as comparison keys, not raw tag names: the workspace renames and
+    // re-cases tags, so a saved filter must survive "KYC_TAG" -> "Kyc_tag".
+    tags: normalizeTagFilters(r.tags),
+    excludeTags: normalizeTagFilters(r.excludeTags),
   }
+}
+
+/** Dedupe + normalize a list of tag filter entries into comparison keys. */
+function normalizeTagFilters(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  for (const entry of value) {
+    if (seen.size >= MAX_TAG_FILTERS) break
+    if (typeof entry !== "string") continue
+    const key = tagFilterKey(entry)
+    if (key) seen.add(key)
+  }
+  return Array.from(seen)
+}
+
+/**
+ * The stable key a tag is matched by: trimmed, lowercased, accent-stripped.
+ * Both the saved filter entries and a conversation's live tags go through it,
+ * so matching is exact-on-key rather than substring — "FAN_TAG" must not be
+ * swallowed by a filter on "fanvue".
+ */
+export function tagFilterKey(tag: string): string {
+  return normalizeForMatch(tag.trim())
 }
 
 // Lowercase + Unicode-normalize (NFD) + strip combining marks, so accented
@@ -138,6 +174,53 @@ export function matchesAudience(tags: readonly string[] | null | undefined, audi
     const needles = AUDIENCES[audience] ?? []
     return needles.some((needle) => normalizedTags.some((tag) => tag.includes(needle)))
   })
+}
+
+/**
+ * Exact tag include/exclude filter. `exclude` wins over `include`: a ticket
+ * tagged both AGENCY_TAG and PAYOUTS_TAG is hidden by an AGENCY_TAG exclusion
+ * even while PAYOUTS_TAG is included — an agent who says "never agency" means
+ * it, and a half-agency ticket is still an agency ticket. Empty `include` =
+ * no include filter (everything passes); empty `exclude` = nothing dropped.
+ */
+export function matchesTagFilters(
+  tags: readonly string[] | null | undefined,
+  include: string[],
+  exclude: string[]
+): boolean {
+  if (include.length === 0 && exclude.length === 0) return true
+  const keys = new Set((tags ?? []).map((t) => tagFilterKey(t)))
+  if (exclude.some((t) => keys.has(t))) return false
+  if (include.length === 0) return true
+  return include.some((t) => keys.has(t))
+}
+
+export type TagFacet = { tag: string; count: number }
+
+/**
+ * The tag vocabulary actually present in the pool, with counts, most common
+ * first (ties alphabetical). Drives the Triage filter chips — built from live
+ * data rather than a hardcoded list, so a tag the workspace adds tomorrow is
+ * filterable the moment it shows up on a ticket. The first spelling seen for a
+ * key wins as the display label.
+ */
+export function collectTagFacets(items: TriageItem[]): TagFacet[] {
+  const byKey = new Map<string, TagFacet>()
+  for (const item of items) {
+    // A conversation carrying the same tag twice must only count once.
+    const seen = new Set<string>()
+    for (const raw of item.tags ?? []) {
+      const key = tagFilterKey(raw)
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      const existing = byKey.get(key)
+      if (existing) existing.count += 1
+      else byKey.set(key, { tag: raw.trim(), count: 1 })
+    }
+  }
+  return Array.from(byKey.values()).sort(
+    (a, b) => b.count - a.count || a.tag.localeCompare(b.tag)
+  )
 }
 
 // Cap on how much "still waiting" contributes to urgency, in minutes. Beyond
@@ -191,7 +274,9 @@ function compareAsc(a: number, b: number): number {
 
 /**
  * Apply the agent's triage_prefs to the swept pool and rank what's left.
- * Filters (all AND'd together): priorityOnly, audience, keywords. Keywords
+ * Filters (all AND'd together): priorityOnly, audience, tag include/exclude,
+ * keywords. Tag exclusion is checked before everything else — it's the one
+ * filter meant to be absolute ("never show me agency"). Keywords
  * combine the literal `keywords` with the cached `expandedTerms` ONLY when
  * `expand` is true — a saved expansion sitting unused while `expand` is off
  * must not silently widen the filter.
@@ -210,6 +295,7 @@ export function filterAndRank(
 
   const ranked: RankedTriageItem[] = []
   for (const item of items) {
+    if (!matchesTagFilters(item.tags, prefs.tags, prefs.excludeTags)) continue
     if (prefs.priorityOnly && !item.priority) continue
     if (!matchesAudience(item.tags, prefs.audiences)) continue
 

@@ -21,6 +21,8 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useCanvasNav } from "@/components/canvas/canvas-nav"
+import { ConversationTags } from "@/components/canvas/conversation-tags"
+import { formatTagLabel } from "@/lib/conversation-tags"
 import { readApiError } from "@/lib/api-error"
 import { onCanvasRefresh } from "@/lib/canvas-refresh"
 import { useCanvasListHotkeys } from "@/lib/canvas-hotkeys"
@@ -33,7 +35,9 @@ import { cn, relativeTime } from "@/lib/utils"
 import {
   AUDIENCES,
   EMPTY_TRIAGE_PREFS,
+  tagFilterKey,
   type RankedTriageItem,
+  type TagFacet,
   type TriagePrefs,
 } from "@/lib/triage/match"
 
@@ -73,6 +77,10 @@ export function TriagePanel({
   const [ranked, setRanked] = useState<RankedTriageItem[] | null>(null)
   const [pool, setPool] = useState(0)
   const [prefs, setPrefs] = useState<TriagePrefs>(EMPTY_TRIAGE_PREFS)
+  // The tag vocabulary present in the pool, newest sweep's counts included.
+  // Server-derived (no hardcoded tag list) so a new Intercom tag is filterable
+  // as soon as it lands on a ticket.
+  const [tagFacets, setTagFacets] = useState<TagFacet[]>([])
   const [sweptAt, setSweptAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sweeping, setSweeping] = useState(false)
@@ -114,6 +122,7 @@ export function TriagePanel({
       const data = await res.json()
       setRanked(Array.isArray(data.items) ? data.items : [])
       setPool(typeof data.pool === "number" ? data.pool : 0)
+      setTagFacets(Array.isArray(data.tagFacets) ? data.tagFacets : [])
       setSweptAt(typeof data.sweptAt === "string" ? data.sweptAt : null)
       setSweepStatus(
         data.sweepStatus && typeof data.sweepStatus.complete === "boolean"
@@ -219,6 +228,8 @@ export function TriagePanel({
               expand: next.expand,
               audiences: next.audiences,
               priorityOnly: next.priorityOnly,
+              tags: next.tags,
+              excludeTags: next.excludeTags,
             }),
           })
           if (!res.ok) throw new Error(await readApiError(res, `Failed (${res.status})`))
@@ -314,6 +325,30 @@ export function TriagePanel({
     [updatePrefs]
   )
 
+  // Tri-state per tag: off -> include (only these) -> exclude (never these) ->
+  // off. One chip carries both directions because the two filters are really
+  // one decision per tag, and a separate include/exclude list would double the
+  // UI for a sidebar that has to fit a 1366×768 laptop.
+  const toggleTag = useCallback(
+    (tag: string) => {
+      const key = tagFilterKey(tag)
+      const current = prefsRef.current
+      const included = current.tags.includes(key)
+      const excluded = current.excludeTags.includes(key)
+      if (included) {
+        updatePrefs({
+          tags: current.tags.filter((t) => t !== key),
+          excludeTags: [...current.excludeTags, key],
+        })
+      } else if (excluded) {
+        updatePrefs({ excludeTags: current.excludeTags.filter((t) => t !== key) })
+      } else {
+        updatePrefs({ tags: [...current.tags, key] })
+      }
+    },
+    [updatePrefs]
+  )
+
   const clearFilters = useCallback(() => {
     setKeywordDraft("")
     prefsRef.current = EMPTY_TRIAGE_PREFS
@@ -343,7 +378,11 @@ export function TriagePanel({
   }, [])
 
   const hasFilters =
-    prefs.keywords.length > 0 || prefs.audiences.length > 0 || prefs.priorityOnly
+    prefs.keywords.length > 0 ||
+    prefs.audiences.length > 0 ||
+    prefs.priorityOnly ||
+    prefs.tags.length > 0 ||
+    prefs.excludeTags.length > 0
 
   const assignToMe = async (conversationId: string) => {
     setAssigningId(conversationId)
@@ -481,6 +520,8 @@ export function TriagePanel({
       />
       <FilterBar
         prefs={prefs}
+        tagFacets={tagFacets}
+        onToggleTag={toggleTag}
         keywordDraft={keywordDraft}
         onKeywordDraftChange={onKeywordInputChange}
         onCommitKeyword={commitKeyword}
@@ -623,6 +664,8 @@ function TriageHeader({
 
 function FilterBar({
   prefs,
+  tagFacets,
+  onToggleTag,
   keywordDraft,
   onKeywordDraftChange,
   onCommitKeyword,
@@ -634,6 +677,8 @@ function FilterBar({
   savingPrefs,
 }: {
   prefs: TriagePrefs
+  tagFacets: TagFacet[]
+  onToggleTag: (tag: string) => void
   keywordDraft: string
   onKeywordDraftChange: (v: string) => void
   onCommitKeyword: () => void
@@ -645,7 +690,19 @@ function FilterBar({
   savingPrefs: boolean
 }) {
   const activeFilterCount =
-    prefs.audiences.length + (prefs.priorityOnly ? 1 : 0)
+    prefs.audiences.length +
+    prefs.tags.length +
+    prefs.excludeTags.length +
+    (prefs.priorityOnly ? 1 : 0)
+
+  // A tag the agent filtered on can drop out of the pool entirely (nothing
+  // open carries it right now). Keep those chips visible at count 0, otherwise
+  // an active filter becomes invisible and un-removable from this panel.
+  const facetKeys = new Set(tagFacets.map((f) => tagFilterKey(f.tag)))
+  const orphanFilters: TagFacet[] = [...prefs.tags, ...prefs.excludeTags]
+    .filter((key) => !facetKeys.has(key))
+    .map((key) => ({ tag: key, count: 0 }))
+  const tagChips = [...tagFacets, ...orphanFilters]
 
   return (
     <div className="flex shrink-0 flex-col gap-1.5 border-b px-2 py-2">
@@ -680,19 +737,64 @@ function FilterBar({
               )}
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-56 text-xs">
-            <p className="text-[11px] font-medium text-muted-foreground">Audience</p>
-            <div className="flex flex-wrap gap-1.5">
-              {AUDIENCE_OPTIONS.map((audience) => (
-                <ChipToggle
-                  key={audience}
-                  label={audience}
-                  active={prefs.audiences.includes(audience)}
-                  onClick={() => onToggleAudience(audience)}
-                />
-              ))}
+          <PopoverContent
+            align="end"
+            className="flex max-h-[60vh] w-64 flex-col gap-2 overflow-y-auto text-xs"
+          >
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[11px] font-medium text-muted-foreground">Audience</p>
+              <div className="flex flex-wrap gap-1.5">
+                {AUDIENCE_OPTIONS.map((audience) => (
+                  <ChipToggle
+                    key={audience}
+                    label={audience}
+                    active={prefs.audiences.includes(audience)}
+                    onClick={() => onToggleAudience(audience)}
+                  />
+                ))}
+              </div>
             </div>
-            <div className="mt-1 border-t pt-2">
+
+            {/* Exact Intercom tags, straight off the pool. Unlike keywords
+                (which read the ticket text and go wrong the moment Fin or a
+                customer phrases things differently) a tag is set by Intercom
+                itself, so "never agency" actually holds. Click cycles
+                include -> exclude -> off. */}
+            <div className="flex flex-col gap-1.5 border-t pt-2">
+              <p className="text-[11px] font-medium text-muted-foreground">
+                Tags
+                <span className="ml-1 font-normal opacity-70">click: keep → hide → off</span>
+              </p>
+              {tagChips.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">
+                  No tags in the pool yet — sweep once and they show up here.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {tagChips.map((facet) => {
+                    const key = tagFilterKey(facet.tag)
+                    return (
+                      <TagChipToggle
+                        key={key}
+                        label={formatTagLabel(facet.tag)}
+                        title={facet.tag}
+                        count={facet.count}
+                        state={
+                          prefs.excludeTags.includes(key)
+                            ? "exclude"
+                            : prefs.tags.includes(key)
+                              ? "include"
+                              : "off"
+                        }
+                        onClick={() => onToggleTag(facet.tag)}
+                      />
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t pt-2">
               <ChipToggle
                 label="Priority only"
                 active={prefs.priorityOnly}
@@ -702,6 +804,32 @@ function FilterBar({
           </PopoverContent>
         </Popover>
       </div>
+
+      {/* Active tag filters, visible without opening the popover — an
+          exclusion that silently hides tickets is the kind of filter you
+          forget you set. Clicking one cycles it on through to off. */}
+      {(prefs.tags.length > 0 || prefs.excludeTags.length > 0) && (
+        <div className="flex flex-wrap gap-1">
+          {prefs.tags.map((key) => (
+            <TagChipToggle
+              key={`in-${key}`}
+              label={formatTagLabel(key)}
+              title={`Only tickets tagged ${key}`}
+              state="include"
+              onClick={() => onToggleTag(key)}
+            />
+          ))}
+          {prefs.excludeTags.map((key) => (
+            <TagChipToggle
+              key={`ex-${key}`}
+              label={formatTagLabel(key)}
+              title={`Hiding tickets tagged ${key}`}
+              state="exclude"
+              onClick={() => onToggleTag(key)}
+            />
+          ))}
+        </div>
+      )}
 
       {prefs.keywords.length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -771,6 +899,46 @@ function ChipToggle({
   )
 }
 
+// One Intercom tag as a tri-state filter chip: off (muted outline), include
+// (solid — "only these") or exclude (struck through, destructive tint —
+// "never these"). `count` is how many pooled tickets carry it; omitted when
+// the chip is just echoing an active filter back.
+function TagChipToggle({
+  label,
+  title,
+  count,
+  state,
+  onClick,
+}: {
+  label: string
+  title: string
+  count?: number
+  state: "off" | "include" | "exclude"
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={state !== "off"}
+      className={cn(
+        "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide transition-colors",
+        state === "include" && "border-primary bg-primary text-primary-foreground",
+        state === "exclude" &&
+          "border-destructive/50 bg-destructive/10 text-destructive line-through",
+        state === "off" && "border-muted-foreground/30 text-muted-foreground hover:text-foreground"
+      )}
+    >
+      {state === "exclude" && <XIcon className="size-2.5 shrink-0 no-underline" />}
+      {label}
+      {count != null && count > 0 && (
+        <span className="tabular-nums opacity-60">{count}</span>
+      )}
+    </button>
+  )
+}
+
 function TriageRow({
   entry,
   assigning,
@@ -826,6 +994,9 @@ function TriageRow({
           {item.subject || item.snippet}
         </span>
       )}
+      {/* Intercom's own tags — who this is (CREATOR / FAN / AGENCY) and what
+          it's about (PAYOUTS / KYC / REFUND), before anything is opened. */}
+      <ConversationTags tags={item.tags} />
       <span className="flex flex-wrap items-center gap-1">
         {item.slaStatus === "missed" && (
           <Badge variant="destructive" className="h-4 px-1 text-[10px] font-normal">

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { getAgentContext } from "@/lib/automation/rules"
-import { EMPTY_TRIAGE_PREFS, filterAndRank } from "@/lib/triage/match"
+import { EMPTY_TRIAGE_PREFS, collectTagFacets, filterAndRank } from "@/lib/triage/match"
 import {
   getTriagePrefs,
   listTriageItems,
@@ -25,7 +25,13 @@ export async function GET() {
   // Signed in but no agents row yet — degrade gracefully rather than error,
   // same as /api/reply-queue for an unprovisioned account.
   if (!agentId) {
-    return NextResponse.json({ items: [], pool: 0, prefs: EMPTY_TRIAGE_PREFS, sweptAt: null })
+    return NextResponse.json({
+      items: [],
+      pool: 0,
+      prefs: EMPTY_TRIAGE_PREFS,
+      sweptAt: null,
+      tagFacets: [],
+    })
   }
 
   const [items, prefs, sweptAt, sweepStatus] = await Promise.all([
@@ -42,6 +48,11 @@ export async function GET() {
     pool: items.length,
     prefs,
     sweptAt,
+    // The tag vocabulary of the WHOLE pool (not just the filtered result), so
+    // the filter chips stay put while the agent narrows things down — a chip
+    // list that reshuffles on every keystroke is unusable, and a tag you just
+    // excluded has to remain visible to be un-excluded.
+    tagFacets: collectTagFacets(items),
     // Lets the panel warn when the pool count is only a partial snapshot
     // (last sweep hit its page cap or errored mid-pagination).
     sweepStatus,

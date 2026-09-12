@@ -5,6 +5,9 @@ import {
   normalizeForMatch,
   matchesKeywords,
   matchesAudience,
+  matchesTagFilters,
+  collectTagFacets,
+  tagFilterKey,
   urgencyScore,
   filterAndRank,
   EMPTY_TRIAGE_PREFS,
@@ -243,5 +246,98 @@ describe("normalizeTriagePrefs", () => {
     const prefs = normalizeTriagePrefs({ keywords: manyKeywords, expandedTerms: manyExpanded })
     expect(prefs.keywords).toHaveLength(20)
     expect(prefs.expandedTerms).toHaveLength(60)
+  })
+})
+
+describe("tagFilterKey", () => {
+  it("normalizes case and whitespace so a renamed/re-cased tag still matches", () => {
+    expect(tagFilterKey("  AGENCY_TAG ")).toBe("agency_tag")
+    expect(tagFilterKey("Agency_Tag")).toBe(tagFilterKey("AGENCY_TAG"))
+    expect(tagFilterKey("🔴 Churn risk")).toBe("🔴 churn risk")
+  })
+})
+
+describe("matchesTagFilters", () => {
+  it("no filters = everything passes", () => {
+    expect(matchesTagFilters(["AGENCY_TAG"], [], [])).toBe(true)
+    expect(matchesTagFilters([], [], [])).toBe(true)
+  })
+
+  it("include is OR: any listed tag is enough, untagged tickets drop out", () => {
+    expect(matchesTagFilters(["FAN_TAG", "KYC_TAG"], ["kyc_tag"], [])).toBe(true)
+    expect(matchesTagFilters(["FAN_TAG"], ["kyc_tag", "fan_tag"], [])).toBe(true)
+    expect(matchesTagFilters(["CREATOR_TAG"], ["kyc_tag"], [])).toBe(false)
+    expect(matchesTagFilters([], ["kyc_tag"], [])).toBe(false)
+  })
+
+  it("exclude wins over include — a part-agency ticket is still an agency ticket", () => {
+    expect(matchesTagFilters(["AGENCY_TAG", "PAYOUTS_TAG"], ["payouts_tag"], ["agency_tag"])).toBe(
+      false
+    )
+    expect(matchesTagFilters(["PAYOUTS_TAG"], ["payouts_tag"], ["agency_tag"])).toBe(true)
+  })
+
+  it("matches on the whole tag, not a substring — 'fan' must not catch 'FANVUE_STAFF'", () => {
+    expect(matchesTagFilters(["FANVUE_STAFF"], ["fan"], [])).toBe(false)
+    expect(matchesTagFilters(["FAN_TAG"], ["fan_tag"], [])).toBe(true)
+  })
+})
+
+describe("collectTagFacets", () => {
+  it("counts each tag once per conversation, most common first", () => {
+    const facets = collectTagFacets([
+      makeItem({ conversationId: "1", tags: ["CREATOR_TAG", "PAYOUTS_TAG"] }),
+      makeItem({ conversationId: "2", tags: ["CREATOR_TAG", "CREATOR_TAG"] }),
+      makeItem({ conversationId: "3", tags: [] }),
+    ])
+    expect(facets).toEqual([
+      { tag: "CREATOR_TAG", count: 2 },
+      { tag: "PAYOUTS_TAG", count: 1 },
+    ])
+  })
+
+  it("folds differently-cased spellings of one tag together", () => {
+    const facets = collectTagFacets([
+      makeItem({ conversationId: "1", tags: ["KYC_TAG"] }),
+      makeItem({ conversationId: "2", tags: ["kyc_tag"] }),
+    ])
+    expect(facets).toEqual([{ tag: "KYC_TAG", count: 2 }])
+  })
+})
+
+describe("filterAndRank tag filters", () => {
+  it("excludeTags drops the ticket even when it matches the keyword filter", () => {
+    const items = [
+      makeItem({ conversationId: "agency", tags: ["AGENCY_TAG"], snippet: "payout stuck" }),
+      makeItem({ conversationId: "creator", tags: ["CREATOR_TAG"], snippet: "payout stuck" }),
+    ]
+    const ranked = filterAndRank(items, makePrefs({ keywords: ["payout"], excludeTags: ["agency_tag"] }), 0)
+    expect(ranked.map((r) => r.item.conversationId)).toEqual(["creator"])
+  })
+
+  it("tags include narrows the pool to the listed tags", () => {
+    const items = [
+      makeItem({ conversationId: "a", tags: ["KYC_TAG"] }),
+      makeItem({ conversationId: "b", tags: ["REFUND_TAG"] }),
+      makeItem({ conversationId: "c", tags: [] }),
+    ]
+    const ranked = filterAndRank(items, makePrefs({ tags: ["kyc_tag"] }), 0)
+    expect(ranked.map((r) => r.item.conversationId)).toEqual(["a"])
+  })
+})
+
+describe("normalizeTriagePrefs tag filters", () => {
+  it("normalizes, dedupes and drops non-strings", () => {
+    const prefs = normalizeTriagePrefs({
+      tags: ["AGENCY_TAG", "agency_tag", 7, "  KYC_TAG  ", ""],
+      excludeTags: ["FAN_TAG"],
+    })
+    expect(prefs.tags).toEqual(["agency_tag", "kyc_tag"])
+    expect(prefs.excludeTags).toEqual(["fan_tag"])
+  })
+
+  it("defaults to empty lists when absent or garbage", () => {
+    expect(normalizeTriagePrefs({}).tags).toEqual([])
+    expect(normalizeTriagePrefs({ excludeTags: "nope" }).excludeTags).toEqual([])
   })
 })

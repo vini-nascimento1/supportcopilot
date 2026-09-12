@@ -1,7 +1,7 @@
 ---
 title: Canvas Workflow
 tags: [canvas, react-flow, ui, workflow]
-updated: 2026-09-01
+updated: 2026-09-12
 ---
 
 # Canvas Workflow
@@ -20,7 +20,9 @@ Each case's central card is `components/canvas/case-info-node.tsx` — it shows 
 
 - **Inbox** — the agent's assigned + open Intercom conversations.
 - **Queue** — pending suggested replies awaiting approval/send.
-- **Triage** — the unassigned pool, filtered by the agent's keyword/audience preferences (see [[Triage System]]).
+- **Triage** — the unassigned pool, filtered by the agent's keyword/audience/tag preferences (see [[Triage System]]).
+
+Inbox and Triage rows both render the conversation's **Intercom tags** (`CREATOR_TAG`, `AGENCY_TAG`, `PAYOUTS_TAG`, `KYC_TAG`, …) as small badges under the snippet, via the shared `components/canvas/conversation-tags.tsx` + `lib/conversation-tags.ts` pair — so a ticket looks the same in both lists and an agent can tell who they're about to answer without opening it. Labels drop the `_TAG` suffix, colour by family (audience / risk / money / neutral), sort audience-first and truncate to three with a `+N` (the raw tag is on hover). The tag vocabulary is never hardcoded: everything is derived from the tag string itself, so a tag the workspace adds tomorrow renders correctly with no code change.
 
 Tab selection and sidebar collapse state persist across the app via `lib/canvas-tabs-store.ts`, which combines `localStorage` with `window` custom events so multiple panes stay in sync.
 
@@ -44,7 +46,7 @@ Tab selection and sidebar collapse state persist across the app via `lib/canvas-
 3. Canvas renders the case: a conversation node plus auto-suggested tool cards (matched via Intercom tags/keywords — see [[Tool Cards and Fadmin]]), connected by dashed wire edges.
 4. Sidebar Inbox polls `/api/cases` (agent's assigned + open Intercom conversations) every 10-30s.
 5. Sidebar Queue polls `/api/reply-queue` (rows from `suggested_replies`) every 5-30s.
-6. Sidebar Triage polls `/api/triage` (unassigned pool, swept every 5 min) filtered by the agent's keyword/audience prefs — see [[Triage System]].
+6. Sidebar Triage polls `/api/triage` (unassigned pool, swept every 5 min) filtered by the agent's keyword/audience/tag prefs — see [[Triage System]].
 
 ```
 Agent opens case (Inbox tab)

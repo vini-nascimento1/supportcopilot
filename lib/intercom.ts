@@ -20,6 +20,10 @@ export type SupportCase = {
   intercomUrl: string | null
   tip: CaseTip | null
   draftPlaceholder: string
+  /** Intercom conversation tags (CREATOR_TAG, AGENCY_TAG, PAYOUTS_TAG, …).
+      Rendered as badges on the inbox row so an agent can tell who they're
+      about to answer without opening the ticket. */
+  tags: string[]
   // SLA-staleness inputs for the inbox (see lib/inbox-sla.ts). `waitingSince`
   // non-null ⇒ waiting on US (an FRT concern, not a check-in candidate).
   // `lastAdminReplyAt` is when we last replied — the clock for customer silence.
@@ -65,6 +69,12 @@ type IntercomConversation = {
     contacts?: IntercomContact[]
   } | null
   user?: IntercomContact | null
+  tags?: { tags?: Array<{ name?: string | null }> } | null
+}
+
+/** The tag names of a search/list conversation payload, empty when untagged. */
+function getTags(conversation: { tags?: { tags?: Array<{ name?: string | null }> } | null }): string[] {
+  return (conversation.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean)
 }
 
 const intercomToken = process.env.INTERCOM_ACCESS_TOKEN
@@ -143,6 +153,7 @@ function demoCases(playbooks: PlaybookListItem[]): CasesQueueData {
       state: "open",
       updatedAt: new Date().toISOString(),
       snippet: "I am not receiving the OTP code for my payout confirmation.",
+      tags: ["CREATOR_TAG", "PAYOUTS_TAG"],
     },
     {
       id: "demo-payout",
@@ -151,6 +162,7 @@ function demoCases(playbooks: PlaybookListItem[]): CasesQueueData {
       state: "open",
       updatedAt: new Date().toISOString(),
       snippet: "The payout says under review and asks for more documents.",
+      tags: ["AGENCY_TAG", "PAYOUTS_TAG", "KYC_TAG"],
     },
   ].map((row) => {
     const tip = getLiveTipForText(row.snippet, playbooks)
@@ -377,7 +389,7 @@ export async function getConversationDetail(
     firstMessage: sourceRole === "customer" ? sourceBody : "",
     messages,
     intercomUrl: getIntercomUrl(String(conv.id)),
-    tags: (conv.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean),
+    tags: getTags(conv),
     topic: conv.topics?.topics?.[0]?.name ?? null,
     updatedAt: toDate(conv.updated_at),
     // Intercom encodes "unassigned" as admin_assignee_id = 0; normalize to null.
@@ -507,6 +519,7 @@ export async function getOpenCasesQueue(
         intercomUrl: getIntercomUrl(id),
         tip,
         draftPlaceholder: getDraftPlaceholder(snippet, tip),
+        tags: getTags(conversation),
         waitingSince: toDate(conversation.waiting_since),
         lastAdminReplyAt: toDate(conversation.statistics?.last_admin_reply_at),
       }
@@ -707,7 +720,7 @@ function toSweepConversation(c: IntercomSearchConversation): {
   conv: SweepConversation
 } {
   const contact = c.contacts?.contacts?.[0]
-  const tags = (c.tags?.tags ?? []).map((t) => t.name ?? "").filter(Boolean)
+  const tags = getTags(c)
   return {
     conv: {
       id: String(c.id ?? ""),
