@@ -44,6 +44,13 @@ const SEED_ENTRIES: ChangelogEntry[] = [
       "AI drafts used to hand over the outcome and stop there — a refusal with nothing in front of it and nothing after it, leaving the customer unsure what happens next. Every draft now follows the same arc: a short acknowledgement before bad news, the actual reason in plain words with what it means for the customer, and a clear ending — either it's sorted and closed, or the one next step and who's doing it. Drafts that genuinely have nothing outstanding still stay short; the reply just says so instead of inventing a follow-up.",
   },
   {
+    id: "seed-2026-09-12-e",
+    date: "2026-09-12",
+    title: "Subscription charges get explained, not investigated",
+    description:
+      "When a fan is angry about a charge that's clearly their own subscription, renewal or converted free trial, drafts no longer ask for card digits or promise to verify the transaction — calling it a scam doesn't make it unidentified. Instead the draft explains the billing properly on the first reply: a free trial takes payment details and converts automatically unless it's cancelled before it ends, a processed renewal can't be reversed, and a subscription buys access to the content that was there at the time of purchase, not a promise of future posts. It ends with the cancellation path and the direct link. First policy answers are allowed to be this thorough now; repeat demands still get the short, firm version.",
+  },
+  {
     id: "seed-2026-09-08-a",
     date: "2026-09-08",
     title: "Drafts no longer name the fraud team",

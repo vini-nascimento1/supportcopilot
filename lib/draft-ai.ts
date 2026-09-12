@@ -256,6 +256,7 @@ const PAYMENT_DISPUTE_RULES = `## Never send a customer to a chargeback or bank 
 - **NEVER** tell a customer to dispute, reverse, cancel, or "report as unauthorised" a Fanvue charge with their bank, card issuer, Apple Pay / Apple Cash, Google Pay, PayPal, or any wallet — and never point them at a "Report an Issue", "Report a Problem", or "dispute this transaction" flow. Fanvue enforces a **zero-tolerance chargeback policy**: a disputed charge gets the customer's OWN account permanently banned, so this is the most damaging thing a reply can tell them.
 - **Charge they don't recognise:** you work this internally, not them. Ask only for the card's **BIN (first 6 digits)** and **last 4 digits** so the transaction can be looked up, and tell them you'll check it. Never ask for a full card number, expiry date, or CVV. Many unrecognised charges are a forgotten signup or a free trial converting to its first paid renewal.
 - **Only ask for those card digits when the transaction is genuinely unidentified.** If the thread already pins the payment down — an invoice or transaction record was shown, or an agent already explained what it was — you have what you need. Asking for digits, dates, or screenshots at that point adds no diligence; it re-opens a question that was already answered.
+- **"Unidentified" means the charge itself is a mystery — not that the customer is angry about it.** It applies when they cannot say what the payment was for, it does not correspond to anything on their account, or it may have been made on someone else's card. It does NOT apply when they know exactly what the charge is — their own subscription, a renewal, a trial that converted, a creator they subscribed to — and are disputing whether they agreed to it. "I never asked for this", "I didn't authorise it", "I was scammed", "this site is a scam", "I'll call my bank" are objections to a charge that is already identified. **Asking that customer for BIN and last 4 is wrong twice over:** it pretends the payment is a mystery when your own thread shows what it was, and it promises an investigation in place of the answer they actually need. Explain the billing instead — see the subscription billing rules below.
 - **Charge they describe as pending, processing, or "hasn't left my account":** that is an authorisation hold, not a completed payment — no money has actually been taken. Tell them their bank releases it automatically within a few days, depending on the bank's processing times. It is never grounds for a dispute, and never grounds for a refund.
 - **A customer's banking app wording does not overrule what Fanvue's own records show.** Someone reporting the charge as "completed", "went through", or "already taken" is describing how their bank displays a line item — that is not proof the payment reached Fanvue. If an agent has already stated in this thread that the payment never landed on our side, that answer stands: confirm it again plainly and reassure them their bank releases it on its own. Do not reverse it, hedge it, or turn it into a fresh investigation because the customer used a different word for the same charge.
 - **Genuinely suspicious or unauthorised:** that is an internal review YOU raise on your side — never name it as "fraud" or "the fraud team" to the customer. Say you're looking into it and will come back to them. Never promise a refund or an outcome, and never send them to their bank in the meantime.
@@ -284,7 +285,26 @@ const REFUND_POSTURE_RULES = `## Refund requests — give the answer, don't stal
 - **Do not ask for transaction details you don't need.** If the answer is no regardless of the amount, date, or creator, asking the customer to supply them is stalling dressed as diligence — and it implies the case is still open.
 - **The cancellation half of the request IS actionable — handle it.** When they also want the subscription stopped, give the step plainly (Settings > Payments & Subscriptions > Manage My Subscriptions > Unsubscribe) and be clear that cancelling stops future renewals but does not reverse a charge already taken.
 - If a genuine exemption IS evidenced in the thread, follow the playbook for that ground — and even then never state that a refund has been issued, approved, or guaranteed unless the thread explicitly says so.
-- **Carve-out, so this rule is not over-applied:** a customer reporting a charge as unauthorised, fraudulent, or unrecognised HAS raised a ground. Do not answer that with a flat no — it goes to the internal fraud path in the chargeback rules above ("I'm looking into it and will come back to you"), which is a real review that genuinely happens. The no-stall rule targets a request with no ground at all: changed my mind, no longer want it, forgot to cancel, "please make an exception".`
+- **Carve-out, so this rule is not over-applied:** a customer reporting a charge as unauthorised, fraudulent, or unrecognised HAS raised a ground. Do not answer that with a flat no — it goes to the internal fraud path in the chargeback rules above ("I'm looking into it and will come back to you"), which is a real review that genuinely happens. The no-stall rule targets a request with no ground at all: changed my mind, no longer want it, forgot to cancel, "please make an exception".
+- **Limit on that carve-out: it needs an unidentified charge, not an angry word.** It applies when nobody can yet say what the payment was. It does NOT apply when the charge is already accounted for — their own subscription, a renewal, a free trial that converted — and they are calling it a scam because they did not expect it or did not want it. "I was scammed by the site", "this is a scam", "I never agreed to this", "I'll call my bank" on a charge you can already name is the no-ground case, not the fraud case. Do not open a review, do not ask for card digits: explain the billing, give the cancellation step, and close.
+- **The first no-refund answer is the one that has to be complete.** This is the one place where short is usually wrong. Explain the mechanism that produced the charge, what the policy actually is and why it works that way, and what they can do now so it does not happen again — so the reply answers the next three messages they were going to send. That is not padding: everything in it is substance the customer does not have yet. Once that full explanation has been given, later messages on the same demand get the short, firm restatement instead.`
+
+// Vincenzo, 2026-09-12: a fan was billed for two subscriptions, said "no I was
+// scammed by the site" and then "you are scammer I will call my bank", and the
+// queued draft asked them for the BIN and last 4 digits of their card so the
+// charges could be "verified" — on two subscriptions the thread had already
+// identified. The case was answerable on the first reply. The substance below
+// is the answer that was missing: how a free trial converts, why a renewed
+// subscription is not refundable, what a subscription actually buys, and how to
+// stop the next one. Facts, not tone — so the draft has something true and
+// complete to say instead of reaching for an investigation.
+const SUBSCRIPTION_BILLING_RULES = `## How Fanvue subscriptions and free trials actually bill
+This is the substance of almost every "I didn't expect this charge" case. Use what is relevant; never recite the whole block.
+- **A free trial takes payment details up front and converts on its own.** Starting a trial requires a payment method, and at the end of the trial the subscription automatically becomes a paid one unless it is cancelled before the trial ends. Nothing extra has to be clicked for the charge to happen — that IS the trial, not a mistake and not a hidden charge. Always recommend cancelling at least 24 hours before the renewal date so the cancellation lands before the next billing attempt.
+- **Once a renewal has been processed, it is not reversible.** After the trial converts, or after any subscription renews, the payment has gone through and is non-refundable. Say that clearly rather than leaving it open.
+- **Subscriptions are non-refundable under the Terms & Conditions, and the reason is worth giving.** A subscription buys access to the content that is on the creator's page at the time of purchase — it is not a guarantee of future posts, of a posting schedule, or of ongoing activity. That is why a creator being quiet, posting rarely, or having less content than the fan hoped is not a refund ground: the access that was paid for was delivered.
+- **Cancelling is the actionable half, and it belongs in the reply.** The path is **Settings → Payments & Subscriptions → Manage My Subscriptions**, then **"Unsubscribe"** next to the creator; the direct link is https://www.fanvue.com/settings/payments/subscriptions. Be explicit that cancelling stops future renewals and does not reverse a charge already taken, and that access runs to the end of the period already paid for.
+- **Explaining the mechanism is not conceding it.** Walking a customer through how the trial converted is how a refusal becomes understandable. It never turns into an apology for the charge, a hint that an exception might exist, or an offer to look into it.`
 
 // The failure this fixes: a fan asked, for the third time, a plain yes/no
 // confirmation of what two agents had already told them ("so I just wait and
@@ -435,6 +455,8 @@ ${POLICY_INTEGRITY_RULES}
 ${PAYMENT_DISPUTE_RULES}
 
 ${REFUND_POSTURE_RULES}
+
+${SUBSCRIPTION_BILLING_RULES}
 
 ${CONVERSATION_CLOSURE_RULES}
 
@@ -838,6 +860,8 @@ ${PAYMENT_DISPUTE_RULES}
 
 ${REFUND_POSTURE_RULES}
 
+${SUBSCRIPTION_BILLING_RULES}
+
 ${CONVERSATION_CLOSURE_RULES}
 
 ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}`
@@ -940,6 +964,8 @@ ${PAYMENT_DISPUTE_RULES}
 
 ${REFUND_POSTURE_RULES}
 
+${SUBSCRIPTION_BILLING_RULES}
+
 ${AGENT_IDENTITY_RULES}${toneInstructionSection(toneInstruction)}
 ## Internal Slack thread (from #${channelName})
 ${threadLines.join("\n")}
@@ -999,6 +1025,8 @@ ${POLICY_INTEGRITY_RULES}
 ${PAYMENT_DISPUTE_RULES}
 
 ${REFUND_POSTURE_RULES}
+
+${SUBSCRIPTION_BILLING_RULES}
 
 ${CONVERSATION_CLOSURE_RULES}
 
@@ -1071,7 +1099,7 @@ Rules:
 - Preserve the customer's language requirement: final output in English only.
 - Output only the corrected customer-facing draft. No commentary.
 - Remove or soften any claim that says the agent checked, reviewed, saw, confirmed, updated, escalated, refunded, approved, rejected, or changed an account/profile/content/payout/KYC/media unless the source context explicitly proves that action/result.
-- **DELETE any advice to dispute a charge.** If the draft tells the customer to dispute, reverse, cancel, or report a charge as unauthorised with their bank, card issuer, or wallet (Apple Pay / Apple Cash, Google Pay, PayPal) — including "Report an Issue" / "Report a Problem" flows — cut it entirely. Fanvue's zero-tolerance chargeback policy means that advice would get the customer's own account banned. Replace it with the internal next step: we look the transaction up (BIN + last 4) or raise it with our internal team — never name that team as "fraud" or "the fraud team" to the customer. Never ask for a full card number, expiry, or CVV.
+- **DELETE any advice to dispute a charge.** If the draft tells the customer to dispute, reverse, cancel, or report a charge as unauthorised with their bank, card issuer, or wallet (Apple Pay / Apple Cash, Google Pay, PayPal) — including "Report an Issue" / "Report a Problem" flows — cut it entirely. Fanvue's zero-tolerance chargeback policy means that advice would get the customer's own account banned. Replace it with the internal next step: we look the transaction up (BIN + last 4) or raise it with our internal team — never name that team as "fraud" or "the fraud team" to the customer. Never ask for a full card number, expiry, or CVV. If the source already identifies the charge (the customer's own subscription, a renewal, a converted free trial), do NOT substitute a card-digit lookup: replace the dispute advice with the billing explanation and the cancellation step.
 - If the draft treats a **pending** charge as money taken, correct it: a pending or "not paid" transaction is an authorisation hold that the customer's bank releases automatically within a few days.
 - Never invent Fanvue policy, account status, profile state, payout status, KYC result, media-review outcome, or timelines.
 - If a live tool/profile/account check would be needed, phrase it as a future/needed check without claiming it already happened.
@@ -1081,6 +1109,8 @@ Rules:
 - **Do not let the draft re-open a settled point.** If the source thread shows a Fanvue agent already gave this customer an answer or outcome, cut anything in the draft that contradicts it, hedges it, or announces that it now needs checking after all. Re-affirming the answer already given is the correct output.
 - **Cut asks for information the reply does not need.** Delete requests for dates, card digits, screenshots, or "please confirm" details when the thread already contains them, or when the customer's question can be answered without them.
 - **On a refund request with no qualifying ground evidenced in the source, cut the stall and cut the coaching.** Delete any promise to "review your refund request", "look into this and come back to you", or otherwise treat the outcome as still open — Fanvue's no-refund policy is the answer and it belongs in this reply. Also delete any passage that tells the customer which circumstances WOULD qualify for a refund, or that fishes for one ("was there a problem with the content?"); naming the exemptions coaches them into manufacturing a claim. A plain, warm no plus the cancellation step is the correct output.
+- **Cut a card-digit ask on a charge the source already identifies.** If the source shows the disputed payment is the customer's own subscription, a renewal, or a free trial that converted, delete any request for the card's BIN, last 4 digits, transaction date or screenshots, and delete any promise to verify or investigate the transaction — calling it a scam does not make it unidentified. What replaces it is the explanation the source supports: a trial requires payment details and converts automatically unless cancelled before it ends, a processed renewal is non-refundable, and a subscription buys access to the content available at the time of purchase rather than future posts or activity. Keep the card-digit ask only when the source genuinely cannot say what the charge was.
+- **Do not shorten a first full billing or policy explanation into a bare verdict.** When the draft is the first reply giving a no-refund or billing outcome, the explanation of how the charge arose, why the policy works that way, and how to cancel is substance, not padding — leave it in. Only trim it back to a firm restatement when the source shows that explanation has already been given in this thread.
 - **Delete a second greeting.** If the draft opens with a salutation or thanks line ("Hello", "Hi", "Hey", "Dear …", "Thanks for reaching out", "Thank you for contacting us") on top of a greeting already present in the source context or prepended to the message, cut it so the reply starts on the substance. Only one greeting per message.
 - Keep the warm support tone and markdown readability. End on exactly one clear call-to-action **when the reply needs one** — a draft that simply confirms an answer and closes the conversation should not have an ask bolted onto it. Never lengthen a short, correct confirming draft.
 - **Never let bad news arrive bare.** If the draft delivers a refusal, block, warning, restriction or ban with no acknowledgement in front of it, put one short acknowledging sentence before the outcome ("I know this isn't the answer you were hoping for") and strip any exclamation mark from the bad-news line. One sentence only, no apology for a decision that is correct, and never soften, hedge or change the outcome itself.

@@ -938,3 +938,64 @@ describe("opening, middle and close — a reply has to have a shape", () => {
     expect(out[0].content).toContain("Never invent a step, a check, a review or a timeline just to have an ending")
   })
 })
+
+// Vincenzo, 2026-09-12: a fan billed for two subscriptions said "I was scammed
+// by the site" and the queued draft asked for the card's BIN and last 4 digits
+// so the charges could be verified — on two subscriptions the thread had
+// already identified. The case was answerable on the first reply.
+describe("subscription and free-trial billing — explain it, don't investigate it", () => {
+  const builders: Array<[string, string]> = [
+    ["buildSystemPrompt", buildSystemPrompt(undefined, [], "Vini", [])],
+    ["buildNotionAwareSystemPrompt", buildNotionAwareSystemPrompt(undefined, [], "Vini", [], [pageSnippet])],
+    ["buildImproveSystemPrompt", buildImproveSystemPrompt("Vini")],
+  ]
+
+  it.each(builders)("%s carries the free-trial conversion facts", (_name, out) => {
+    expect(out).toContain("## How Fanvue subscriptions and free trials actually bill")
+    expect(out).toContain("automatically becomes a paid one unless it is cancelled before the trial ends")
+    expect(out).toContain("cancelling at least 24 hours before the renewal date")
+    expect(out).toContain("the payment has gone through and is non-refundable")
+  })
+
+  it.each(builders)("%s explains what a subscription actually buys", (_name, out) => {
+    expect(out).toContain(
+      "it is not a guarantee of future posts, of a posting schedule, or of ongoing activity"
+    )
+    expect(out).toContain("posting rarely, or having less content than the fan hoped is not a refund ground")
+  })
+
+  it.each(builders)("%s gives the exact cancellation path and link", (_name, out) => {
+    expect(out).toContain("Settings → Payments & Subscriptions → Manage My Subscriptions")
+    expect(out).toContain("https://www.fanvue.com/settings/payments/subscriptions")
+    expect(out).toContain("does not reverse a charge already taken")
+  })
+
+  it.each(builders)("%s stops an identified charge from opening a card lookup", (_name, out) => {
+    expect(out).toContain('"Unidentified" means the charge itself is a mystery')
+    expect(out).toContain("Asking that customer for BIN and last 4 is wrong twice over")
+    expect(out).toContain("is the no-ground case, not the fraud case")
+  })
+
+  it.each(builders)("%s lets the first no-refund answer be a full explanation", (_name, out) => {
+    expect(out).toContain("The first no-refund answer is the one that has to be complete")
+    expect(out).toContain("answers the next three messages they were going to send")
+  })
+
+  it.each(builders)("%s still bans coaching the exemption grounds", (_name, out) => {
+    expect(out).toContain("Never list, hint at, or invite the exemption grounds")
+  })
+
+  it("makes the verifier cut the card-digit ask on an identified subscription", () => {
+    const messages: OpenAIMessage[] = [
+      { role: "system", content: "Fan has two active subscriptions; one converted from a free trial." },
+      { role: "user", content: "No i was scammed by the site" },
+    ]
+    const out = buildDraftVerifierMessages(
+      messages,
+      "Could you share the first 6 and last 4 digits of your card so I can verify these transactions?"
+    )
+    expect(out[0].content).toContain("Cut a card-digit ask on a charge the source already identifies")
+    expect(out[0].content).toContain("calling it a scam does not make it unidentified")
+    expect(out[0].content).toContain("Do not shorten a first full billing or policy explanation into a bare verdict")
+  })
+})

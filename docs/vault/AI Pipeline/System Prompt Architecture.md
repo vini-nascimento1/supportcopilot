@@ -80,6 +80,14 @@ Like `PAYMENT_DISPUTE_RULES`, it lives in the prompt rather than only in a playb
 
 The [[Draft Verify Pipeline]] verifier carries the rule as a second gate: on a refund request with no qualifying ground in the source it deletes the stall ("I'll review your refund request", "I'll look into this and come back to you") and deletes any passage naming or fishing for the exemptions, leaving a plain warm no plus the cancellation step. Locked in by `lib/draft-ai.test.ts` ("refund posture — answer up front, never coach the exemptions").
 
+## 3d. Subscription Billing Rules (added 2026-09-12)
+
+`SUBSCRIPTION_BILLING_RULES` — sits directly after the refund-posture block. Every other block in this stack is a prohibition; this one is **facts**, because the failure it fixes was the model reaching for an investigation to fill a space where it had nothing true to say. It carries four things: a free trial takes payment details up front and converts to a paid subscription automatically unless cancelled before the trial ends (cancel at least 24 hours before the renewal date); once a renewal has been processed the payment is non-refundable; a subscription buys **access to the content available at the time of purchase**, not a guarantee of future posts, a posting schedule, or ongoing activity — which is why a quiet or low-output creator is not a refund ground; and the cancellation path (Settings → Payments & Subscriptions → Manage My Subscriptions → "Unsubscribe", direct link `https://www.fanvue.com/settings/payments/subscriptions`), with the explicit note that cancelling stops future renewals and does not reverse a charge already taken. A closing bullet says explaining the mechanism is not conceding it: the explanation never becomes an apology, a hint at an exception, or an offer to look into it.
+
+**Why it exists:** a fan was billed for two subscriptions, replied "no I was scammed by the site" and then "you are scammer I will call my Bank", and the queued draft asked them for the **BIN and last 4 digits of their card** so the transactions could be verified — two subscriptions the thread had already identified. The case was answerable on the first reply. Two existing rules combined to produce it: `PAYMENT_DISPUTE_RULES`' "ask for BIN + last 4 on a charge they don't recognise", and `REFUND_POSTURE_RULES`' carve-out treating a charge reported as unauthorised or fraudulent as a raised ground. Both have now been narrowed in place — "unidentified" means nobody can say what the payment was, not that the customer is angry about one they can name, and "I was scammed" / "I'll call my bank" about their own subscription is the no-ground case, not the fraud case.
+
+The same change adds the counterweight to `GOOD_REPLY_SHAPE`'s "two or three sentences is a finished reply": **the first no-refund answer is the one that has to be complete.** Explaining the mechanism, the policy and the fix in that first reply answers the next three messages the customer was going to send, so it is substance rather than padding; later messages on the same demand get the short firm restatement instead. The [[Draft Verify Pipeline]] verifier carries both halves — it cuts a card-digit ask on a charge the source already identifies, and it is forbidden from compressing a first full billing explanation back into a bare verdict. Locked in by `lib/draft-ai.test.ts` ("subscription and free-trial billing — explain it, don't investigate it").
+
 ## 4. Privacy Rules
 
 The model is told never to use the customer's real name in the reply. The customer's email address is withheld from the model's input entirely — but the model is separately told *whether* an email is on file, so it doesn't ask the customer to provide one redundantly.
@@ -208,7 +216,7 @@ Before/after on the `confirm-and-close` fixture, which reproduces the live 2026-
 
 ## Key files
 
-- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `REPLY_ARC_RULES`, `AGENT_IDENTITY_RULES`, `UNBACKED_COMMITMENT_RULES`, `REFUND_POSTURE_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `greetingToneRule()`, `buildAgentGreeting()`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
+- `lib/draft-ai.ts` — `buildSystemPrompt()`, `RULE_PRECEDENCE`, `GOOD_REPLY_SHAPE`, `REPLY_ARC_RULES`, `AGENT_IDENTITY_RULES`, `UNBACKED_COMMITMENT_RULES`, `REFUND_POSTURE_RULES`, `SUBSCRIPTION_BILLING_RULES`, `CONVERSATION_CLOSURE_RULES`, capability/policy/payment-dispute/privacy rule constants, `REPLY_STYLE_NUDGE`, `greetingToneRule()`, `buildAgentGreeting()`, `toneInstructionSection()`, `buildNotionAwareSystemPrompt()`, `buildImproveSystemPrompt()`, `buildMacroAdaptSystemPrompt()`, `buildDraftVerifierMessages()`, `buildUserMessage()`
 - `scripts/dump-assembled-prompt.mts` — assembled-prompt dump for all four paths
 - `scripts/eval-draft-behavior.mts` — behavioural eval, `--dry-run` / `--self-test` / `--runs=N` / `--scenario=<id>`
 - `lib/draft-ai.test.ts` — "chargeback / bank-dispute guardrail", "refund posture — answer up front, never coach the exemptions", "greeting is injected exactly once", "no keyword-gated confirmations", and "confirm, don't re-open" assert the rules survive prompt refactors
@@ -225,6 +233,7 @@ buildSystemPrompt(playbook, examples, agentName, articles, hasAgentReplied, gree
         ├─ 3. POLICY_INTEGRITY_RULES      (no invented exceptions)
         ├─ 3b. PAYMENT_DISPUTE_RULES      (never send them to a chargeback)
         ├─ 3c. REFUND_POSTURE_RULES       (say no now; never name the exemptions)
+        ├─ 3d. SUBSCRIPTION_BILLING_RULES (how a trial converts; what a sub actually buys)
         ├─ 4. Privacy rule                (no real name; email presence only, not value)
         ├─ 5. English-only instruction    (repeated again on the user message footer)
         ├─ 0a. RULE_PRECEDENCE            (which rule wins when two conflict)
