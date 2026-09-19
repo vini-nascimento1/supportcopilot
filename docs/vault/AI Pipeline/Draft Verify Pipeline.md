@@ -1,7 +1,7 @@
 ---
 title: Draft Verify Pipeline
 tags: [ai, drafting, intercom, reply-queue]
-updated: 2026-08-22
+updated: 2026-09-19
 ---
 
 # Draft Verify Pipeline
@@ -126,6 +126,23 @@ Note that `pg_net` gives up waiting after its default 5s and logs a timeout, whi
 
 `/api/reply-queue/assign` now returns `{ ok, drafted, suggestionOutcome, draftError }` instead of just `{ ok: true }`. `components/canvas/triage-panel.tsx`, `components/canvas/queue-panel.tsx`, and `components/canvas/inbox-panel.tsx` (which loops the same single-assign endpoint for its own bulk action) all read `drafted` and show a warning toast — "Assigned to you, but the draft didn't generate/regenerate — retrying in the background." — instead of unconditionally claiming a draft is on its way. Previously all three claimed success even when the draft had already failed. `app/api/reply-queue/assign-bulk/route.ts` (the Triage panel's own multi-select "Assign N + draft") still reports assignment counts only, not per-conversation draft success — a bulk-assigned conversation whose draft fails is caught by the recovery sweep rather than surfaced in that toast.
 
+## Outdated drafts: when the customer writes again (2026-09-19)
+
+A cached suggestion is only correct for the thread as it stood when it was generated. When the customer replies a second time, the draft answers something they have already moved past — and until this pass, nothing refreshed it. The webhook recompute (`runReplyQueuePipeline`, topic `conversation.user.replied`) was the **only** path that ever replaced an existing draft, and it fails quietly in several ordinary ways: the topic isn't subscribed in the Intercom developer hub, the `after()` work is cut short, or generation throws. Both reconcilers then declined to help, because each skips any conversation already in `haveDraft`. The card simply aged in place — an agent would see "18 min ago" on a ticket the customer had replied to a minute earlier, with a draft written for the older message.
+
+**The signal.** `getNonReadAssignedConversations()` now also returns `lastCustomerReplyAt`, read from the search payload's `statistics.last_contact_reply_at` (falling back to `waiting_since`). This is deliberately *not* `waitingSince`: `waiting_since` is pinned to the moment the thread started waiting on us and does **not** move when the customer writes again while already waiting, so it can't detect this at all.
+
+**The comparison.** `isDraftOutdated(createdAt, lastCustomerReplyAt)` and `selectOutdatedDrafts(pending, live)` in `lib/reply-queue.ts` — pure, unit-tested, and numeric (Postgres returns `+00:00` offsets where `toISOString()` emits `Z`, so a lexical compare is wrong exactly when the timestamps are closest). Unparseable or missing timestamps answer `false`: "can't tell" must not mean "redraft on every poll". There is no grace period here, unlike staling — an outdated draft is a fact about two timestamps, not a race against Intercom's eventually-consistent search index.
+
+**What acts on it.**
+
+- `app/api/reply-queue/route.ts` flags each outdated item (`outdated: true`, plus `lastCustomerReplyAt`) and puts those conversations **first** in the background recompute — ahead of the ones with no draft at all, which at least show a visible "drafting…" placeholder, where an outdated one looks finished and is one click from being sent.
+- Dedup differs for the two cases. A conversation with no draft is deduped by `getRecentlyTouchedConversationIds()` (attempts ∪ recent suggestion rows). An outdated one is deduped by `getConversationsAttemptedSince()` — **attempts only** — because its existing suggestion row is precisely what's stale and must not count as "recently handled". Once the refresh lands, `created_at` moves past the customer's reply and the conversation stops qualifying on its own.
+- `app/api/cron/draft-recovery/route.ts` does the same for agents who don't have the Queue tab open, running outdated ids through the same `filterRecoveryCandidates()` cooloffs as missing ones.
+- The Home briefing (`lib/briefing/sources/intercom.ts`) treats an outdated draft exactly like no draft: `pending: true`, actions `["open"]` only. A stale reply must never be one tap from going out on someone's phone.
+
+**What the agent sees.** Both queue surfaces now show the **customer's** clock (`lastCustomerReplyAt ?? createdAt`) as the row timestamp, with the draft's own age in the tooltip — an agent reads that number as "how long have they been waiting", and showing the draft's age is what made a fresh reply look 18 minutes old. An outdated row carries a "new reply" badge, an inline explanation, and a two-step confirm on send (same pattern as a locked row); the Canvas bulk send skips outdated rows with a warning and counts only the sendable ones in its button label.
+
 ## Retrieval is being replaced (2026-08-09)
 
 The playbook gate + Notion-MCP grounding described below is measurably
@@ -228,11 +245,13 @@ The actual customer send happens through `/api/draft/send` (the same human-gated
 - `lib/ai-throttle.ts` — shared-key throttle + the shared OpenAI client (`openaiFetch()`, `openaiApiKey()`, `openaiBaseUrl()`)
 - `app/api/draft/route.ts` — manual Generate/Improve endpoint
 - `app/api/draft/send/route.ts` — human-gated Intercom send
-- `app/api/reply-queue/route.ts` — Queue GET endpoint; reconciles cached suggestions against live Intercom, backfills missing drafts in the background (`STALE_GRACE_MS`, `BACKFILL_BUDGET_MS`)
+- `app/api/reply-queue/route.ts` — Queue GET endpoint; reconciles cached suggestions against live Intercom, backfills missing drafts and refreshes outdated ones in the background (`STALE_GRACE_MS`, `BACKFILL_BUDGET_MS`)
 - `app/api/reply-queue/assign/route.ts` — human-gated Intercom assignment + inline draft generation; returns `{ drafted, suggestionOutcome, draftError }`
 - `app/api/reply-queue/assign-bulk/route.ts` — bulk assignment + background draft generation (`DRAFT_BUDGET_MS`)
 - `app/api/reply-queue/resolve/route.ts` — queue bookkeeping after a send
-- `app/api/cron/draft-recovery/route.ts` — recovery sweep cron (`draft-recovery-5min`, jobid 7); drafts what the other paths missed and retires drafts whose conversation left the non-read set (`STALE_GRACE_MS`)
+- `app/api/cron/draft-recovery/route.ts` — recovery sweep cron (`draft-recovery-5min`, jobid 7); drafts what the other paths missed, refreshes drafts the customer has written past, and retires drafts whose conversation left the non-read set (`STALE_GRACE_MS`)
 - `app/api/webhooks/intercom/route.ts` — webhook trigger for the autonomous pipeline
+- `lib/reply-queue.ts` — pure routing: risk banding, webhook-topic classification, `selectDepartedDrafts()`, `selectOutdatedDrafts()` / `isDraftOutdated()`
+- `components/queue/queue-actions.ts` — shared client contract for both queue surfaces (`outdated`, `lastCustomerReplyAt`, `isBulkSendable()`)
 
 See also: [[System Prompt Architecture]], [[Canvas Workflow]], [[Triage System]], [[Intercom Integration]], [[Database Schema Reference]], [[Settings and Profile]], [[Automation Rules Engine]].

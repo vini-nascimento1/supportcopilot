@@ -8,7 +8,7 @@ import {
   markSuggestionsStaleByConversations,
 } from "@/lib/reply-queue-store"
 import { computeAndPersistSuggestion } from "@/lib/reply-queue-pipeline"
-import { selectDepartedDrafts } from "@/lib/reply-queue"
+import { selectDepartedDrafts, selectOutdatedDrafts } from "@/lib/reply-queue"
 
 // Draft recovery sweep. Invoked on a schedule by Supabase pg_cron via pg_net
 // with the shared CRON_SECRET header — same pattern as the triage sweep.
@@ -123,9 +123,20 @@ export async function POST(req: Request) {
     const missing = nonRead
       .map((c) => c.id)
       .filter((id) => !haveDraft.has(id) && !seen.has(id))
-    if (missing.length === 0) continue
 
-    const toDraft = await filterRecoveryCandidates(missing, {
+    // Drafts the customer has written past since we generated them. The webhook
+    // recompute is the only other path that refreshes an existing draft, and it
+    // fails quietly (topic not delivered, after() cut short, generation error),
+    // which left an agent looking at a reply to a message the customer had
+    // already superseded. Redrafted here for the agents who don't have the Queue
+    // tab open, same as the missing ones. Ordered first for the same reason as
+    // in the Queue route: a stale draft looks ready to send.
+    const outdated = selectOutdatedDrafts(pending, nonRead).filter((id) => !seen.has(id))
+
+    const candidateIds = [...outdated, ...missing]
+    if (candidateIds.length === 0) continue
+
+    const toDraft = await filterRecoveryCandidates(candidateIds, {
       retryAfterIso,
       failureCooloffIso,
     })

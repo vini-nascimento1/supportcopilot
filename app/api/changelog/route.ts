@@ -16,6 +16,20 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-09-19-a",
+    date: "2026-09-19",
+    title: "Queue drafts refresh when the customer writes again",
+    description:
+      "A draft used to sit there unchanged after the customer sent another message — still answering the older one, and still looking ready to send. Now the Queue notices the newer message, flags the card with a \"new reply\" badge, and regenerates the draft in the background. Until the fresh one lands, sending takes an extra confirm and a bulk send skips those cards, so a stale reply can't go out by accident. The same check runs on the server every few minutes, so it works even when you don't have the Queue open, and a stale draft is no longer offered for one-tap sending on your phone.",
+  },
+  {
+    id: "seed-2026-09-19-b",
+    date: "2026-09-19",
+    title: "The time on a Queue card is the customer's, not the draft's",
+    description:
+      "The timestamp on each Queue row used to show how old the AI draft was, which made a message that arrived a minute ago look like it had been waiting 18 minutes. It now shows when the customer last wrote — the number you actually work from. Hover it to see when the draft itself was written.",
+  },
+  {
     id: "seed-2026-09-12-a",
     date: "2026-09-12",
     title: "Every ticket now shows its tags",

@@ -387,6 +387,10 @@ export function QueuePanel({
 
   const allReadySelected = ready.length > 0 && selectedIds.size === ready.length
   const someReadySelected = selectedIds.size > 0 && !allReadySelected
+  // Outdated drafts are skipped by bulkApproveSend, so the bar must count only
+  // what would actually go out — a selection of 6 that sends 4 reads as a bug.
+  const outdatedSelectedCount = ready.filter((i) => selectedIds.has(i.id) && i.outdated).length
+  const sendableSelectedCount = selectedIds.size - outdatedSelectedCount
   // Native checkbox indeterminate can only be set imperatively, in an effect.
   useEffect(() => {
     if (masterRef.current) masterRef.current.indeterminate = someReadySelected
@@ -441,8 +445,17 @@ export function QueuePanel({
   // immediately via `remove`; failures stay selected so the agent can retry or
   // open the case. Guarded by an inline confirm (irreversible outbound sends).
   const bulkApproveSend = async () => {
-    const targets = ready.filter((i) => selectedIds.has(i.id))
-    if (targets.length === 0) return
+    const selected = ready.filter((i) => selectedIds.has(i.id))
+    // A draft the customer has written past must not go out in a bulk click —
+    // it answers a message they've moved on from. Skipped with a warning; the
+    // row's own confirm is the way to send one deliberately.
+    const targets = selected.filter((i) => !i.outdated)
+    const skippedOutdated = selected.length - targets.length
+    if (targets.length === 0) {
+      setConfirmBulkSend(false)
+      if (skippedOutdated > 0) toast.warning(outdatedSkippedWarning(skippedOutdated))
+      return
+    }
     setBulkActing(true)
     let sent = 0
     let failed = 0
@@ -463,6 +476,7 @@ export function QueuePanel({
     setBulkActing(false)
     if (sent > 0) toast.success(`Sent ${sent}`)
     if (failed > 0) toast.warning(`${failed} couldn't send`)
+    if (skippedOutdated > 0) toast.warning(outdatedSkippedWarning(skippedOutdated))
     // Some sends went out but the queue-clearing resolve failed — reconcile.
     if (resolveFailed) void load()
   }
@@ -532,6 +546,9 @@ export function QueuePanel({
 
   const lockedSkippedWarning = (n: number) =>
     `${n} locked draft${n > 1 ? "s" : ""} skipped — open each one and confirm after checking fadmin`
+
+  const outdatedSkippedWarning = (n: number) =>
+    `${n} draft${n > 1 ? "s" : ""} skipped — the customer replied after ${n > 1 ? "they were" : "it was"} written, so ${n > 1 ? "they're" : "it's"} being regenerated`
 
   // The "On request" band has no separate needs_check split like "Ready to
   // send" does, so a bulk send must not forward locked rows — each of those
@@ -874,6 +891,16 @@ export function QueuePanel({
       {selectedIds.size > 0 && (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-muted/40 px-2 py-2">
           <span className="text-xs font-medium tabular-nums">{selectedIds.size} selected</span>
+          {outdatedSelectedCount > 0 && (
+            <Badge
+              variant="outline"
+              className="h-4 gap-1 border-sky-500/40 px-1 text-[10px] font-normal text-sky-700 dark:text-sky-400"
+              title="The customer replied after these drafts were written — they're being regenerated, so a bulk send skips them"
+            >
+              <RotateCwIcon className="size-2.5" />
+              {outdatedSelectedCount} outdated
+            </Badge>
+          )}
           <button
             type="button"
             onClick={clearBulkSelection}
@@ -884,7 +911,7 @@ export function QueuePanel({
           {confirmBulkSend ? (
             <div className="ml-auto flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground">
-                Approve &amp; send {selectedIds.size}?
+                Approve &amp; send {sendableSelectedCount}?
               </span>
               <Button
                 size="sm"
@@ -933,7 +960,7 @@ export function QueuePanel({
                 title="Send is an irreversible outbound message to the customer"
               >
                 <SendIcon className="size-3.5" />
-                Approve &amp; send {selectedIds.size}
+                Approve &amp; send {sendableSelectedCount}
               </Button>
             </div>
           )}
@@ -1089,6 +1116,11 @@ function QueueRow({
 }) {
   const nav = useCanvasNav()
   const locked = item.riskBand === "needs_check"
+  // The customer replied after this draft was written (server-computed against
+  // Intercom's last_contact_reply_at). The refreshed draft is already being
+  // generated in the background, but until it lands this one must not go out on
+  // a single click.
+  const outdated = Boolean(item.outdated)
   const unassigned = item.ownerId === null
   const caseHref = `/cases/${item.intercomConversationId}/canvas`
   const [expanded, setExpanded] = useState(false)
@@ -1128,7 +1160,7 @@ function QueueRow({
   }
 
   const onApprove = () => {
-    if (locked && !confirming) {
+    if ((locked || outdated) && !confirming) {
       setConfirming(true)
       return
     }
@@ -1227,8 +1259,24 @@ function QueueRow({
                 needs check
               </Badge>
             )}
-            <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground">
-              {relativeTime(item.createdAt)}
+            {outdated && (
+              <Badge
+                variant="outline"
+                className="h-4 shrink-0 gap-1 border-sky-500/40 px-1 text-[10px] font-normal text-sky-700 dark:text-sky-400"
+                title="The customer replied after this draft was written — a fresh draft is being generated"
+              >
+                <RotateCwIcon className="size-2.5" />
+                new reply
+              </Badge>
+            )}
+            {/* The customer's clock, not the draft's. An agent reads this row
+                as "how long have they been waiting", and showing the draft's
+                age made a freshly-arrived reply look 18 minutes old. */}
+            <span
+              className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground"
+              title={`Customer wrote ${relativeTime(item.lastCustomerReplyAt ?? item.createdAt)} · draft written ${relativeTime(item.createdAt)}`}
+            >
+              {relativeTime(item.lastCustomerReplyAt ?? item.createdAt)}
             </span>
           </span>
           {item.subject && (
@@ -1401,6 +1449,13 @@ function QueueRow({
             <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <ShieldAlertIcon className="size-3.5 shrink-0" />
               Verify payout / KYC / media in fadmin before sending.
+            </p>
+          )}
+          {outdated && !confirming && !unassigned && (
+            <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <RotateCwIcon className="size-3.5 shrink-0" />
+              The customer replied after this draft was written — a refreshed draft is on its way.
+              Open the case if you need the latest message now.
             </p>
           )}
         </div>

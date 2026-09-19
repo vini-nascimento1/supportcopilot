@@ -9,6 +9,8 @@ import {
   classifyWebhookTopic,
   hasBodyChanged,
   selectDepartedDrafts,
+  selectOutdatedDrafts,
+  isDraftOutdated,
   STALE_GRACE_MS,
   LOCKED_CATEGORIES,
 } from "./reply-queue"
@@ -260,5 +262,55 @@ describe("selectDepartedDrafts", () => {
       draft({ intercomConversationId: "too-fresh", createdAt: fresh }),
     ]
     expect(selectDepartedDrafts(pending, new Set(["still-waiting"]), NOW)).toEqual(["departed"])
+  })
+})
+
+describe("isDraftOutdated", () => {
+  const DRAFTED = "2026-09-19T10:00:00.000Z"
+
+  it("is true when the customer wrote after the draft was generated", () => {
+    expect(isDraftOutdated(DRAFTED, "2026-09-19T10:04:00.000Z")).toBe(true)
+  })
+
+  it("is false when the draft already covers the latest message", () => {
+    expect(isDraftOutdated(DRAFTED, "2026-09-19T09:58:00.000Z")).toBe(false)
+    // Same instant — the draft was written from that very message.
+    expect(isDraftOutdated(DRAFTED, DRAFTED)).toBe(false)
+  })
+
+  it("is false when either timestamp is missing or unparseable", () => {
+    expect(isDraftOutdated(DRAFTED, null)).toBe(false)
+    expect(isDraftOutdated(DRAFTED, undefined)).toBe(false)
+    expect(isDraftOutdated(null, "2026-09-19T10:04:00.000Z")).toBe(false)
+    expect(isDraftOutdated("not a date", "2026-09-19T10:04:00.000Z")).toBe(false)
+  })
+
+  // Postgres returns "+00:00" offsets while Date#toISOString emits "Z" — the
+  // comparison has to be numeric, not lexical (same bug class as
+  // filterRecoveryCandidates).
+  it("compares instants, not strings", () => {
+    expect(isDraftOutdated("2026-09-19T10:00:00+00:00", "2026-09-19T10:04:00.000Z")).toBe(true)
+    expect(isDraftOutdated("2026-09-19T10:05:00.000Z", "2026-09-19T10:04:00+00:00")).toBe(false)
+  })
+})
+
+describe("selectOutdatedDrafts", () => {
+  const pending = [
+    { intercomConversationId: "moved-on", createdAt: "2026-09-19T10:00:00.000Z" },
+    { intercomConversationId: "current", createdAt: "2026-09-19T10:10:00.000Z" },
+    { intercomConversationId: "not-live", createdAt: "2026-09-19T10:00:00.000Z" },
+  ]
+  const live = [
+    { id: "moved-on", lastCustomerReplyAt: "2026-09-19T10:06:00.000Z" },
+    { id: "current", lastCustomerReplyAt: "2026-09-19T10:06:00.000Z" },
+  ]
+
+  it("returns only drafts the customer has written past", () => {
+    expect(selectOutdatedDrafts(pending, live)).toEqual(["moved-on"])
+  })
+
+  it("ignores conversations missing from the live set or lacking a reply time", () => {
+    expect(selectOutdatedDrafts(pending, [])).toEqual([])
+    expect(selectOutdatedDrafts(pending, [{ id: "moved-on", lastCustomerReplyAt: null }])).toEqual([])
   })
 })

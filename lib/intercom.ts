@@ -51,11 +51,14 @@ type IntercomConversation = {
   // null once a teammate replies. This — not `read` (which tracks whether an
   // admin opened it) — is the true "non-read / waiting on us" signal.
   waiting_since?: number | null
-  // Intercom's search API embeds a statistics block. We only need the last
-  // admin reply time (unix seconds) to clock customer silence for the inbox
-  // SLA staleness colouring.
+  // Intercom's search API embeds a statistics block. We need the last admin
+  // reply time (unix seconds) to clock customer silence for the inbox SLA
+  // staleness colouring, and the last CONTACT reply time to tell whether a
+  // cached AI draft predates the customer's newest message (see the reply
+  // queue's outdated-draft reconciliation).
   statistics?: {
     last_admin_reply_at?: number | null
+    last_contact_reply_at?: number | null
   } | null
   title?: string | null
   conversation_message?: {
@@ -535,6 +538,14 @@ export type NonReadConversation = {
       Queue tab tell a fresh "drafting…" placeholder from one that's been stuck
       for a while (the autonomous pipeline kept failing silently). */
   waitingSince: string | null
+  /** ISO time of the customer's MOST RECENT message (statistics.last_contact_reply_at).
+      Distinct from waitingSince, which is pinned to the moment the thread started
+      waiting on us and does NOT move when the customer writes again while already
+      waiting. This is the clock the reply queue compares a cached draft against:
+      a draft written before this timestamp was composed without the customer's
+      latest message and must be redrafted. Falls back to waiting_since when
+      Intercom omits the statistics block. */
+  lastCustomerReplyAt: string | null
 }
 
 // The conversations currently assigned to `adminId`, open, and NON-READ (waiting
@@ -598,6 +609,8 @@ export async function getNonReadAssignedConversations(
             customer: getCustomerLabel(c),
             subject: getSnippet(c),
             waitingSince: toDate(c.waiting_since),
+            lastCustomerReplyAt:
+              toDate(c.statistics?.last_contact_reply_at) ?? toDate(c.waiting_since),
           })
         }
       }

@@ -14,6 +14,7 @@ const conversation = (over: Partial<NonReadConversation> = {}): NonReadConversat
   customer: "Ada Lovelace",
   subject: "My payout is still pending after four days",
   waitingSince: new Date(NOW - 26 * 60_000).toISOString(),
+  lastCustomerReplyAt: new Date(NOW - 26 * 60_000).toISOString(),
   ...over,
 })
 
@@ -69,6 +70,19 @@ describe("toTicketItem", () => {
 
   it("marks an undrafted conversation pending with no prepared reply", () => {
     const item = toTicketItem(conversation(), null, NOW)
+    expect(item.pending).toBe(true)
+    expect(item.prepared).toBeUndefined()
+    expect(item.actions).toEqual(["open"])
+  })
+
+  // A draft written before the customer's newest message answers something
+  // they've moved past — it must not be one tap from sending on the phone.
+  it("holds back a draft the customer has already written past", () => {
+    const item = toTicketItem(
+      conversation({ lastCustomerReplyAt: new Date(NOW - 2 * 60_000).toISOString() }),
+      queueItem({ createdAt: new Date(NOW - 20 * 60_000).toISOString() }),
+      NOW
+    )
     expect(item.pending).toBe(true)
     expect(item.prepared).toBeUndefined()
     expect(item.actions).toEqual(["open"])

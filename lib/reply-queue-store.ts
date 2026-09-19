@@ -297,6 +297,27 @@ export async function getRecentlyTouchedConversationIds(
   return touched
 }
 
+// Conversations (from the given set) whose last drafting ATTEMPT started at or
+// after `sinceIso` — regardless of whether it produced a row. Used to dedup the
+// refresh of an OUTDATED draft, where the existing suggestion row can't serve as
+// the dedup signal: that row is exactly what's stale, so only an attempt made
+// since tells us a refresh is already in flight (or just failed and should wait
+// out the window). Compare-as-epoch happens in Postgres here, not in JS.
+export async function getConversationsAttemptedSince(
+  conversationIds: string[],
+  sinceIso: string
+): Promise<Set<string>> {
+  if (conversationIds.length === 0) return new Set()
+  const db = getSupabaseAdminClient()
+  if (!db) return new Set()
+  const { data } = await db
+    .from("reply_queue_attempts")
+    .select("intercom_conversation_id")
+    .in("intercom_conversation_id", conversationIds)
+    .gte("attempted_at", sinceIso)
+  return new Set((data ?? []).map((r) => r.intercom_conversation_id as string))
+}
+
 // Which of these conversations the recovery sweep should actually redraft.
 // Two different clocks, because two different failures need different patience:
 //   • `retryAfterIso` — anything touched since then is either in flight or just

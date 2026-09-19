@@ -31,6 +31,16 @@ export type QueueItem = {
   confidence: number | null
   riskBand: RiskBand
   createdAt: string
+  /** The customer wrote again AFTER this draft was generated, so it answers a
+      message they have already moved past. Set by GET /api/reply-queue, which
+      also queues the conversation for an immediate redraft. Both surfaces flag
+      it and make the send take a confirm — a stale draft otherwise looks
+      exactly like a ready one. */
+  outdated?: boolean
+  /** ISO time of the customer's latest message (Intercom last_contact_reply_at).
+      This — not createdAt, the draft's own age — is what the row's "waiting"
+      timestamp means to an agent. */
+  lastCustomerReplyAt?: string | null
 }
 
 // A non-read conversation whose AI draft is still being generated (no ready row
@@ -58,6 +68,11 @@ export const byOldest = (a: QueueItem, b: QueueItem) =>
 
 /** True for a draft the server will refuse to send without a fadmin check. */
 export const isLocked = (item: QueueItem) => item.riskBand === "needs_check"
+
+/** Drafts a bulk send must skip: locked ones need their own fadmin confirm, and
+    outdated ones were written before the customer's latest message. */
+export const isBulkSendable = (item: QueueItem) =>
+  item.riskBand !== "needs_check" && !item.outdated
 
 /**
  * Read GET /api/reply-queue into the shape above, tolerating a partial or

@@ -170,6 +170,75 @@ export function selectDepartedDrafts(
     .map((p) => p.intercomConversationId)
 }
 
+// ── Outdated drafts (the customer wrote again after we drafted) ────────────
+//
+// A cached suggestion is only correct for the thread as it stood when it was
+// generated. When the customer replies again, the draft answers a question
+// they have already moved past — but nothing retired it: the webhook recompute
+// is the only path that refreshes an existing draft, and it silently does
+// nothing whenever the topic isn't delivered, the background `after()` work is
+// cut short, or generation fails. Both reconcilers (the Queue route and the
+// recovery sweep) skip any conversation that already HAS a pending row, so the
+// stale draft then sat there indefinitely while the card aged.
+//
+// So the reconcilers compare the draft's own created_at against the customer's
+// last message time and redraft when the thread has moved on.
+
+export type OutdatedDraftInput = {
+  intercomConversationId: string
+  createdAt: string
+}
+
+/** The customer-side clock for one live conversation, as Intercom reports it. */
+export type LiveCustomerActivity = {
+  id: string
+  lastCustomerReplyAt: string | null
+}
+
+// Was this draft written before the customer's latest message? Unparseable or
+// missing timestamps answer false — "can't tell" must not mean "redraft it on
+// every poll" (nor, on the Home briefing, "hide a perfectly good draft").
+export function isDraftOutdated(
+  draftCreatedAt: string | null | undefined,
+  lastCustomerReplyAt: string | null | undefined
+): boolean {
+  const createdMs = Date.parse(draftCreatedAt ?? "")
+  const replyMs = Date.parse(lastCustomerReplyAt ?? "")
+  if (!Number.isFinite(createdMs) || !Number.isFinite(replyMs)) return false
+  return createdMs < replyMs
+}
+
+// Which pending drafts were written BEFORE the customer's latest message, and
+// so no longer answer the live thread. Pure, for the same reason
+// selectDepartedDrafts is: getting it wrong either burns a generation on every
+// poll or leaves agents sending replies that ignore what the customer just said.
+//
+// Deliberately no grace period here, unlike staling: an outdated draft is not a
+// race against Intercom's eventually-consistent search index, it is a fact
+// about two timestamps. Repeat work is bounded elsewhere — the caller's
+// attempt-marker recency guard stops the next poll redrafting the same
+// conversation while a recompute is in flight.
+export function selectOutdatedDrafts(
+  pending: readonly OutdatedDraftInput[],
+  live: readonly LiveCustomerActivity[]
+): string[] {
+  const lastReplyById = new Map<string, number>()
+  for (const c of live) {
+    const ms = Date.parse(c.lastCustomerReplyAt ?? "")
+    if (Number.isFinite(ms)) lastReplyById.set(c.id, ms)
+  }
+
+  return pending
+    .filter((p) => {
+      const lastReplyMs = lastReplyById.get(p.intercomConversationId)
+      if (lastReplyMs == null) return false
+      const createdMs = Date.parse(p.createdAt)
+      if (!Number.isFinite(createdMs)) return false
+      return createdMs < lastReplyMs
+    })
+    .map((p) => p.intercomConversationId)
+}
+
 // Map an Intercom webhook topic to the actor whose action it represents:
 //   conversation.user.created / .user.replied / contact.* / lead.* -> "customer"  (recompute)
 //   conversation.admin.replied (an agent answered)                 -> "agent_reply" (leaves the queue)

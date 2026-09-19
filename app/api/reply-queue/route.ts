@@ -7,9 +7,10 @@ import {
   getPendingSuggestionsForAgent,
   markSuggestionsStaleByConversations,
   getRecentlyTouchedConversationIds,
+  getConversationsAttemptedSince,
 } from "@/lib/reply-queue-store"
 import { computeAndPersistSuggestion } from "@/lib/reply-queue-pipeline"
-import { selectDepartedDrafts } from "@/lib/reply-queue"
+import { selectDepartedDrafts, selectOutdatedDrafts } from "@/lib/reply-queue"
 
 export const dynamic = "force-dynamic"
 // The backfill loop below runs inside after(), which is still bound by the
@@ -78,7 +79,23 @@ export async function GET(request: Request) {
     }
 
     const nonReadIds = new Set(nonRead.map((c) => c.id))
-    const items = pending.filter((p) => nonReadIds.has(p.intercomConversationId))
+
+    // Drafts the customer has already written past — see selectOutdatedDrafts.
+    // They stay visible (an agent mid-review shouldn't have the card vanish),
+    // but they are flagged so the UI can say the draft is behind the thread,
+    // and they are first in line for the background recompute below.
+    const outdatedIds = new Set(selectOutdatedDrafts(pending, nonRead))
+    const lastCustomerReplyById = new Map(
+      nonRead.map((c) => [c.id, c.lastCustomerReplyAt] as const)
+    )
+
+    const items = pending
+      .filter((p) => nonReadIds.has(p.intercomConversationId))
+      .map((p) => ({
+        ...p,
+        outdated: outdatedIds.has(p.intercomConversationId),
+        lastCustomerReplyAt: lastCustomerReplyById.get(p.intercomConversationId) ?? null,
+      }))
 
     // On-request drafts the agent generated from the Inbox for conversations that
     // are NOT non-read — i.e. already-read tickets they deliberately drafted.
@@ -108,6 +125,7 @@ export async function GET(request: Request) {
     // group even once the ticket is read. Both guards live in the shared helper.
     const noLongerNonRead = selectDepartedDrafts(pending, nonReadIds, Date.now())
     const missing = drafting.map((d) => d.conversationId)
+    const outdated = [...outdatedIds]
     const url = new URL(request.url)
     const origin = url.origin
     // ?force=1 (the manual "Refresh" button) bypasses the recency guard so the
@@ -120,12 +138,26 @@ export async function GET(request: Request) {
         if (noLongerNonRead.length > 0) {
           await markSuggestionsStaleByConversations(agentId, noLongerNonRead)
         }
-        if (missing.length > 0) {
-          let toCompute = missing
+        if (missing.length > 0 || outdated.length > 0) {
+          // Outdated first: a conversation with no draft at all shows a visible
+          // "drafting…" placeholder, while an outdated one looks finished and is
+          // one click away from being sent at a customer who has moved on.
+          let toCompute = [...outdated, ...missing]
           if (!force) {
             const sinceIso = new Date(Date.now() - BACKFILL_WINDOW_MS).toISOString()
-            const recent = await getRecentlyTouchedConversationIds(missing, sinceIso)
-            toCompute = missing.filter((id) => !recent.has(id))
+            // Two different dedup signals. For a conversation with NO draft,
+            // a recent suggestion row also counts as touched. For an outdated
+            // one it must not: its existing row is precisely what's stale, so
+            // only a recent ATTEMPT (written before the LLM work) means a
+            // refresh is already in flight or just failed.
+            const [recent, attempted] = await Promise.all([
+              getRecentlyTouchedConversationIds(missing, sinceIso),
+              getConversationsAttemptedSince(outdated, sinceIso),
+            ])
+            toCompute = [
+              ...outdated.filter((id) => !attempted.has(id)),
+              ...missing.filter((id) => !recent.has(id)),
+            ]
           }
           const deadline = Date.now() + BACKFILL_BUDGET_MS
           for (const id of toCompute.slice(0, BACKFILL_MAX)) {

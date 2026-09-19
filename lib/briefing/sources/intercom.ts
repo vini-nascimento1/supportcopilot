@@ -2,6 +2,7 @@ import "server-only"
 
 import { getNonReadAssignedConversations, type NonReadConversation } from "@/lib/intercom"
 import { getPendingSuggestionsForAgent, type QueueItem } from "@/lib/reply-queue-store"
+import { isDraftOutdated } from "@/lib/reply-queue"
 import type {
   AttentionItem,
   PreparedSource,
@@ -81,6 +82,11 @@ export function toTicketItem(
   tags?: readonly string[] | null
 ): AttentionItem {
   const customer = firstNameOf(conversation.customer, "a customer")
+  // A draft written before the customer's latest message answers something they
+  // have moved past; a refresh is already queued (Queue route + recovery sweep).
+  // Treated exactly like having no draft yet, so the card can't offer a one-tap
+  // send of a stale reply from someone's phone.
+  const usable = draft && !isDraftOutdated(draft.createdAt, conversation.lastCustomerReplyAt) ? draft : null
   const base: AttentionItem = {
     id: `intercom:${conversation.id}`,
     source: "intercom",
@@ -95,22 +101,22 @@ export function toTicketItem(
     whenLabel: waitingLabel(conversation.waitingSince, nowMs),
     deepLink: intercomDeepLink(conversation.id),
     externalId: conversation.id,
-    actions: draft ? ["reply", "open"] : ["open"],
+    actions: usable ? ["reply", "open"] : ["open"],
   }
 
-  if (!draft) return { ...base, pending: true }
+  if (!usable) return { ...base, pending: true }
 
-  const lockReason = deriveLockReason({ band: draft.riskBand, tags })
+  const lockReason = deriveLockReason({ band: usable.riskBand, tags })
 
   return {
     ...base,
     prepared: {
       kind: "draft",
-      body: draft.body,
-      suggestionId: draft.id,
-      band: draft.riskBand,
+      body: usable.body,
+      suggestionId: usable.id,
+      band: usable.riskBand,
       ...(lockReason ? { lockReason } : {}),
-      sources: toPreparedSources(draft.sources),
+      sources: toPreparedSources(usable.sources),
     },
   }
 }
