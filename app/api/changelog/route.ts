@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-09-23-a",
+    date: "2026-09-23",
+    title: "A new customer message clears the old draft right away",
+    description:
+      "When a customer writes again, the Queue no longer keeps showing the old draft with a \"new reply\" badge. The card switches straight to \"Drafting…\", the same as any reply being written, and the fresh draft appears in its place once it's ready. There's nothing stale left on screen to send by mistake.",
+  },
+  {
     id: "seed-2026-09-19-a",
     date: "2026-09-19",
     title: "Queue drafts refresh when the customer writes again",

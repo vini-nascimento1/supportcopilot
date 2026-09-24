@@ -81,19 +81,23 @@ export async function GET(request: Request) {
     const nonReadIds = new Set(nonRead.map((c) => c.id))
 
     // Drafts the customer has already written past — see selectOutdatedDrafts.
-    // They stay visible (an agent mid-review shouldn't have the card vanish),
-    // but they are flagged so the UI can say the draft is behind the thread,
-    // and they are first in line for the background recompute below.
+    // They answer a message the customer has moved on from, so they are pulled
+    // out of the ready bands and shown as "drafting…", exactly like a
+    // conversation with no draft, while the background recompute below
+    // (outdated first) writes the fresh one. Flagging them in place still left
+    // a stale reply on screen, one confirm away from going out.
     const outdatedIds = new Set(selectOutdatedDrafts(pending, nonRead))
     const lastCustomerReplyById = new Map(
       nonRead.map((c) => [c.id, c.lastCustomerReplyAt] as const)
     )
 
     const items = pending
-      .filter((p) => nonReadIds.has(p.intercomConversationId))
+      .filter(
+        (p) =>
+          nonReadIds.has(p.intercomConversationId) && !outdatedIds.has(p.intercomConversationId)
+      )
       .map((p) => ({
         ...p,
-        outdated: outdatedIds.has(p.intercomConversationId),
         lastCustomerReplyAt: lastCustomerReplyById.get(p.intercomConversationId) ?? null,
       }))
 
@@ -106,11 +110,12 @@ export async function GET(request: Request) {
       (p) => p.onRequest && !nonReadIds.has(p.intercomConversationId)
     )
 
-    // Non-read conversations with no ready draft yet — surfaced to the UI as
-    // "drafting…" placeholders and (re)generated in the background below.
+    // Non-read conversations with no usable draft yet (none at all, or an
+    // outdated one) — surfaced to the UI as "drafting…" placeholders and
+    // (re)generated in the background below.
     const haveDraft = new Set(pending.map((p) => p.intercomConversationId))
     const drafting = nonRead
-      .filter((c) => !haveDraft.has(c.id))
+      .filter((c) => !haveDraft.has(c.id) || outdatedIds.has(c.id))
       .map((c) => ({
         conversationId: c.id,
         customerName: c.customer,
@@ -124,8 +129,10 @@ export async function GET(request: Request) {
     // durable (the agent asked for them) and keep living in the "On request"
     // group even once the ticket is read. Both guards live in the shared helper.
     const noLongerNonRead = selectDepartedDrafts(pending, nonReadIds, Date.now())
-    const missing = drafting.map((d) => d.conversationId)
     const outdated = [...outdatedIds]
+    const missing = drafting
+      .map((d) => d.conversationId)
+      .filter((id) => !outdatedIds.has(id))
     const url = new URL(request.url)
     const origin = url.origin
     // ?force=1 (the manual "Refresh" button) bypasses the recency guard so the
@@ -139,9 +146,8 @@ export async function GET(request: Request) {
           await markSuggestionsStaleByConversations(agentId, noLongerNonRead)
         }
         if (missing.length > 0 || outdated.length > 0) {
-          // Outdated first: a conversation with no draft at all shows a visible
-          // "drafting…" placeholder, while an outdated one looks finished and is
-          // one click away from being sent at a customer who has moved on.
+          // Outdated first: the agent already had a draft for these and just
+          // watched it turn back into "drafting…", so they're the ones waiting.
           let toCompute = [...outdated, ...missing]
           if (!force) {
             const sinceIso = new Date(Date.now() - BACKFILL_WINDOW_MS).toISOString()

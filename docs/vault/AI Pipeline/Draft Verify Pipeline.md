@@ -136,12 +136,12 @@ A cached suggestion is only correct for the thread as it stood when it was gener
 
 **What acts on it.**
 
-- `app/api/reply-queue/route.ts` flags each outdated item (`outdated: true`, plus `lastCustomerReplyAt`) and puts those conversations **first** in the background recompute — ahead of the ones with no draft at all, which at least show a visible "drafting…" placeholder, where an outdated one looks finished and is one click from being sent.
+- `app/api/reply-queue/route.ts` drops each outdated draft from `items` and lists its conversation in `drafting` instead, so both queue surfaces show the same "drafting…" skeleton they show for a conversation with no draft. Those conversations go **first** in the background recompute, ahead of the ones that never had a draft: the agent just watched their card turn back into a placeholder.
 - Dedup differs for the two cases. A conversation with no draft is deduped by `getRecentlyTouchedConversationIds()` (attempts ∪ recent suggestion rows). An outdated one is deduped by `getConversationsAttemptedSince()` — **attempts only** — because its existing suggestion row is precisely what's stale and must not count as "recently handled". Once the refresh lands, `created_at` moves past the customer's reply and the conversation stops qualifying on its own.
 - `app/api/cron/draft-recovery/route.ts` does the same for agents who don't have the Queue tab open, running outdated ids through the same `filterRecoveryCandidates()` cooloffs as missing ones.
 - The Home briefing (`lib/briefing/sources/intercom.ts`) treats an outdated draft exactly like no draft: `pending: true`, actions `["open"]` only. A stale reply must never be one tap from going out on someone's phone.
 
-**What the agent sees.** Both queue surfaces now show the **customer's** clock (`lastCustomerReplyAt ?? createdAt`) as the row timestamp, with the draft's own age in the tooltip — an agent reads that number as "how long have they been waiting", and showing the draft's age is what made a fresh reply look 18 minutes old. An outdated row carries a "new reply" badge, an inline explanation, and a two-step confirm on send (same pattern as a locked row); the Canvas bulk send skips outdated rows with a warning and counts only the sendable ones in its button label.
+**What the agent sees.** Both queue surfaces now show the **customer's** clock (`lastCustomerReplyAt ?? createdAt`) as the row timestamp, with the draft's own age in the tooltip — an agent reads that number as "how long have they been waiting", and showing the draft's age is what made a fresh reply look 18 minutes old. An outdated draft is never shown at all: within one poll (15 s on the Canvas Queue) of Intercom reporting the customer's new message, the card becomes a "Drafting…" skeleton until the refreshed draft lands, and falls into the usual stuck/Retry card if that takes longer than `AUTONOMOUS_STUCK_AFTER_MS`. (The first version, 2026-09-19, kept the stale draft visible behind a "new reply" badge and a send confirm; replaced 2026-09-23 because a stale reply on screen was still one confirm from going out.)
 
 ## Retrieval is being replaced (2026-08-09)
 
@@ -252,6 +252,6 @@ The actual customer send happens through `/api/draft/send` (the same human-gated
 - `app/api/cron/draft-recovery/route.ts` — recovery sweep cron (`draft-recovery-5min`, jobid 7); drafts what the other paths missed, refreshes drafts the customer has written past, and retires drafts whose conversation left the non-read set (`STALE_GRACE_MS`)
 - `app/api/webhooks/intercom/route.ts` — webhook trigger for the autonomous pipeline
 - `lib/reply-queue.ts` — pure routing: risk banding, webhook-topic classification, `selectDepartedDrafts()`, `selectOutdatedDrafts()` / `isDraftOutdated()`
-- `components/queue/queue-actions.ts` — shared client contract for both queue surfaces (`outdated`, `lastCustomerReplyAt`, `isBulkSendable()`)
+- `components/queue/queue-actions.ts` — shared client contract for both queue surfaces (`lastCustomerReplyAt`, `DraftingItem`)
 
 See also: [[System Prompt Architecture]], [[Canvas Workflow]], [[Triage System]], [[Intercom Integration]], [[Database Schema Reference]], [[Settings and Profile]], [[Automation Rules Engine]].

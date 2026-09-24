@@ -314,7 +314,6 @@ function QueueCard({
         )}
         <span className="flex flex-wrap items-center gap-1.5">
           {locked && <StatusTag tone="warn">Locked</StatusTag>}
-          {item.outdated && <StatusTag tone="warn">New reply</StatusTag>}
           {item.riskBand === "low_confidence" && <StatusTag>Review</StatusTag>}
           {unassigned && <Tag>Unassigned</Tag>}
         </span>
@@ -329,18 +328,6 @@ function QueueCard({
                 <b className="block font-semibold text-foreground">Verify in fadmin before sending</b>
                 {LOCK_REASON_GENERIC} fadmin opens in the desktop app; once you have checked, you can
                 send from here.
-              </div>
-            </div>
-          )}
-
-          {item.outdated && (
-            <div className="mb-2.5 flex min-w-0 items-start gap-2.5 rounded-md border bg-card px-3 py-2.5 text-[12.5px] leading-snug text-muted-foreground">
-              <RotateCwIcon className="mt-0.5 size-3.5 shrink-0 text-foreground" />
-              <div className="min-w-0">
-                <b className="block font-semibold text-foreground">The customer replied again</b>
-                This draft was written before their latest message, so it answers something they
-                have moved past. A refreshed draft is being generated — open the case if you need
-                the latest message now.
               </div>
             </div>
           )}
