@@ -3,8 +3,12 @@ import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 
 export async function GET(request: Request) {
-  const { origin } = new URL(request.url)
+  const { origin, searchParams } = new URL(request.url)
   const cookieStore = await cookies()
+  // Set by the callback when the stored Google refresh token is gone (revoked
+  // or never issued): re-run sign-in with the consent screen to get a new one.
+  const forceConsent = searchParams.get("consent") === "1"
+  if (forceConsent) cookieStore.delete("gauth_consented")
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -28,7 +32,8 @@ export async function GET(request: Request) {
   // need it to guarantee a refresh_token comes back. Once `gauth_consented`
   // is set (see callback route), skip `prompt` entirely so returning agents
   // aren't re-shown the same permission screen on every login.
-  const hasConsentedBefore = cookieStore.get("gauth_consented")?.value === "1"
+  const hasConsentedBefore =
+    !forceConsent && cookieStore.get("gauth_consented")?.value === "1"
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",

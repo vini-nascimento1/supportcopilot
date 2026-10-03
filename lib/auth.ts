@@ -166,7 +166,10 @@ export async function refreshGoogleToken(email: string): Promise<string | null> 
 
   const clientId = process.env.GOOGLE_CLIENT_ID
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET
-  if (!clientId || !clientSecret) return null
+  if (!clientId || !clientSecret) {
+    console.error("Google token refresh skipped: GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET not set")
+    return null
+  }
 
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
@@ -179,8 +182,20 @@ export async function refreshGoogleToken(email: string): Promise<string | null> 
         client_secret: clientSecret,
       }),
     })
-    const json = (await res.json()) as { access_token?: string }
-    if (!json.access_token) return null
+    const json = (await res.json()) as { access_token?: string; error?: string }
+    if (!json.access_token) {
+      // Log only Google's error code, never token material.
+      console.error(`Google token refresh failed: ${json.error ?? `HTTP ${res.status}`}`)
+      // invalid_grant = refresh token revoked/expired. Drop it so the next
+      // sign-in forces the consent screen and stores a fresh one (see callback).
+      if (json.error === "invalid_grant") {
+        await adminClient
+          .from("agents")
+          .update({ google_refresh_token: null })
+          .eq("email", email)
+      }
+      return null
+    }
 
     await adminClient
       .from("agents")

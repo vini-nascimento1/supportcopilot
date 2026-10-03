@@ -62,6 +62,19 @@ export async function GET(request: Request) {
         .from("agents")
         .update({ google_refresh_token: data.session.provider_refresh_token })
         .eq("email", email)
+    } else if (cookieStore.get("gauth_consented")?.value === "1") {
+      // Consent screen was skipped, so Google sent no refresh token. If none is
+      // stored either (revoked → cleared by refreshGoogleToken), Gmail would
+      // break an hour from now: re-run login once with the consent screen.
+      // /api/auth/login?consent=1 clears gauth_consented, so this can't loop.
+      const { data: tokenRow } = await adminClient
+        .from("agents")
+        .select("google_refresh_token")
+        .eq("email", email)
+        .maybeSingle()
+      if (!tokenRow?.google_refresh_token) {
+        return NextResponse.redirect(new URL("/api/auth/login?consent=1", origin))
+      }
     }
 
     const { error: userIdError } = await adminClient

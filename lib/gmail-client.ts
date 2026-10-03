@@ -2,6 +2,8 @@ import "server-only"
 
 import { googleFetch } from "@/lib/auth"
 
+const GMAIL_RECONNECT_ERROR = "Gmail connection expired. Sign out and sign back in to reconnect Gmail."
+
 export type GmailResult =
   | { connected: true; unreadCount: number; inboxLink: string }
   | { connected: false; error?: string }
@@ -421,7 +423,7 @@ export async function sendGmailMessage(
       }
     )
 
-    if (!res) return { ok: false, error: "No token or refresh failed" }
+    if (!res) return { ok: false, error: GMAIL_RECONNECT_ERROR }
     if (!res.ok) {
       const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
       return { ok: false, error: err.error?.message ?? `HTTP ${res.status}` }
@@ -530,7 +532,7 @@ export async function trashThreads(
         body: JSON.stringify({ ids: threadIds, addLabelIds: ["TRASH"] }),
       }
     )
-    if (!res) return { ok: false, error: "No token or refresh failed" }
+    if (!res) return { ok: false, error: GMAIL_RECONNECT_ERROR }
     if (!res.ok) {
       const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
       return { ok: false, error: err.error?.message ?? `HTTP ${res.status}` }
