@@ -16,6 +16,13 @@ export type ChangelogEntry = {
 // data takes precedence and this is the source of truth for new entries.
 const SEED_ENTRIES: ChangelogEntry[] = [
   {
+    id: "seed-2026-10-03-a",
+    date: "2026-10-03",
+    title: "Signing back in now fixes a broken Gmail connection",
+    description:
+      "If Quick Send or other Gmail actions stopped working with a token error, signing out and back in didn't always fix it. Now, when Google drops your Gmail access, the error tells you to sign out and sign back in, and doing that shows Google's permission screen once so Gmail reconnects properly.",
+  },
+  {
     id: "seed-2026-09-23-a",
     date: "2026-09-23",
     title: "A new customer message clears the old draft right away",
